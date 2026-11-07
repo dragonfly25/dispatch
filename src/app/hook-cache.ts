@@ -9,6 +9,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { browserReadiness } from "../browser/index.js";
 import { globalConfigPath, parseYaml } from "../config/index.js";
 import { type GlobalConfigFile, GlobalConfigFileSchema } from "../config/schema.js";
 import type { RoutingConfig, Rule, RuleAction, RuleMatch } from "../core/routing.js";
@@ -106,6 +107,7 @@ function trustedRepos(
   global: GlobalConfigFile | null,
   mcp: ((root: string) => string[]) | null,
   webOffAt: string | null,
+  browserOffAt: string | null,
 ): TrustedRepo[] {
   return Object.entries(global?.trusted_repos ?? {}).flatMap(([id, entry]) => {
     const root = rootOf(id);
@@ -116,6 +118,7 @@ function trustedRepos(
         policyHash: entry.hash,
         ...(mcp ? { forwardableMcp: mcp(root) } : {}),
         ...(root === webOffAt ? { forwardWeb: false } : {}),
+        ...(root === browserOffAt ? { browser: false } : {}),
       },
     ];
   });
@@ -143,6 +146,39 @@ function mcpLister(ctx: AppContext, consent: boolean): ((root: string | null) =>
 function webOffHere(ctx: AppContext): string | null {
   const here = ctx.config.trust.repoId ? rootOf(ctx.config.trust.repoId) : null;
   return ctx.config.execution.forwardWeb === false ? here : null;
+}
+
+/**
+ * The repo where the command runs when its merged config lowers what the global config gives the
+ * isolated browser (`browser: false`, or `network: off` while the global network is on), else null.
+ */
+function browserOffHere(ctx: AppContext, global: GlobalConfigFile | null): string | null {
+  const here = ctx.config.trust.repoId ? rootOf(ctx.config.trust.repoId) : null;
+  if (global?.hosts?.["claude-code"]?.browser !== true) return null;
+  const exec = ctx.config.execution;
+  const globalNet = global.network ?? "off";
+  const lowered = exec.browser !== true || (globalNet !== "off" && exec.network === "off");
+  return lowered ? here : null;
+}
+
+/** The browser and network fields of the policy summary (global settings, checked install). */
+function browserPolicy(
+  ctx: AppContext,
+  global: GlobalConfigFile | null,
+): Pick<PolicySummary, "browser" | "browserReason" | "network" | "networkAgents"> {
+  const r = browserReadiness({
+    enabled: global?.hosts?.["claude-code"]?.browser === true,
+    dispatchHome: ctx.dispatchHome,
+    platform: process.platform,
+    home: ctx.env.HOME,
+  });
+  const network = global?.network === "on" ? "all" : (global?.network ?? "off");
+  return {
+    browser: r.ready,
+    ...(r.ready ? {} : { browserReason: r.reason }),
+    network,
+    ...(global?.network_agents ? { networkAgents: [...global.network_agents] } : {}),
+  };
 }
 
 /** Rule actions that send a task to a provider. */
@@ -181,12 +217,13 @@ export function buildHookCache(ctx: AppContext): HookCache {
     forwardMcp,
     forwardableMcp: mcp ? mcp(null) : [],
     forwardWeb: claude?.forward_web !== false,
+    ...browserPolicy(ctx, global),
     summary: summarizePolicy(ctx.config.routing),
   };
   return {
     version: 1,
     writtenAt: ctx.clock.now().toISOString(),
-    trustedRepos: trustedRepos(global, mcp, webOffHere(ctx)),
+    trustedRepos: trustedRepos(global, mcp, webOffHere(ctx), browserOffHere(ctx, global)),
     policy,
   };
 }

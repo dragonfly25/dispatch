@@ -9,12 +9,15 @@ import { plainUi, tildify, tildifyText, type Ui } from "./ui.js";
 /** Display name of a plan group. */
 const GROUP_LABEL: Record<string, string> = {
   dispatch: "Dispatch",
+  browser: "Isolated browser",
   "claude-code": "Claude Code",
   codex: "Codex",
 };
 
 /** What each host's trust grants mean, in one sentence. */
 const GRANT_SUMMARY: Record<string, string> = {
+  browser:
+    "Delegated agents that use the Claude desktop browser tools get an isolated Chrome (temporary empty profile) on codex.",
   "claude-code": "Claude Code loads the Dispatch plugin (a sub-agent and a hook) in every session.",
   codex:
     "Codex may run the Dispatch launcher outside its sandbox, and runs the Dispatch hooks once you approve them with /hooks.",

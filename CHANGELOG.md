@@ -7,6 +7,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Isolated browser for delegated agents: custom agents that list the Claude desktop browser tools
+  (`mcp__Claude_Browser__*`) are delegated to codex with a Dispatch-owned Playwright MCP server
+  (`dispatch_browser`): the installed Google Chrome, `--isolated --headless`, a temporary empty
+  profile, origins limited to the dev-server ports of `.claude/launch.json`, output in the run dir,
+  and a codex `enabled_tools` allowlist without `browser_run_code_unsafe`. Trust grant
+  `hosts.claude-code.browser` asked by `dispatch setup` (wizard default yes; `--browser`,
+  `--no-browser`, answers key `browser`); setup installs the pinned `@playwright/mcp@0.0.84` into
+  `~/.dispatch/tools/playwright-mcp` with npm `--ignore-scripts` (refresh reinstalls, uninstall
+  removes it). Such agents also need the sandbox network (`network: delegated-agents`) and Bash;
+  otherwise they stay on Claude. The task gets a "Browser tools in this run" section mapping the
+  desktop tools to Playwright's and saying how to start, read and stop the dev servers. Doctor
+  check `claude-code.browser`; handoff field `browser`; `executeTask` option `browser`. Live
+  spikes: `docs/spikes/browser.md`; threat model T16.
 - Opt-in shell sandbox network for delegated agents (off by default): `network: off |
   delegated-agents | all` in the global config (the old `on` is a deprecated alias of `all`), plus
   global-only `network_agents: [names]` to narrow `delegated-agents` (`general-purpose` = runs a host

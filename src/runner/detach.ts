@@ -54,6 +54,8 @@ export interface DetachHandoff {
   web?: boolean;
   /** The agent declares WebFetch (absent with `web`: treated as true). */
   webFetch?: boolean;
+  /** The agent uses the Claude desktop browser tools (the run needs the isolated browser). */
+  browser?: boolean;
 }
 
 /** What the supervisor needs to run the task (the content of {@link TASK_FILE}). */
@@ -277,6 +279,7 @@ export async function superviseRun(
       ...(payload.handoff?.mcpServers.length ? { mcpServers: payload.handoff.mcpServers } : {}),
       ...withWeb(payload.handoff),
       ...(payload.handoff ? { agent: payload.handoff.agent } : {}),
+      ...(payload.handoff?.browser === true ? { browser: true } : {}),
     };
     let result = await executeTask(runner, payload.task, opts);
     if (cancelled && result.outcome !== "success") {

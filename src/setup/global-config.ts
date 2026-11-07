@@ -220,8 +220,11 @@ export function renderGlobalConfig(a: ResolvedAnswers): string {
       `Only servers whose env/header values are \${VAR} references are forwarded, by variable name;`,
       "a repo or flag can only turn it off. hosts.claude-code.forward_web (default true) gives agents",
       "that use WebSearch/WebFetch web access when delegated; false keeps them on Claude.",
+      "hosts.claude-code.browser is a TRUST GRANT (SECURITY): the isolated browser (Playwright MCP,",
+      "installed Google Chrome, temporary profile, localhost only) for agents that use the desktop",
+      "browser tools; `dispatch setup --refresh --yes` installs it. They also need `network`.",
       "Also: hard (default true), intercept, and hosts.codex.hard.",
-    ])}\nhosts:\n  claude-code:\n    forward_mcp: ${a.forwardMcp}`,
+    ])}\nhosts:\n  claude-code:\n    forward_mcp: ${a.forwardMcp}\n    browser: ${a.browser}`,
     ...OTHER_OPTIONS.map((o) => `${comment(o.explain)}\n${comment(o.example)}`),
   ];
   const text = `${sections.join("\n\n")}\n`;
@@ -252,6 +255,10 @@ export function currentAnswers(text: string): SetupAnswers {
     "claude-code"
   ]?.forward_mcp;
   if (typeof forward === "boolean") out.forwardMcp = forward;
+  const browser = (doc.hosts as { "claude-code"?: { browser?: unknown } } | null | undefined)?.[
+    "claude-code"
+  ]?.browser;
+  if (typeof browser === "boolean") out.browser = browser;
   const providers = doc.providers;
   if (providers && typeof providers === "object") {
     type P = { plan?: unknown; enabled?: unknown; tos_acknowledged?: unknown } | null;
@@ -301,6 +308,12 @@ export function updateGlobalConfig(text: string, a: SetupAnswers, source: string
       if (isScalar(doc.getIn(path, true))) doc.setIn(path, doc.createNode({}));
     }
     doc.setIn(["hosts", "claude-code", "forward_mcp"], a.forwardMcp);
+  }
+  if (a.browser !== undefined) {
+    for (const path of [["hosts"], ["hosts", "claude-code"]]) {
+      if (isScalar(doc.getIn(path, true))) doc.setIn(path, doc.createNode({}));
+    }
+    doc.setIn(["hosts", "claude-code", "browser"], a.browser);
   }
   return doc.toString({ lineWidth: 0 });
 }

@@ -75,6 +75,11 @@ export interface Settings {
    * off, never on.
    */
   forward_web: boolean;
+  /**
+   * The isolated browser (global `hosts.claude-code.browser`, default false); a repo or flag
+   * `browser: false` turns it off, never on.
+   */
+  browser: boolean;
 }
 
 export type Provenance = Record<keyof Settings, Source>;
@@ -156,6 +161,7 @@ function applyGlobal(s: Settings, g: GlobalConfigFile, prov: Provenance, issues:
   set("retention_days", g.retention_days);
   set("forward_mcp", g.hosts?.["claude-code"]?.forward_mcp);
   set("forward_web", g.hosts?.["claude-code"]?.forward_web);
+  set("browser", g.hosts?.["claude-code"]?.browser);
   if (g.network !== undefined) {
     if (g.network === "on") {
       issues.push({
@@ -284,6 +290,13 @@ function applyOverlay(
     else {
       s.forward_web = o.forward_web;
       accept("forward_web");
+    }
+  }
+  if (o.browser !== undefined) {
+    if (o.browser && !s.browser) loosen("browser", "enables the isolated browser");
+    else {
+      s.browser = o.browser;
+      accept("browser");
     }
   }
   const wt = o.worktree;

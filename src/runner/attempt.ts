@@ -6,6 +6,7 @@
 import { mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { BrowserRun, BuildInvocationWithBrowser } from "../browser/index.js";
 import type {
   AdapterOutcome,
   AdapterRunContext,
@@ -15,14 +16,11 @@ import type {
 } from "../core/contracts.js";
 import type { McpServer } from "../mcp/resolve.js";
 import { ingestClaudeObservations } from "../quota/readers/claude-passive.js";
-import {
-  type BuildInvocationWithNetwork,
-  cacheDirFor,
-  type SandboxNetwork,
-} from "../sandbox/network.js";
+import { cacheDirFor, type SandboxNetwork } from "../sandbox/network.js";
 import { buildPatch, type PatchResult } from "../sandbox/patch.js";
 import type { WorktreeHandle } from "../sandbox/worktree.js";
 import type { WebAccess } from "../web/index.js";
+import { prepareBrowserDirs } from "./browser.js";
 import { buildChildEnv } from "./env.js";
 import { acquireLease, holdLease } from "./lease.js";
 import type { ProbeCache } from "./lifecycle.js";
@@ -57,6 +55,8 @@ export interface RunContext {
   web?: WebAccess;
   /** True when worktree attempts get the sandbox network (`network:` config, see decideNetwork). */
   network?: boolean;
+  /** The isolated browser given to worktree attempts (routing only picked capable instances). */
+  browser?: BrowserRun;
 }
 
 /**
@@ -213,7 +213,10 @@ export async function runAttempt(
     deps.addSecrets?.(withheld);
     const worktree = await realpath(wt.path);
     network = await networkFor(rc, autonomy, child.env.TMPDIR ?? tmpdir(), index);
-    const args: BuildInvocationWithNetwork = {
+    // The browser serves dev servers started from the agent's shell: worktree attempts only.
+    const browser = rc.browser !== undefined && autonomy === "worktree" ? rc.browser : undefined;
+    if (browser) await prepareBrowserDirs(attemptDir);
+    const args: BuildInvocationWithBrowser = {
       task,
       target,
       autonomy,
@@ -226,6 +229,7 @@ export async function runAttempt(
       mcpServers,
       ...(rc.web === undefined ? {} : { web: rc.web }),
       ...(network === undefined ? {} : { network }),
+      ...(browser === undefined ? {} : { browser }),
     };
     const inv = adapter.buildInvocation(args);
     rc.log.write({
@@ -235,6 +239,7 @@ export async function runAttempt(
       autonomy,
       worktree,
       ...(network === undefined ? {} : { network: true }),
+      ...(browser === undefined ? {} : { browser: true }),
     });
 
     const ctx: AdapterRunContext = {

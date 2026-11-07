@@ -46,6 +46,7 @@ Other answer flags: `--host claude-code|codex|none`, `--autonomy read-only|workt
 | `~/.dispatch/bin/dispatch` | The launcher. It holds absolute paths to Node and Dispatch, so hooks work even when the host was started from a GUI with a minimal `PATH`. |
 | `~/.dispatch/config.yaml` | Your answers, commented. Edit it for thresholds, extra accounts and the like; see [configuration.md](configuration.md). |
 | `~/.dispatch/setup-manifest.json` | A record of every edit, so uninstall can undo it exactly. |
+| `~/.dispatch/tools/playwright-mcp/` | Only with the isolated browser grant: the pinned `@playwright/mcp` (npm, `--ignore-scripts`, no browser download). `setup --refresh` reinstalls a missing or outdated copy; `uninstall --global` removes it. |
 | Claude Code | A user-scope plugin, installed through `claude plugin install dispatch@dispatch-local -s user` from a local marketplace under `~/.dispatch/hosts/claude-code/`. It contains the `dispatch` sub-agent, a `SessionStart` hook that tells the session how and when to delegate, and a `PreToolUse` hook on the `Agent` tool that redirects `general-purpose` sub-agents and your own eligible sub-agents (`.claude/agents/`) to Dispatch in trusted repos (hard mode, `hosts.claude-code.hard` / `intercept` / `exclude` / `auto_apply`). The hook reads your agent files and never changes them; it writes one-time handoff files under `~/.dispatch/handoffs/`. Claude Code reads the plugin from that folder, so `dispatch setup --refresh` updates it for every new session without a reinstall. Dispatch itself writes nothing under `~/.claude`. |
 | Codex | A skill in `~/.agents/skills/dispatch/`, hook entries in `~/.codex/hooks.json` (marker-delimited, other entries untouched), and a rules file `~/.codex/rules/dispatch.rules`. |
 
@@ -69,6 +70,15 @@ Setup asks you to accept these trust grants. Read them before saying yes.
   `dispatch setup --reconfigure` changes it; a repo can turn it off with `forward_mcp: false`.
   `dispatch doctor` (`claude-code.mcp-forwarding`) lists, for the current repo, which servers
   qualify and why the others do not. Threat model: [security.md](security.md) T13.
+- **Isolated browser** (`hosts.claude-code.browser`, default yes in the wizard; `--browser` /
+  `--no-browser`, answers-file key `browser`; a non-interactive setup without an answer installs
+  nothing). Setup downloads `@playwright/mcp@0.0.84` (~19 MB, no browser) from npm into
+  `~/.dispatch/tools/playwright-mcp` without running install scripts. Your agents that use the
+  Claude desktop browser tools can then run on codex with your installed Google Chrome and a
+  temporary empty profile (never your own profile, cookies or logins), limited to localhost dev
+  servers. They also need the sandbox network: `network: delegated-agents` (T15). `dispatch doctor`
+  (`claude-code.browser`) shows whether it is installed, its version and where Chrome is. Threat
+  model: [security.md](security.md) T16.
 
 ### Claude permission rule
 
@@ -126,7 +136,8 @@ Run `dispatch doctor`; each line has a status and a `fix:`. The usual ones:
 | `<cli> was not found on PATH` | Install the CLI, or set `providers.<id>.binary` in `~/.dispatch/config.yaml`. |
 | `not logged in` / `login state is unknown` | `codex login`; for `claude` and `agy` run the CLI once interactively. `doctor --live` proves the login. |
 | `claude-code.permission-rule` warns | Add the printed `Bash(... run:*)`, `Bash(... wait:*)` and `Bash(... apply:*)` rules to `permissions.allow`. |
-| One of your sub-agents is not delegated | `dispatch doctor` (`claude-code.hard-mode`) lists each agent of the current repo and why it stays on Claude (desktop browser, web tools with `forward_web: false`, an MCP server that is not forwardable, an unknown tool, instructions over 32 KB, or `intercept`/`exclude`). |
+| One of your sub-agents is not delegated | `dispatch doctor` (`claude-code.hard-mode`) lists each agent of the current repo and why it stays on Claude (desktop browser without the isolated browser or the sandbox network, web tools with `forward_web: false`, an MCP server that is not forwardable, an unknown tool, instructions over 32 KB, or `intercept`/`exclude`). |
+| `claude-code.browser` warns | Not installed or outdated: `dispatch setup --refresh --yes`; no Chrome: install Google Chrome; no network: set `network: delegated-agents`. |
 | `claude-code.hard-mode` warns (no PreToolUse hook, or the cache does not say) | The plugin predates hard mode: `dispatch setup --refresh`, then restart Claude Code sessions. |
 | `CODEX_SANDBOX` set (`host.codex-rule`) | The Codex rule did not match. Use the absolute launcher path and a single-quoted task, run `dispatch setup --refresh`, and approve the Dispatch hooks in Codex `/hooks`. |
 | `quota channel is broken` | A provider changed its format. Routing continues on estimates and `status` shows `stale`; update Dispatch, or set `quota.readers.<id>.enabled: false`. |

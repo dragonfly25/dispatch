@@ -32,7 +32,12 @@ export interface CommandResult {
  * The production implementation lives in `src/runner` (the only module that may spawn).
  */
 export interface CommandRunner {
-  run(binary: string, argv: readonly string[]): Promise<CommandResult>;
+  /** Runs `binary argv` without a shell; `env` is layered over the current environment. */
+  run(
+    binary: string,
+    argv: readonly string[],
+    opts?: { env?: Record<string, string> },
+  ): Promise<CommandResult>;
 }
 
 /**
@@ -44,10 +49,15 @@ export interface CommandRunner {
  * - `snapshot.leftovers`: paths the command may create. Those absent before setup are removed after
  *   `undo`: a directory recursively when `recursive`, else only when empty; a file only when its
  *   JSON equals `match`.
+ * - `env`: variables layered over the environment of `argv` (not of `undo`).
+ * - `ensure`: a path the command creates; a re-run with the same content runs the command again
+ *   when it is missing (e.g. an install directory deleted by hand).
  */
 export interface CliCommandSpec {
   argv: string[];
   undo?: string[];
+  env?: Record<string, string>;
+  ensure?: string;
   snapshot?: {
     jsonKeys?: { file: string; keys: string[] }[];
     leftovers?: { path: string; recursive?: boolean; match?: unknown }[];
@@ -64,7 +74,19 @@ export function parseCliSpec(content: string): CliCommandSpec {
   }
   const spec = (Array.isArray(raw) ? { argv: raw } : raw) as CliCommandSpec | undefined;
   const isArgv = (a: unknown) => Array.isArray(a) && a.every((x) => typeof x === "string");
-  if (!spec || !isArgv(spec.argv) || (spec.undo !== undefined && !isArgv(spec.undo))) {
+  const isEnv = (e: unknown) =>
+    e === undefined ||
+    (e !== null &&
+      typeof e === "object" &&
+      !Array.isArray(e) &&
+      Object.values(e).every((v) => typeof v === "string"));
+  if (
+    !spec ||
+    !isArgv(spec.argv) ||
+    (spec.undo !== undefined && !isArgv(spec.undo)) ||
+    !isEnv(spec.env) ||
+    (spec.ensure !== undefined && typeof spec.ensure !== "string")
+  ) {
     throw new DispatchError(
       "cli-command content must be a JSON argv or {argv, undo?, snapshot?}",
       ExitCode.USAGE,
@@ -273,7 +295,8 @@ async function applyCli(
   deps: EditDeps,
 ): Promise<ApplyResult> {
   const spec = parseCliSpec(op.content);
-  if (prev && prev.content === op.content) return { status: "unchanged", entry: prev };
+  const present = spec.ensure === undefined || existsSync(spec.ensure);
+  if (prev && prev.content === op.content && present) return { status: "unchanged", entry: prev };
   const snapshot: CliSnapshot = prev?.snapshot ?? {
     jsonKeys: (spec.snapshot?.jsonKeys ?? []).flatMap(({ file, keys }) =>
       keys.map((key) => ({ file, key, before: getJsonKey(file, key) })),
@@ -283,7 +306,7 @@ async function applyCli(
       existed: existsSync(l.path),
     })),
   };
-  const res = await needRunner(deps).run(op.file, spec.argv);
+  const res = await needRunner(deps).run(op.file, spec.argv, spec.env ? { env: spec.env } : {});
   if (res.code !== 0) {
     throw new DispatchError(
       `\`${cliLabel(op.file, spec.argv)}\` failed (exit ${res.code}): ${res.stderr.trim()}`,

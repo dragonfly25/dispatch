@@ -25,6 +25,8 @@ export interface TrustedRepo {
   forwardableMcp?: string[];
   /** False when this repo's merged config turns web forwarding off (`forward_web: false`). */
   forwardWeb?: boolean;
+  /** False when this repo's merged config turns the isolated browser or the network off. */
+  browser?: boolean;
 }
 
 /** Summary of the active routing policy, injected by SessionStart hooks. */
@@ -67,6 +69,17 @@ export interface PolicySummary {
   forwardableMcp?: string[];
   /** Web forwarding (`hosts.claude-code.forward_web`, default true). Absent: true. */
   forwardWeb?: boolean;
+  /**
+   * The isolated browser is enabled (`hosts.claude-code.browser`), installed (pinned, integrity
+   * checked) and Google Chrome was found when the cache was written. Absent: false.
+   */
+  browser?: boolean;
+  /** Why {@link browser} is false (doctor and the agent listing show it). */
+  browserReason?: string;
+  /** Global sandbox network scope (`network`, `on` normalized to `all`). Absent: off. */
+  network?: "off" | "delegated-agents" | "all";
+  /** Global `network_agents` (absent: every delegated agent). */
+  networkAgents?: string[];
   /** One short paragraph for the host model (`additionalContext`). */
   summary: string;
 }
@@ -108,7 +121,8 @@ function isCache(v: unknown): v is HookCache {
         typeof r.root === "string" &&
         (r.policyHash === null || typeof r.policyHash === "string") &&
         optionalStrings(r.forwardableMcp) &&
-        (r.forwardWeb === undefined || typeof r.forwardWeb === "boolean"),
+        (r.forwardWeb === undefined || typeof r.forwardWeb === "boolean") &&
+        (r.browser === undefined || typeof r.browser === "boolean"),
     ) &&
     p !== undefined &&
     typeof p.profile === "string" &&
@@ -121,6 +135,10 @@ function isCache(v: unknown): v is HookCache {
     (p.forwardMcp === undefined || typeof p.forwardMcp === "boolean") &&
     optionalStrings(p.forwardableMcp) &&
     (p.forwardWeb === undefined || typeof p.forwardWeb === "boolean") &&
+    (p.browser === undefined || typeof p.browser === "boolean") &&
+    (p.browserReason === undefined || typeof p.browserReason === "string") &&
+    (p.network === undefined || NETWORK_SCOPES.includes(p.network)) &&
+    optionalStrings(p.networkAgents) &&
     typeof p.summary === "string"
   );
 }
@@ -167,6 +185,35 @@ export function forwardableMcpFor(cache: HookCache, cwd: string): string[] {
 export function forwardWebFor(cache: HookCache, cwd: string): boolean {
   if (cache.policy.forwardWeb === false) return false;
   return trustedRepoFor(cache, cwd)?.forwardWeb !== false;
+}
+
+const NETWORK_SCOPES: readonly unknown[] = ["off", "delegated-agents", "all"];
+
+/**
+ * Whether `agent`, running in `cwd`, may get the isolated browser: it must be ready (enabled,
+ * installed, Chrome found), not turned off by the repo, and the run must get the sandbox network
+ * (the same rule as `decideNetwork` in src/sandbox/network.ts, which this bundle cannot import).
+ * Returns true, or why not. The runner checks everything again with the merged config.
+ */
+export function browserFor(cache: HookCache, cwd: string, agent: string): true | string {
+  const p = cache.policy;
+  if (p.browser !== true) {
+    return p.browserReason ?? "the isolated browser is off (hosts.claude-code.browser)";
+  }
+  if (trustedRepoFor(cache, cwd)?.browser === false) {
+    return "this repo's config turns the isolated browser or the sandbox network off";
+  }
+  const scope = p.network ?? "off";
+  const inScope =
+    scope === "all" ||
+    (scope === "delegated-agents" &&
+      (p.networkAgents === undefined || p.networkAgents.includes(agent)));
+  if (!inScope) {
+    return scope === "off"
+      ? "needs network: set network: delegated-agents"
+      : `needs network: add ${agent} to network_agents`;
+  }
+  return true;
 }
 
 /** The trusted repo containing `cwd` (the longest matching root), or null. */

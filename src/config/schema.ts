@@ -364,6 +364,12 @@ export const GlobalConfigFileSchema = z
               .describe(
                 "SECURITY. Give web access (codex web search, claude WebSearch/WebFetch) to the external agent that runs an intercepted agent whose `tools:` list WebSearch or WebFetch (default true; false keeps those agents on Claude). Never widens the shell sandbox network. A repo or flag can only turn it off (`forward_web: false`).",
               ),
+            browser: z
+              .boolean()
+              .optional()
+              .describe(
+                "SECURITY. Trust grant: the isolated browser for intercepted agents that use the Claude desktop browser tools (`mcp__Claude_Browser__*`). `dispatch setup` installs the pinned `@playwright/mcp` into ~/.dispatch/tools/playwright-mcp; codex runs it with the installed Google Chrome, a temporary empty profile and only localhost origins. Such agents also need the sandbox network (`network`). Asked by `dispatch setup`; default false. A repo or flag can only turn it off (`browser: false`).",
+              ),
           })
           .strict()
           .optional()
@@ -408,6 +414,12 @@ const overlayShape = {
     .optional()
     .describe(
       "SECURITY. `false` turns web forwarding off here: agents that use WebSearch/WebFetch stay on Claude (global `hosts.claude-code.forward_web`, default true; `true` cannot loosen it).",
+    ),
+  browser: z
+    .boolean()
+    .optional()
+    .describe(
+      "SECURITY. `false` turns the isolated browser off here: agents that use the Claude desktop browser tools stay on Claude (global `hosts.claude-code.browser`; `true` cannot loosen it).",
     ),
   ...securityKeys,
   ...ordinaryKeys,

@@ -8,6 +8,7 @@
  * configuration.
  */
 import { realpath } from "node:fs/promises";
+import { browserReadiness, type Readiness } from "../browser/index.js";
 import type { EffectiveConfig } from "../config/load.js";
 import { dispatchHome as defaultDispatchHome } from "../config/paths.js";
 import type {
@@ -35,6 +36,7 @@ import { redact } from "../state/redact.js";
 import type { SqliteStateStore } from "../state/store.js";
 import type { WebAccess } from "../web/index.js";
 import { type AttemptReport, type RunContext, runAttempt } from "./attempt.js";
+import { planBrowser } from "./browser.js";
 import { assertDepthAllowed, RecursionRejectedError } from "./depth.js";
 import { runFanout } from "./fanout.js";
 import {
@@ -95,6 +97,10 @@ export interface RunnerDeps {
   probes?: ProbeCache;
   /** Resolver of forwarded MCP servers (default: the user's Claude config, read only). */
   resolveMcp?: McpResolver;
+  /** Readiness of the isolated browser (tests inject one); default: {@link browserReadiness}. */
+  browserReadiness?: () => Readiness;
+  /** Node that runs the browser server; default `process.execPath`. */
+  nodePath?: string;
 }
 
 /** Per-call options of {@link executeTask}. */
@@ -129,10 +135,27 @@ export interface ExecuteOptions {
    * belongs to `general-purpose` when a host session started it, else to nobody (by hand).
    */
   agent?: string;
+  /**
+   * The run is for an agent that uses the Claude desktop browser tools: only browser-capable
+   * instances (codex) are routed to, with the isolated browser; otherwise the task returns to the
+   * host (browser off or not installed, no Chrome, no sandbox network).
+   */
+  browser?: boolean;
 }
 
 /** A run result plus the sandbox network decision (structural superset of the frozen RunResult). */
 export type RunResultWithNetwork = RunResult & { sandboxNetwork?: NetworkDecision };
+
+/** The isolated browser's readiness for this run (injected, else checked on disk). */
+function readinessOf(deps: RunnerDeps, dispatchHome: string): Readiness {
+  if (deps.browserReadiness) return deps.browserReadiness();
+  return browserReadiness({
+    enabled: deps.config.execution.browser === true,
+    dispatchHome,
+    platform: process.platform,
+    home: deps.env.HOME,
+  });
+}
 
 /** Host id (from env detection) → adapter id of the instance it runs on. */
 const HOST_ADAPTER: Record<string, string> = {
@@ -276,6 +299,27 @@ export async function executeTask(
     });
     if (network.scope !== "off") log.write({ type: "network", ...network });
 
+    const browser = planBrowser({
+      wanted: opts.browser === true,
+      readiness: opts.browser ? readinessOf(deps, home) : { ready: false, reason: "not requested" },
+      network,
+      autonomy: task.autonomy,
+      routing: web.routing,
+      nodePath: deps.nodePath ?? process.execPath,
+      repoRoot,
+    });
+    if (!browser.ok) {
+      log.write({ type: "browser.unavailable", reason: browser.reason });
+      return await finish(toHost(null, browser.reason));
+    }
+    if (browser.browser !== undefined) {
+      log.write({
+        type: "browser.forward",
+        origins: browser.browser.origins,
+        excludedInstances: browser.excluded,
+      });
+    }
+
     const input: DecisionInput = {
       task,
       host: {
@@ -283,7 +327,7 @@ export async function executeTask(
         ...(opts.sessionModel ? { sessionModel: opts.sessionModel } : {}),
         depth,
       },
-      routing: web.routing as unknown as Record<string, unknown>,
+      routing: browser.routing as unknown as Record<string, unknown>,
       quota: await deps.quota.snapshot(exec.instances),
       sessionHistory:
         deps.sessionHistory && deps.host.sessionId
@@ -324,6 +368,7 @@ export async function executeTask(
       mcpServers: mcp.servers,
       ...(web.web === undefined ? {} : { web: web.web }),
       ...(network.enabled ? { network: true } : {}),
+      ...(browser.browser === undefined ? {} : { browser: browser.browser }),
     };
     if (decision.mode === "fanout") return await finish(await runFanout(rc, decision.targets));
     const reports: AttemptReport[] = [];

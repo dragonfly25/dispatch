@@ -18,6 +18,8 @@ export interface SetupContext {
   dispatchHome: string;
   install: Pick<InstallPaths, "nodePath" | "cliPath" | "hookPath">;
   hosts: readonly HostIntegration[];
+  /** Dispatch-owned tools to provision (e.g. the isolated browser), planned after the launcher. */
+  tools?: readonly { id: string; ops: EditOp[] }[];
 }
 
 /** A planned setup: the ops in apply order and the preview shown before anything is written. */
@@ -28,7 +30,10 @@ export interface SetupPlan {
   absent: string[];
   /** Manifest entries no longer planned; `--refresh` removes them. */
   stale: ManifestEntry[];
-  /** `ops` by destination, in apply order: `dispatch` (the launcher), then each detected host id. */
+  /**
+   * `ops` by destination, in apply order: `dispatch` (the launcher), the tools (e.g. `browser`),
+   * then each detected host id.
+   */
   groups: { host: string; ops: EditOp[] }[];
 }
 
@@ -103,6 +108,11 @@ export async function planSetup(ctx: SetupContext): Promise<SetupPlan> {
   const hostCtx = hostPlanContext(ctx);
   const ops: EditOp[] = [launcherOp(ctx)];
   const groups: SetupPlan["groups"] = [{ host: "dispatch", ops: [...ops] }];
+  for (const tool of ctx.tools ?? []) {
+    if (tool.ops.length === 0) continue;
+    ops.push(...tool.ops);
+    groups.push({ host: tool.id, ops: [...tool.ops] });
+  }
   const detected: string[] = [];
   const absent: string[] = [];
   for (const host of ctx.hosts) {

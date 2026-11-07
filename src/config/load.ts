@@ -89,6 +89,8 @@ export interface ExecutionConfig {
   forwardMcp?: boolean;
   /** Web forwarding after tighten-only merging (absent: true, the default). */
   forwardWeb?: boolean;
+  /** Isolated browser after tighten-only merging (absent: false). */
+  browser?: boolean;
 }
 
 export interface LoadOptions {
@@ -339,6 +341,7 @@ export function loadEffectiveConfig(opts: LoadOptions): EffectiveConfig {
     retentionDays: s.retention_days,
     forwardMcp: s.forward_mcp,
     forwardWeb: s.forward_web,
+    browser: s.browser,
   };
 
   return {

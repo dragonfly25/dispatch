@@ -35,6 +35,8 @@ export interface SetupAnswers {
   acceptAgyTerms?: boolean;
   /** Trust grant {@link FORWARD_MCP_GRANT} (`hosts.claude-code.forward_mcp`). */
   forwardMcp?: boolean;
+  /** Trust grant `BROWSER_GRANT` (`hosts.claude-code.browser`): install the isolated browser. */
+  browser?: boolean;
 }
 
 /** Answers with every default applied. */
@@ -46,6 +48,8 @@ export interface ResolvedAnswers {
   enableAntigravity: boolean;
   /** Without an answer (non-interactive), consent is not assumed: false. */
   forwardMcp: boolean;
+  /** Without an answer (non-interactive), nothing is downloaded: false. */
+  browser: boolean;
 }
 
 /** The MCP forwarding trust grant, as setup shows it. */
@@ -72,6 +76,8 @@ export interface AnswerFlags {
   acceptAgyTerms?: boolean;
   /** `--forward-mcp` / `--no-forward-mcp`. */
   forwardMcp?: boolean;
+  /** `--browser` / `--no-browser`. */
+  browser?: boolean;
 }
 
 /** True when any answer flag was passed. */
@@ -84,7 +90,8 @@ export function hasAnswerFlags(f: AnswerFlags): boolean {
       f.plan?.length ||
       f.enableAntigravity ||
       f.acceptAgyTerms ||
-      f.forwardMcp !== undefined,
+      f.forwardMcp !== undefined ||
+      f.browser !== undefined,
   );
 }
 
@@ -135,6 +142,7 @@ const AnswersFileSchema = z
       .strict()
       .optional(),
     forward_mcp: z.boolean().optional(),
+    browser: z.boolean().optional(),
   })
   .strict();
 type AnswersFile = z.infer<typeof AnswersFileSchema>;
@@ -196,6 +204,8 @@ export function presetAnswers(
   if (accept !== undefined) out.acceptAgyTerms = accept;
   const forward = flags.forwardMcp ?? file.forward_mcp;
   if (forward !== undefined) out.forwardMcp = forward;
+  const browser = flags.browser ?? file.browser;
+  if (browser !== undefined) out.browser = browser;
   return out;
 }
 
@@ -226,5 +236,6 @@ export function withDefaults(a: SetupAnswers): ResolvedAnswers {
     plans: a.plans,
     enableAntigravity: a.enableAntigravity === true,
     forwardMcp: a.forwardMcp === true,
+    browser: a.browser === true,
   };
 }

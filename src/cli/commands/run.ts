@@ -338,6 +338,7 @@ export function registerRun(program: Command, deps: CliDeps): void {
               ...(from?.h.mcpServers.length ? { mcpServers: from.h.mcpServers } : {}),
               ...withWeb(from?.h),
               ...(from ? { agent: from.h.agent.name } : {}),
+              ...(from?.h.browser === true ? { browser: true } : {}),
             });
           } finally {
             spin?.stop();

@@ -15,6 +15,7 @@
  */
 import { readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { BROWSER_SERVER_NAME } from "../browser/index.js";
 
 /** Transport of an MCP server. */
 export type McpTransport = "stdio" | "http" | "sse";
@@ -89,6 +90,7 @@ export const REASONS = {
   helper: "headersHelper/OAuth server",
   notFound: "not configured (built-in or unknown server)",
   name: "unsupported server name",
+  ownName: "dispatch_browser is reserved for Dispatch's isolated browser",
   transport: "unsupported transport",
   sse: "sse transport cannot be forwarded (codex hosts stdio and streamable HTTP only)",
   rename: `env renames a variable (only NAME: \${NAME} entries can be passed by name)`,
@@ -182,6 +184,7 @@ export function describeServer(name: string, scope: McpScope, raw: unknown): Mcp
   if (Array.isArray(raw.args)) base.args = strings(raw.args);
   if (typeof raw.url === "string") base.url = raw.url;
   if (!SAFE_NAME.test(name)) return no(REASONS.name);
+  if (name === BROWSER_SERVER_NAME) return no(REASONS.ownName);
   if (raw.headersHelper !== undefined || raw.oauth !== undefined) return no(REASONS.helper);
   if (type === "stdio" ? !base.command : !base.url) return no(REASONS.malformed);
 

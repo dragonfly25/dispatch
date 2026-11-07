@@ -218,7 +218,7 @@ const READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS", "TodoWrite", "Notebook
 const WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]);
 /** Web tools: delegable when web forwarding is on; the runner routes to a provider that can give them. */
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch"]);
-/** The desktop app's built-in browser: never forwarded. */
+/** The desktop app's built-in browser: replaced by Dispatch's isolated browser when available. */
 const BROWSER_SERVER = "Claude_Browser";
 
 /** What decides eligibility besides the agent file. */
@@ -227,6 +227,11 @@ export interface EligibilityOptions {
   forwardableMcp?: readonly string[] | undefined;
   /** Web forwarding is on (`hosts.claude-code.forward_web`, `forwardWebFor(cache, root)`). */
   webSupported?: boolean;
+  /**
+   * The isolated browser can replace `Claude_Browser` for this agent (`browserFor(cache, root,
+   * agent)`): true, or why not. Absent: not available.
+   */
+  browser?: true | string;
 }
 
 /** The outcome of {@link eligibility}. */
@@ -239,6 +244,8 @@ export type Eligibility =
       web: boolean;
       /** The agent declares WebFetch (opens given URLs: codex needs live search). */
       webFetch: boolean;
+      /** The agent declares `mcp__Claude_Browser__*` tools (the isolated browser replaces them). */
+      browser: boolean;
     }
   | { eligible: false; reason: string };
 
@@ -251,32 +258,53 @@ export function mcpServerOf(tool: string): string | null {
 /**
  * Whether Dispatch may run `def` on another provider, and with which autonomy: only read tools →
  * read-only; edit tools or Bash (or no `tools:` list, meaning every tool) → worktree. Web tools
- * need `webSupported` (web forwarding on); an MCP tool needs its server in `forwardableMcp` (the desktop browser,
- * `Claude_Browser`, never); any other tool keeps the agent on Claude. Instructions over
+ * need `webSupported` (web forwarding on); an MCP tool needs its server in `forwardableMcp`; the
+ * desktop browser (`Claude_Browser`) needs `browser` (the isolated browser) and Bash; any other tool keeps the agent on Claude. Instructions over
  * {@link MAX_AGENT_BODY} keep it on Claude too.
  */
 export function eligibility(def: AgentDefinition, opts: EligibilityOptions = {}): Eligibility {
   if (Buffer.byteLength(def.body, "utf8") > MAX_AGENT_BODY) {
     return { eligible: false, reason: "instructions over 32 KB" };
   }
-  if (def.tools === null)
-    return { eligible: true, autonomy: "worktree", mcpServers: [], web: false, webFetch: false };
+  if (def.tools === null) {
+    return {
+      eligible: true,
+      autonomy: "worktree",
+      mcpServers: [],
+      web: false,
+      webFetch: false,
+      browser: false,
+    };
+  }
   const forwardable = new Set(opts.forwardableMcp ?? []);
   const servers = new Set<string>();
   let writes = false;
   let web = false;
   let webFetch = false;
+  let browser = false;
+  let bash = false;
   for (const entry of def.tools) {
     const tool = entry.replace(/\(.*$/, "").trim();
     const server = mcpServerOf(tool);
     if (server !== null) {
-      if (server === BROWSER_SERVER) return { eligible: false, reason: "uses Claude_Browser" };
+      if (server === BROWSER_SERVER) {
+        if (opts.browser !== true) {
+          return {
+            eligible: false,
+            reason: `uses Claude_Browser; ${opts.browser ?? "the isolated browser is off (hosts.claude-code.browser)"}`,
+          };
+        }
+        browser = true;
+        continue;
+      }
       if (!forwardable.has(server)) {
         return { eligible: false, reason: `uses MCP server ${server}, which is not forwardable` };
       }
       servers.add(server);
-    } else if (WRITE_TOOLS.has(tool)) writes = true;
-    else if (WEB_TOOLS.has(tool)) {
+    } else if (WRITE_TOOLS.has(tool)) {
+      writes = true;
+      if (tool === "Bash") bash = true;
+    } else if (WEB_TOOLS.has(tool)) {
       if (opts.webSupported !== true) {
         return {
           eligible: false,
@@ -292,11 +320,19 @@ export function eligibility(def: AgentDefinition, opts: EligibilityOptions = {})
       };
     }
   }
+  if (browser && !bash) {
+    // Dev servers run in the agent's sandboxed shell, which only worktree runs have.
+    return {
+      eligible: false,
+      reason: "uses Claude_Browser without Bash (dev servers need a shell)",
+    };
+  }
   return {
     eligible: true,
     autonomy: writes ? "worktree" : "read-only",
     mcpServers: [...servers].sort(),
     web,
     webFetch,
+    browser,
   };
 }

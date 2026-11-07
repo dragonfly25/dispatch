@@ -17,6 +17,7 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { HookInput, HookResponse } from "../../core/contracts.js";
 import {
+  browserFor,
   forwardableMcpFor,
   forwardWebFor,
   type HookCache,
@@ -248,6 +249,7 @@ function customAgentResponse(
   const verdict = eligibility(agent.def, {
     forwardableMcp: forwardableMcpFor(t.cache, t.root),
     webSupported: forwardWebFor(t.cache, t.root),
+    browser: browserFor(t.cache, t.root, agent.name),
   });
   if (!verdict.eligible) return SILENT;
   const description = typeof call.fields.description === "string" ? call.fields.description : null;
@@ -264,6 +266,7 @@ function customAgentResponse(
     mcpServers: verdict.mcpServers,
     web: verdict.web,
     webFetch: verdict.webFetch,
+    ...(verdict.browser ? { browser: true } : {}),
     autoApply: t.cache.policy.claudeAutoApply !== false,
     passthroughKey: key,
   };
