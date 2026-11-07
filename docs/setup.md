@@ -16,7 +16,7 @@ Setup asks four questions, because they are the only things it cannot find out b
 2. the plan of each provider it found (for example `max5x` or `pro` for Claude, `plus` for Codex;
    "unknown" is fine and skips it), which feeds the quota estimates;
 3. your starting strategy (`balance`, `preserve` or `specialize`);
-4. the autonomy ceiling for delegated agents (`read-only`, `worktree`, `direct`; `worktree` is the default).
+4. the autonomy ceiling for delegated agents (`read-only`, `worktree`, `direct`; `worktree` is the default); `direct` is not implemented in v0.1 and adapters refuse it).
 
 Antigravity stays off unless you opt in: setup shows Google's terms and enables it only if you type
 "yes" and `agy` is installed (see [Billing and terms](../README.md#billing-and-terms)). Setup then prints
@@ -101,6 +101,24 @@ dispatch doctor --from-host   # run it from inside Claude Code or Codex: checks 
 flags, login), the pool each one draws from, the quota channel, and the host integration. Each warning
 comes with a `fix:` line. `dispatch status` then shows one line per provider with remaining quota,
 reset time, and how much to trust the number (`real`, `estimated`, `stale`, `unknown`).
+
+## Troubleshooting
+
+Run `dispatch doctor`; each line has a status and a `fix:`. The usual ones:
+
+| Doctor says | Fix |
+| --- | --- |
+| `launcher ... points at paths that no longer exist` | Node or Dispatch moved (upgrade, reinstall): `dispatch setup --refresh`. |
+| `<path> does not exist (setup has not run)` / `config.global ... does not exist` | `dispatch setup`. |
+| `.dispatch/ exists but is not trusted` / `changed since it was trusted` | The repo policy is ignored. Review `.dispatch/`, then `dispatch trust`. |
+| `<cli> was not found on PATH` | Install the CLI, or set `providers.<id>.binary` in `~/.dispatch/config.yaml`. |
+| `not logged in` / `login state is unknown` | `codex login`; for `claude` and `agy` run the CLI once interactively. `doctor --live` proves the login. |
+| `claude-code.permission-rule` warns | Add the printed `Bash(... run:*)` and `Bash(... wait:*)` rules to `permissions.allow`. |
+| `CODEX_SANDBOX` set (`host.codex-rule`) | The Codex rule did not match. Use the absolute launcher path and a single-quoted task, run `dispatch setup --refresh`, and approve the Dispatch hooks in Codex `/hooks`. |
+| `quota channel is broken` | A provider changed its format. Routing continues on estimates and `status` shows `stale`; update Dispatch, or set `quota.readers.<id>.enabled: false`. |
+
+Other useful commands: `dispatch validate` (config errors), `dispatch explain` (why a task went where it
+went), `dispatch logs --task <runId>` (what happened in a run).
 
 Updating, reconfiguring and uninstalling are covered in the
 [README](../README.md#update-reconfigure-uninstall).
