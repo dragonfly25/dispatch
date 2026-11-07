@@ -24,6 +24,7 @@ export default defineConfig({
         branches: 85,
         statements: 85,
         "src/platform/**": { lines: 95, functions: 95, branches: 95, statements: 95 },
+        "src/quota/**": { lines: 90, functions: 90, branches: 90, statements: 90 },
         "src/state/redact.ts": { lines: 95, functions: 95, branches: 95, statements: 95 },
       },
     },
