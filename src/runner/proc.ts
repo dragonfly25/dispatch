@@ -92,7 +92,9 @@ function onParentSignal(sig: NodeJS.Signals): void {
   shuttingDown = true;
   void Promise.all([...active].map((g) => g.reap())).then(() => {
     shuttingDown = false;
-    // Only re-raise when nobody else handles the signal, so the default action still happens.
+    // Our own listener must go first: it would count as a handler and swallow the re-raised signal.
+    // Re-raise only when nobody else handles the signal, so the default action still happens.
+    uninstallHandlers();
     if (process.listenerCount(sig) === 0) process.kill(process.pid, sig);
   });
 }
@@ -111,12 +113,16 @@ function register(group: ActiveGroup): void {
   process.on("exit", onParentExit);
 }
 
-function unregister(group: ActiveGroup): void {
-  active.delete(group);
-  if (active.size > 0 || !handlersInstalled) return;
+function uninstallHandlers(): void {
+  if (!handlersInstalled) return;
   handlersInstalled = false;
   for (const [sig, fn] of signalListeners) process.off(sig, fn);
   process.off("exit", onParentExit);
+}
+
+function unregister(group: ActiveGroup): void {
+  active.delete(group);
+  if (active.size === 0) uninstallHandlers();
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
