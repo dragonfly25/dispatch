@@ -135,6 +135,7 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `thresholds.<instance>.hard` | number, required | `5` | 0 to 100 | global, repo, flags | Below this remaining %, never use. |
 | `timeouts` | object |  |  | global, repo, flags | Run timeouts. |
 | `timeouts.default_task_ms` | integer | `600000` | at least 1 | global, repo, flags | Timeout of a delegated task in milliseconds (default 600000). |
+| `retention_days` | number | `30` | greater than 0 | global only | How long `dispatch gc` keeps finished runs and their history (default 30). |
 | `quota` | object |  |  | global only | Quota reading settings (global file only). |
 | `quota.cache_minutes` | number | `5` | at least 0 | global only | Minutes a real quota reading stays fresh (default 5). |
 | `quota.readers` | map of object | `{}` |  | global only | Quota readers by instance id; `enabled: false` turns a reader off. Routing works with every reader disabled (the estimator takes over). |
