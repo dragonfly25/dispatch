@@ -1,0 +1,34 @@
+name: Publish to npm
+
+# Manual only (Actions tab → "Publish to npm" → Run workflow, choosing the release tag). The job runs in
+# the `npm-publish` environment, which the repository owner should protect with required reviewers.
+# npm trusted publishing (OIDC) is used: no npm token is stored in the repository; link the package to
+# this workflow on npmjs.com before the first publish.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  npm-publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}" }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, registry-url: "https://registry.npmjs.org" }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      # npm trusted publishing (OIDC): no token is stored in the repository. The package must be
+      # linked to this workflow on npmjs.com before the first publish.
+      - run: npm publish --provenance --access public

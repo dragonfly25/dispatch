@@ -1,0 +1,53 @@
+name: Release
+
+# Runs on a version tag: verifies the build on macOS and Linux and creates the GitHub release.
+# Publishing to npm is a separate, manually triggered workflow (publish.yml).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - name: Configure git identity
+        run: |
+          git config --global user.name "Dispatch CI"
+          git config --global user.email "ci@dispatch.invalid"
+          git config --global init.defaultBranch main
+      - run: pnpm install --frozen-lockfile
+      - name: Tag matches package version
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm acceptance
+      - run: pnpm pack --pack-destination "$RUNNER_TEMP/pack"
+      - name: Install the tarball and check the version
+        run: |
+          prefix="$RUNNER_TEMP/prefix"
+          npm install -g --prefix "$prefix" "$RUNNER_TEMP"/pack/*.tgz
+          test "$("$prefix/bin/dispatch" --version)" = "$(node -p "require('./package.json').version")"
+
+  github-release:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the GitHub release from the changelog section
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --title "Dispatch $GITHUB_REF_NAME" --notes-file notes.md
