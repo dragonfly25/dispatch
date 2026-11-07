@@ -1,0 +1,14 @@
+[
+  {
+    "tool": "Bash",
+    "command": "<LAUNCHER> run --detach --json --task 'Add an add(a, b) helper to src/a.ts. Working directory is the repo root. Goal: export a function add(a, b) that returns a + b. Constraints: only touch src/a.ts. Acceptance: function is exported and returns the sum of its two arguments. Do not apply the patch; produce a patch for review.' --task-type bugfix --path src/a.ts"
+  },
+  {
+    "tool": "Bash",
+    "command": "<LAUNCHER> wait run_FAKE0001 --timeout 100"
+  },
+  {
+    "tool": "Bash",
+    "command": "<LAUNCHER> wait run_FAKE0001 --timeout 100"
+  }
+]

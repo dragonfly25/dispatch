@@ -1,0 +1,26 @@
+{
+  "note": "codex exec 0.167.0, gpt-6-luna (low effort), unified exec. Fake launcher `wait` sleeps before answering. Times are seconds since the first launcher call, from the launcher's own log.",
+  "run_a_hint_absent": {
+    "instruction": "Repeat the same wait while its exit code is 75 (no mention of yielded sessions or write_stdin)",
+    "wait_sleep_s": 25,
+    "launcher_calls": [
+      { "t": 0, "argv": "run --detach --json --task ..." },
+      { "t": 3, "argv": "wait <id> --timeout 280", "exit": 75 },
+      { "t": 7, "argv": "wait <id> --timeout 280", "note": "sleeps 25 s; shell tool yields after about 10 s" },
+      { "t": 21, "argv": "wait <id> --timeout 280", "note": "model started a NEW wait while the previous one was still running" },
+      { "t": 35, "argv": "wait <id> --timeout 280", "note": "same again" },
+      { "t": 49, "argv": "wait <id> --timeout 280", "note": "same again" }
+    ],
+    "outcome": "Model gave up with 'Dispatch is still running' while a wait was in flight; 4 duplicate waits"
+  },
+  "run_b_hint_present": {
+    "instruction": "If the shell tool returns before it exits (running session id, no exit code), poll that same session with write_stdin and empty input; do not start another wait; do not answer yet",
+    "wait_sleep_s": 40,
+    "launcher_calls": [
+      { "t": 0, "argv": "run --detach --json --task ... --task-type bugfix --path src/a.ts" },
+      { "t": 3, "argv": "wait <id> --timeout 280", "exit": 75 },
+      { "t": 6, "argv": "wait <id> --timeout 280", "note": "sleeps 40 s, completed result received in the same command_execution item" }
+    ],
+    "outcome": "One wait process only; the model then read the (fake) patch path and tried to review it itself"
+  }
+}

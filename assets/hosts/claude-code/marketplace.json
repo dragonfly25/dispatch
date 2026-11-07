@@ -1,0 +1,12 @@
+{
+  "name": "dispatch-local",
+  "owner": { "name": "Dispatch" },
+  "description": "Local marketplace written by `dispatch setup`; it holds the Dispatch host plugin.",
+  "plugins": [
+    {
+      "name": "dispatch",
+      "source": "./plugins/dispatch",
+      "description": "Delegate coding tasks to another AI provider through Dispatch."
+    }
+  ]
+}
