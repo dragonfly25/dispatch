@@ -54,26 +54,30 @@ export function registerProviders(program: Command, deps: CliDeps): void {
     .description("list the configured provider instances")
     .option("--json", "machine-readable output")
     .action(async (opts: { json?: boolean }) => {
-      await withContext(deps, (ctx) => {
-        const rows = listProviders(ctx);
-        if (opts.json) {
-          printJson(deps.io, { host: ctx.host.self, providers: rows });
-          return;
-        }
-        for (const r of rows) {
-          const tags = [
-            r.enabled ? "enabled" : "disabled",
-            r.pool,
-            ...(r.experimental ? ["experimental"] : []),
-            ...(r.host ? ["host"] : []),
-            ...(r.known ? [] : ["unknown adapter"]),
-          ];
-          deps.io.out(
-            `${r.id}  adapter ${r.adapter}${r.adapterVersion ? ` ${r.adapterVersion}` : ""}${
-              r.cliRange ? ` (cli ${r.cliRange})` : ""
-            }  ${tags.join(", ")}${r.configDir ? `  config_dir ${r.configDir}` : ""}\n`,
-          );
-        }
-      });
+      await withContext(
+        deps,
+        (ctx) => {
+          const rows = listProviders(ctx);
+          if (opts.json) {
+            printJson(deps.io, { host: ctx.host.self, providers: rows });
+            return;
+          }
+          for (const r of rows) {
+            const tags = [
+              r.enabled ? "enabled" : "disabled",
+              r.pool,
+              ...(r.experimental ? ["experimental"] : []),
+              ...(r.host ? ["host"] : []),
+              ...(r.known ? [] : ["unknown adapter"]),
+            ];
+            deps.io.out(
+              `${r.id}  adapter ${r.adapter}${r.adapterVersion ? ` ${r.adapterVersion}` : ""}${
+                r.cliRange ? ` (cli ${r.cliRange})` : ""
+              }  ${tags.join(", ")}${r.configDir ? `  config_dir ${r.configDir}` : ""}\n`,
+            );
+          }
+        },
+        { readOnly: true },
+      );
     });
 }

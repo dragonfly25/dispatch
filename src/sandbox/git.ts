@@ -54,12 +54,29 @@ export async function headSha(dir: string): Promise<string> {
   return r.stdout.trim();
 }
 
+/**
+ * Pathspec that leaves Dispatch's own repo directory (`.dispatch/`: config, installed host files)
+ * out of every dirtiness check and snapshot, so it never changes a task's base or review flag.
+ */
+export const EXCLUDE_DISPATCH_DIR = ":(exclude).dispatch";
+
 /** Raw `git status --porcelain=v2 -z` output (NUL-separated records), untracked files included. */
 export function status(dir: string): Promise<string> {
-  return git(dir, ["status", "--porcelain=v2", "-z", "--untracked-files=all"]);
+  return git(dir, [
+    "status",
+    "--porcelain=v2",
+    "-z",
+    "--untracked-files=all",
+    "--",
+    ".",
+    EXCLUDE_DISPATCH_DIR,
+  ]);
 }
 
-/** True when the work tree has staged, unstaged or untracked (non-ignored) changes. */
+/**
+ * True when the work tree has staged, unstaged or untracked (non-ignored) changes, not counting
+ * anything under `.dispatch/`.
+ */
 export async function isDirty(dir: string): Promise<boolean> {
   return (await status(dir)).length > 0;
 }

@@ -72,7 +72,9 @@ describe("host asset templates [UC2][UC3][UC9]", () => {
     for (const rel of ["claude-code/agents/dispatch.md", "codex/skills/dispatch/SKILL.md"]) {
       const text = render(rel, values);
       expect(text, rel).toContain("/home/u/.dispatch/bin/dispatch run --detach --json");
-      expect(text, rel).toContain("/home/u/.dispatch/bin/dispatch wait <runId> --timeout 100");
+      expect(text, rel).toContain(
+        "/home/u/.dispatch/bin/dispatch wait <runId> --json --timeout 100",
+      );
       expect(text, rel).toContain("EXTERNAL_AGENT_OUTPUT");
       expect(text, rel).toContain("75");
       expect(text, rel).toMatch(/Dispatch never applies/i);

@@ -70,7 +70,7 @@ const CALL_FORM =
 /** How to wait, including the write_stdin hint (docs/spikes/hosts-prototype.md finding 10). */
 function waitText(l: string): string {
   return (
-    `then run \`${l} wait <runId> --timeout ${CODEX_WAIT_TIMEOUT_SEC}\`. The wait command can ` +
+    `then run \`${l} wait <runId> --json --timeout ${CODEX_WAIT_TIMEOUT_SEC}\`. The wait command can ` +
     "take minutes: if the shell tool returns before it exits (a running session id and no exit " +
     "code), the task is not finished, so poll that same session with write_stdin and empty " +
     "input until it exits; do not start another wait and do not answer yet. Repeat the same " +

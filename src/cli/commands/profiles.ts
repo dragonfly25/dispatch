@@ -48,19 +48,23 @@ export function registerProfiles(program: Command, deps: CliDeps): void {
     .description("list the routing profiles and mark the active one")
     .option("--json", "machine-readable output")
     .action(async (opts: { json?: boolean }) => {
-      await withContext(deps, (ctx) => {
-        const rows = listProfiles(ctx);
-        if (opts.json) {
-          printJson(deps.io, { active: ctx.config.routing.activeProfile, profiles: rows });
-          return;
-        }
-        const width = Math.max(...rows.map((r) => r.name.length));
-        for (const r of rows) {
-          deps.io.out(
-            `${r.active ? "*" : " "} ${r.name.padEnd(width)}  ${r.source.padEnd(7)}  ${r.rules} rule(s)  ${r.file}\n`,
-          );
-          if (r.description) deps.io.out(`    ${r.description}\n`);
-        }
-      });
+      await withContext(
+        deps,
+        (ctx) => {
+          const rows = listProfiles(ctx);
+          if (opts.json) {
+            printJson(deps.io, { active: ctx.config.routing.activeProfile, profiles: rows });
+            return;
+          }
+          const width = Math.max(...rows.map((r) => r.name.length));
+          for (const r of rows) {
+            deps.io.out(
+              `${r.active ? "*" : " "} ${r.name.padEnd(width)}  ${r.source.padEnd(7)}  ${r.rules} rule(s)  ${r.file}\n`,
+            );
+            if (r.description) deps.io.out(`    ${r.description}\n`);
+          }
+        },
+        { readOnly: true },
+      );
     });
 }

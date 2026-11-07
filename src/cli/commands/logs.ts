@@ -201,38 +201,42 @@ export function registerLogs(program: Command, deps: CliDeps): void {
     .action(async (opts: LogsOptions) => {
       const { io } = deps;
       const limit = parseLimit(opts.limit);
-      await withContext(deps, async (ctx) => {
-        if (opts.follow) {
-          await follow(
-            ctx,
-            opts.task,
-            {
-              event: (runId, e) =>
-                io.out(
-                  opts.json
-                    ? `${JSON.stringify({ runId, event: e })}\n`
-                    : `${runId}  ${renderEvent(e)}\n`,
-                ),
-              finished: (run) =>
-                io.out(
-                  opts.json
-                    ? `${JSON.stringify({ runId: run.runId, finished: toRow(run) })}\n`
-                    : `${run.runId}  finished: ${run.result?.outcome ?? run.status}\n`,
-                ),
-            },
-            deps.sleep ?? realSleep,
-          );
-          return;
-        }
-        if (opts.task !== undefined) {
-          const detail = await runDetail(ctx, opts.task);
-          if (opts.json) printJson(io, detail);
-          else io.out(renderDetail(detail));
-          return;
-        }
-        const rows = listRunRows(ctx, limit);
-        if (opts.json) printJson(io, rows);
-        else io.out(renderRows(rows));
-      });
+      await withContext(
+        deps,
+        async (ctx) => {
+          if (opts.follow) {
+            await follow(
+              ctx,
+              opts.task,
+              {
+                event: (runId, e) =>
+                  io.out(
+                    opts.json
+                      ? `${JSON.stringify({ runId, event: e })}\n`
+                      : `${runId}  ${renderEvent(e)}\n`,
+                  ),
+                finished: (run) =>
+                  io.out(
+                    opts.json
+                      ? `${JSON.stringify({ runId: run.runId, finished: toRow(run) })}\n`
+                      : `${run.runId}  finished: ${run.result?.outcome ?? run.status}\n`,
+                  ),
+              },
+              deps.sleep ?? realSleep,
+            );
+            return;
+          }
+          if (opts.task !== undefined) {
+            const detail = await runDetail(ctx, opts.task);
+            if (opts.json) printJson(io, detail);
+            else io.out(renderDetail(detail));
+            return;
+          }
+          const rows = listRunRows(ctx, limit);
+          if (opts.json) printJson(io, rows);
+          else io.out(renderRows(rows));
+        },
+        { readOnly: true },
+      );
     });
 }

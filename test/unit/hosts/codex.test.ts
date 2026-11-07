@@ -125,7 +125,7 @@ describe("codex plan and preview [UC3]", () => {
     const plan = await planSetup(ctx([host()]));
     const skill = plan.ops.find((o) => o.file === paths().skill)?.content ?? "";
     expect(skill).toContain(`${launcher()} run --detach --json --task '<task>'`);
-    expect(skill).toContain(`${launcher()} wait <runId> --timeout 280`);
+    expect(skill).toContain(`${launcher()} wait <runId> --json --timeout 280`);
     expect(skill).toContain("write_stdin");
     expect(skill).toContain("EXTERNAL_AGENT_OUTPUT");
     expect(skill).toContain("returned_to_host");
@@ -191,7 +191,14 @@ describe("[SEC-rules] the rendered dispatch.rules", () => {
       argv[0] === parts.pattern[0] && parts.pattern[1].includes(argv[1] ?? "");
     expect(parts.match.every(hit)).toBe(true);
     expect(parts.notMatch.some(hit)).toBe(false);
-    expect(parts.match).toContainEqual([launcher(), "wait", "run_abc", "--timeout", "280"]);
+    expect(parts.match).toContainEqual([
+      launcher(),
+      "wait",
+      "run_abc",
+      "--json",
+      "--timeout",
+      "280",
+    ]);
   });
 
   it("compound, redirect, expansion and other-binary forms never bypass the sandbox", async () => {

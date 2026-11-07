@@ -200,7 +200,7 @@ What a handler returns follows the host's hook protocol. Recorded examples:
 ```
 
 ```json
-{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Dispatch: native sub-agents are disabled in this session. ... run <LAUNCHER> run --detach --json --task '<task>' ... then <LAUNCHER> wait <runId> --timeout 280 ..."}}
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Dispatch: native sub-agents are disabled in this session. ... run <LAUNCHER> run --detach --json --task '<task>' ... then <LAUNCHER> wait <runId> --json --timeout 280 ..."}}
 ```
 
 (`test/fixtures/hosts/claude_session_start_hook_response.json`,

@@ -5,7 +5,7 @@
  * The store and the quota provider are created lazily, so commands that never touch the state
  * database (`validate`, `profiles`, `use`) do not create `<dispatchHome>/state/dispatch.db`.
  */
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { dispatchHome, type EffectiveConfig, loadEffectiveConfig } from "../config/index.js";
 import { assetsDir as builtInAssetsDir } from "../config/paths.js";
@@ -63,6 +63,12 @@ export interface LoadAppContextOptions {
    * @throws DispatchError (exit 2) for an unknown or disabled instance.
    */
   provider?: string | undefined;
+  /**
+   * Read-only command: when the state database does not exist yet, the store is an empty
+   * in-memory database and nothing is created on disk (a never-set-up Dispatch leaves no trace).
+   * An existing database is opened as usual. Commands that record state must not set this.
+   */
+  readOnly?: boolean;
 }
 
 /** Everything a command needs. Create with {@link loadAppContext}; call `close()` when done. */
@@ -126,7 +132,10 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
     spawner,
     secrets,
     get store() {
-      store ??= SqliteStateStore.open(dbPath, { clock, secrets: () => secrets });
+      store ??= SqliteStateStore.open(opts.readOnly && !existsSync(dbPath) ? ":memory:" : dbPath, {
+        clock,
+        secrets: () => secrets,
+      });
       return store;
     },
     get readers() {

@@ -100,7 +100,7 @@ describe("claude-code plan and setup [UC1]", () => {
     const plugin = join(bundle(), "plugins", "dispatch");
     const agent = readFileSync(join(plugin, "agents", "dispatch.md"), "utf8");
     expect(agent).toContain(`${launcher} run --detach --json --task '<task>'`);
-    expect(agent).toContain(`${launcher} wait <runId> --timeout 100`);
+    expect(agent).toContain(`${launcher} wait <runId> --json --timeout 100`);
     expect(agent).toContain("model: haiku");
     expect(agent).toContain("EXTERNAL_AGENT_OUTPUT");
     expect(agent).not.toMatch(/\{\{/);

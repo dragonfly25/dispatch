@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { git, headSha, isDirty, repoRoot } from "./git.js";
+import { EXCLUDE_DISPATCH_DIR, git, headSha, isDirty, repoRoot } from "./git.js";
 
 /** Result of {@link snapshotBase}. */
 export interface SnapshotResult {
@@ -25,7 +25,7 @@ const SNAPSHOT_IDENTITY = {
  *
  * The user's repository state is never touched: the tree is assembled in a throw-away index file
  * (`GIT_INDEX_FILE`), so the real index, working tree, stash and refs stay byte-for-byte as they
- * were. The commit is unreferenced; the detached worktree that checks it out keeps it alive.
+ * were. `.dispatch/` is left out of the dirtiness check and the snapshot. The commit is unreferenced; the detached worktree that checks it out keeps it alive.
  */
 export async function snapshotBase(dir: string): Promise<SnapshotResult> {
   const root = (await repoRoot(dir)) ?? dir;
@@ -36,7 +36,7 @@ export async function snapshotBase(dir: string): Promise<SnapshotResult> {
   try {
     const env = { GIT_INDEX_FILE: join(scratch, "index"), ...SNAPSHOT_IDENTITY };
     await git(root, ["read-tree", head], env);
-    await git(root, ["add", "-A"], env);
+    await git(root, ["add", "-A", "--", ".", EXCLUDE_DISPATCH_DIR], env);
     const tree = await git(root, ["write-tree"], env);
     if (tree === (await git(root, ["rev-parse", `${head}^{tree}`]))) {
       return { baseRef: head, dirtySnapshot: false };
