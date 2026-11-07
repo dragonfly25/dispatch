@@ -5,6 +5,11 @@
 - [Configuration reference](configuration.md): every key of the config, profile and mapping files, with
   types, defaults, allowed values, security keys, precedence, trust and the order in which a task is
   routed. Generated from the schemas by `pnpm docs:config`; do not edit it by hand.
+- [Setup and install reference](setup.md): what `dispatch setup` asks and writes, the trust grants, the
+  Claude permission rule, `dispatch install` flags and the `doctor` modes.
+- [Using Dispatch from scripts](scripting.md): `dispatch run --json`, exit codes, `--detach` / `wait` /
+  `cancel`, and a Python example.
+- [Security](security.md): the threat model and the tests that prove each claim.
 
 ## Testing
 
