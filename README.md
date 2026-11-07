@@ -59,19 +59,38 @@ dispatch --version
 dispatch setup
 ```
 
-Setup prints the exact plan, asks for confirmation, then applies it. Use `--yes` to skip the question
-and `--non-interactive` to only print the plan. It only touches hosts it finds on this machine, and
-it never edits your `CLAUDE.md`, `AGENTS.md`, skills, existing sub-agents or any project file.
+Setup asks four questions, because they are the only things it cannot find out by itself:
+
+1. the client you mainly use (Claude Code, Codex, or no preference);
+2. the plan of each provider it found (for example `max5x` or `pro` for Claude, `plus` for Codex;
+   "unknown" is fine and skips it), which feeds the quota estimates;
+3. your starting strategy (`balance`, `preserve` or `specialize`);
+4. the autonomy ceiling for delegated agents (`read-only`, `worktree`, `direct`; `worktree` is the default).
+
+Antigravity stays off unless you opt in: setup shows Google's terms and enables it only if you type
+"yes" and `agy` is installed (see [Billing and terms](#billing-and-terms)). Setup then prints the exact plan
+of files it will write, asks for confirmation, applies it, and writes a commented
+`~/.dispatch/config.yaml` with your answers. Re-run `dispatch setup --reconfigure` to change them later.
+It only touches hosts it finds on this machine, and it never edits your `CLAUDE.md`, `AGENTS.md`,
+skills, existing sub-agents or any project file.
+
+For scripts and CI, give the answers as flags (or a YAML file with `--answers <file>`; flags win over
+the file) and add `--yes` to apply without asking:
+
+```sh
+dispatch setup --non-interactive --yes --plan claude=max5x --plan codex=plus --profile balance
+```
+
+Other answer flags: `--host claude-code|codex|none`, `--autonomy read-only|worktree|direct`,
+`--enable-antigravity --accept-agy-terms`. Without `--yes`, `--non-interactive` only prints the plan.
 
 | Where | What is written |
 | --- | --- |
 | `~/.dispatch/bin/dispatch` | The launcher. It holds absolute paths to Node and Dispatch, so hooks work even when the host was started from a GUI with a minimal `PATH`. |
+| `~/.dispatch/config.yaml` | Your answers, commented. Edit it for thresholds, extra accounts and the like; see [docs/configuration.md](docs/configuration.md). |
 | `~/.dispatch/setup-manifest.json` | A record of every edit, so uninstall can undo it exactly. |
 | Claude Code | A user-scope plugin, installed through `claude plugin install dispatch@dispatch-local -s user` from a local marketplace under `~/.dispatch/hosts/claude-code/`. It contains the `dispatch` sub-agent and a `SessionStart` hook that tells the session how and when to delegate. Dispatch itself writes nothing under `~/.claude`. |
 | Codex | A skill in `~/.agents/skills/dispatch/`, hook entries in `~/.codex/hooks.json` (marker-delimited, other entries untouched), and a rules file `~/.codex/rules/dispatch.rules`. |
-
-Setup does not create `~/.dispatch/config.yaml`: built-in defaults apply until you write one (plan,
-thresholds, extra accounts; see [docs/configuration.md](docs/configuration.md)).
 
 Setup asks you to accept two **trust grants**. Read them before saying yes:
 
@@ -106,7 +125,9 @@ not. Repo policy is code (it decides where tasks go), so Dispatch ignores it unt
 `install` records the hash of the files, and `dispatch trust` re-records it after you review a change.
 
 Useful flags: `--profile <name>` (default `balance`), `--unspecified-model inherit|classify|<tier>`,
-`--no-trust`, `--force`, `--non-interactive --yes` for scripts and CI.
+`--no-trust`, `--force`, `--skip-setup`, and `--non-interactive --yes` for scripts and CI. When it has
+to run setup first, it accepts the setup answer flags too (`--plan`, `--host`, `--autonomy`, `--answers`,
+`--enable-antigravity`, `--accept-agy-terms`).
 
 ### 4. Check it
 
@@ -171,17 +192,19 @@ else:
     print(result["status"], result["outcome"], proc.returncode)
 ```
 
-For long tasks start in the background and poll: `dispatch run --detach --json ...` prints a `runId`;
-`dispatch wait <runId> --timeout 120` returns the result, or exits 75 while the run is still going.
-`dispatch cancel <runId>` stops it. Custom frameworks (LangGraph, CrewAI, your own) call `dispatch`
+For long tasks start in the background and poll: `dispatch run --detach --json ...` prints a `runId`
+(add `--idempotency-key <key>` so a repeated call returns the same run);
+`dispatch wait <runId> --timeout 120` returns the result, or exits 75 while the run is still going
+(the default timeout is 100 s inside Claude Code, 280 s inside Codex, none outside a host).
+`dispatch cancel <runId>` stops the agent; nothing is applied. Custom frameworks (LangGraph, CrewAI, your own) call `dispatch`
 the same way.
 
 ## Everyday commands
 
 | Command | What it does |
 | --- | --- |
-| `dispatch run --task "..."` | Route a task and run it on the chosen provider. `--dry-run` only explains. `--json` for machines. `--provider <instance>` pins one. Also `--task-file`, `--task-type`, `--path`, `--model`, `--tier`, `--effort`, `--autonomy`, `--timeout`, `--detach`. |
-| `dispatch wait <runId> [--timeout s]` / `dispatch cancel <runId>` | Collect or stop a detached run. |
+| `dispatch run --task "..."` | Route a task and run it on the chosen provider. `--dry-run` only explains. `--json` for machines. `--provider <instance>` pins one. Also `--task-file`, `--task-type`, `--path`, `--model`, `--tier`, `--effort`, `--autonomy`, `--timeout`, `--detach`, `--idempotency-key`. |
+| `dispatch wait <runId> [--timeout s]` / `dispatch cancel <runId>` | Collect (exit 75 while still running) or stop a run started with `run --detach`. |
 | `dispatch explain --task "..."` | Show the routing decision with the rule that produced each step. `--replay <decisionId>` re-runs the router on a recorded decision and diffs it. |
 | `dispatch status` | Quota per provider instance, with reset, source and reliability. |
 | `dispatch status --set codex 40` | Correct the remaining percentage by hand (`--window`, `--ttl`, default 6h). |
@@ -263,7 +286,7 @@ and from you reviewing the result.
   `dispatch uninstall` removes it and leaves the tree as it was. A colleague who clones the repo
   without Dispatch gets no errors and no behaviour change; hooks exit silently when it is missing.
 
-More detail, including the threat model: [docs/security.md](docs/security.md).
+More detail, including the threat model and the tests that prove each claim: [docs/security.md](docs/security.md).
 
 ## Billing and terms
 
@@ -280,7 +303,8 @@ providers allow, is theirs to define and it changes. As of November 2026:
 - **Antigravity (`agy`).** Google's FAQ says wrapping `agy` in third-party applications is not supported
   under consumer plans and may lead to account suspension. Therefore the Antigravity target is
   **experimental, off by default, read-only, and opt-in**: with a consumer login it stays disabled until
-  you set `tos_acknowledged: true` for it in your global config. Use an API-credit login if you want to
+  you accept Google's terms in `dispatch setup` (`--enable-antigravity --accept-agy-terms`, which writes
+  `tos_acknowledged: true` to your global config). Use an API-credit login if you want to
   avoid the issue.
 
 `dispatch providers` and `dispatch status` show which pool each instance consumes (`subscription`,
@@ -305,7 +329,7 @@ Run `dispatch doctor`; each line has a status and a `fix:`. The usual ones:
 | Doctor says | Fix |
 | --- | --- |
 | `launcher ... points at paths that no longer exist` | Node or Dispatch moved (upgrade, reinstall): `dispatch setup --refresh`. |
-| `<path> does not exist (setup has not run)` | `dispatch setup`. |
+| `<path> does not exist (setup has not run)` / `config.global ... does not exist` | `dispatch setup`. |
 | `.dispatch/ exists but is not trusted` / `changed since it was trusted` | The repo policy is ignored. Review `.dispatch/`, then `dispatch trust`. |
 | `<cli> was not found on PATH` | Install the CLI, or set `providers.<id>.binary` in `~/.dispatch/config.yaml`. |
 | `not logged in` / `login state is unknown` | `codex login`; for `claude` and `agy` run the CLI once interactively. `doctor --live` proves the login. |
