@@ -1,7 +1,22 @@
 # Built-in profile "preserve": keep the host free for interactive work.
-# TODO(WP9): complete the shipped profiles.
+#
+# The host only orchestrates: every delegable task goes to an external provider. The host keeps
+# nothing except tasks that a pin (config.yaml `pins:`) forces onto it, and the tasks nobody
+# else can take (the host is the implicit last step of every `fallback`).
+#
+# Everything this profile does is written in this file; there is no hidden logic. Rules are
+# evaluated top to bottom, first match wins; see balance.yaml for the full list of match fields
+# and actions.
 version: 1
 description: Delegate everything delegable; the host only orchestrates.
 rules:
+  # Read-only tasks may use antigravity too (disabled by default; skipped while it is).
+  - id: preserve-readonly-delegate
+    description: "Read-only tasks: codex first, then claude, then antigravity."
+    match: { autonomy: [read-only] }
+    action: { type: fallback, instances: [codex, claude, antigravity], strategy: ordered }
+
+  # Catch-all: no `match`, so it takes every other task. Keep it last.
   - id: preserve-delegate-all
+    description: "Everything else: codex first, then claude, then the host."
     action: { type: fallback, instances: [codex, claude], strategy: ordered }

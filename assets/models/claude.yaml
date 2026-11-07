@@ -1,13 +1,40 @@
-# Model table of the claude adapter: tier -> model + native effort; reverse map for the host model.
-# TODO(WP9): placeholder values; verify model names, efforts and costs.
+# Model table of the "claude" adapter.
+#
+# Data, not logic; override in ~/.dispatch/mappings or .dispatch/mappings
+# (a mapping file with a `models.claude:` block replaces this whole table).
+#
+# How to read it:
+#   tiers.<tier>.model         real model id passed to `claude --model`
+#   tiers.<tier>.effort        Dispatch effort (low|medium|high) -> native `claude --effort` value
+#                              (Claude Code accepts low, medium, high, xhigh, max)
+#   tiers.<tier>.relative_cost indicative cost inside this table, 1 = cheapest; used only by
+#                              the estimator and `status --compare`, never by routing
+#   reverse                    ordered model glob -> tier list; classifies the model the host
+#                              asked for (first match wins). Aliases such as "sonnet" match too.
+#
+# Model ids verified against Claude Code 2.1.301 (docs/spikes/claude-code.md).
 version: 1
 models:
   claude:
     tiers:
-      fast: { model: haiku, effort: { low: low, medium: medium, high: high }, relative_cost: 1 }
+      fast:
+        {
+          model: claude-haiku-5-5,
+          effort: { low: low, medium: medium, high: high },
+          relative_cost: 1,
+        }
       balanced:
-        { model: sonnet, effort: { low: low, medium: medium, high: high }, relative_cost: 3 }
-      max: { model: opus, effort: { low: low, medium: medium, high: high }, relative_cost: 10 }
+        {
+          model: claude-sonnet-5-5,
+          effort: { low: low, medium: medium, high: high },
+          relative_cost: 3,
+        }
+      max:
+        {
+          model: claude-opus-5-5,
+          effort: { low: low, medium: medium, high: high },
+          relative_cost: 10,
+        }
     reverse:
       - { pattern: "*haiku*", tier: fast }
       - { pattern: "*sonnet*", tier: balanced }

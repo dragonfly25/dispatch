@@ -1,0 +1,37 @@
+# Tier preset "custom": an empty template to start your own.
+#
+# Copy this file to ~/.dispatch/mappings/<your-name>.yaml (or .dispatch/mappings/ in a repo; the
+# repo copy only applies once you ran `dispatch trust`), edit it, and activate it with
+# `mappings.preset: <your-name>` in config.yaml. As shipped it behaves exactly like "mirror".
+# A preset only does what is written here; nothing hides behind the name.
+version: 1
+preset:
+  description: Empty template; behaves like mirror until you edit it.
+
+  # Effort levels to shift when delegating, clamped to low..high. Examples: -1 saves quota,
+  # 1 buys more depth.
+  effort_shift: 0
+
+  # Task type -> tier override. Task types: test, docs, refactor, review, feature, bugfix.
+  # Tiers: fast, balanced, max. Example: tests run on the cheapest model.
+  #   tier_by_task_type: { test: fast, docs: fast, review: max }
+  tier_by_task_type: {}
+
+# Optional: replace a provider's model table (tier -> model + native effort). Without this block
+# the shipped tables in assets/models/ apply. A table replaces the adapter's whole table, so
+# copy the shipped one first. See assets/models/codex.yaml for a complete example.
+#
+# models:
+#   codex:
+#     tiers:
+#       fast: { model: gpt-6-luna, effort: { low: low, medium: medium, high: high }, relative_cost: 1 }
+#       balanced: { model: gpt-6-sol, effort: { low: low, medium: medium, high: high }, relative_cost: 3 }
+#       max: { model: gpt-6.1-sol, effort: { low: medium, medium: high, high: xhigh }, relative_cost: 6 }
+#     reverse:
+#       - { pattern: "*luna*", tier: fast }
+#       - { pattern: "*sol*", tier: max }
+#
+# Explicit model mappings (they bypass tiers and win over profiles) live in config.yaml:
+#   mappings:
+#     direct:
+#       - { from_model: "claude-opus-*", from_effort: high, instance: codex, model: gpt-6.1-sol, effort: xhigh }

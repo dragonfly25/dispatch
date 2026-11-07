@@ -1,5 +1,11 @@
-# Built-in preset "economy": same tier, one effort level lower on delegated tasks.
-# TODO(WP9): complete the shipped presets.
+# Built-in tier preset "economy": same tier, one effort level lower on delegated tasks.
+#
+# Saves quota on the external providers: a `high` task runs at `medium`, `medium` at `low`, and
+# `low` stays `low` (the shift is clamped to the effort scale). The tier (model) is unchanged.
+# A preset only does what is written here; nothing hides behind the name.
+#
+#   effort_shift         effort levels to shift when delegating (negative = cheaper)
+#   tier_by_task_type    optional task type -> tier override, e.g. { test: fast }
 version: 1
 preset:
   description: Same tier, effort -1.

@@ -1,6 +1,11 @@
-# Built-in profile "off": no delegation; useful as a baseline and for debugging.
+# Built-in profile "off": no delegation. Useful as a baseline for comparisons and for debugging.
+#
+# A single catch-all rule keeps every task on the host (the native sub-agent proceeds as if
+# Dispatch did not exist). Pins and direct mappings still run before this file; the default
+# profile is not touched. Switch back with `dispatch use <profile>`.
 version: 1
 description: Everything stays on the host.
 rules:
   - id: off
+    description: Keep every task on the host.
     action: { type: host }

@@ -1,0 +1,21 @@
+# EXAMPLE ONLY: tier preset "best-of-breed". Everything below is commented out, so this file
+# does nothing as shipped.
+#
+# Idea: choose the tier per task type, so reviews get the strongest model and tests the
+# cheapest. To use it, copy this file to ~/.dispatch/mappings/best-of-breed.yaml (or
+# .dispatch/mappings/ in a repo, then `dispatch trust`), uncomment the block, and activate it
+# with `mappings.preset: best-of-breed` in config.yaml.
+#
+# Choosing WHICH provider takes which task type is a routing decision, not a tier one: use the
+# "specialize" profile (assets/profiles/specialize.yaml) or your own profile for that, and
+# check the result with `dispatch validate` and `dispatch explain`.
+#
+# version: 1
+# preset:
+#   description: Review on the strongest tier, tests and docs on the cheapest.
+#   effort_shift: 0
+#   tier_by_task_type:
+#     review: max
+#     refactor: balanced
+#     test: fast
+#     docs: fast

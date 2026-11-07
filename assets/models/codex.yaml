@@ -1,13 +1,34 @@
-# Model table of the codex adapter.
-# TODO(WP9): placeholder values; verify model names, efforts and costs.
+# Model table of the "codex" adapter.
+#
+# Data, not logic; override in ~/.dispatch/mappings or .dispatch/mappings
+# (a mapping file with a `models.codex:` block replaces this whole table).
+#
+# How to read it:
+#   tiers.<tier>.model         real model slug passed to `codex exec -m`
+#   tiers.<tier>.effort        Dispatch effort (low|medium|high) -> native value of
+#                              `-c model_reasoning_effort=<value>`
+#                              (the catalog also offers xhigh, max and ultra: map `high: xhigh`
+#                              here if you want more depth on a tier)
+#   tiers.<tier>.relative_cost indicative cost inside this table, 1 = cheapest; used only by
+#                              the estimator and `status --compare`, never by routing
+#   reverse                    ordered model glob -> tier list; classifies the model the host
+#                              asked for (first match wins)
+#
+# Slugs taken from `codex debug models` on codex 0.167.0 (docs/spikes/codex.md); gpt-6-luna is
+# the cheapest listed slug. Other listed slugs: gpt-6-astra, gpt-6.1-terra, gpt-5.6-*.
 version: 1
 models:
   codex:
     tiers:
       fast:
         { model: gpt-6-luna, effort: { low: low, medium: medium, high: high }, relative_cost: 1 }
-      balanced: { model: gpt-6, effort: { low: low, medium: medium, high: high }, relative_cost: 3 }
-      max: { model: gpt-6, effort: { low: medium, medium: high, high: xhigh }, relative_cost: 6 }
+      balanced:
+        { model: gpt-6-sol, effort: { low: low, medium: medium, high: high }, relative_cost: 3 }
+      max:
+        { model: gpt-6.1-sol, effort: { low: low, medium: medium, high: high }, relative_cost: 6 }
     reverse:
       - { pattern: "*luna*", tier: fast }
-      - { pattern: "gpt-*", tier: balanced }
+      - { pattern: "*terra*", tier: balanced }
+      - { pattern: "gpt-6-sol", tier: balanced }
+      - { pattern: "*sol*", tier: max }
+      - { pattern: "*astra*", tier: max }

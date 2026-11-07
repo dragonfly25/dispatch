@@ -1,7 +1,38 @@
-# Built-in profile "balance": keep every provider usable until the end of the week.
-# TODO(WP9): complete the shipped profiles.
+# Built-in profile "balance": reach the end of the week with every provider still usable.
+#
+# Everything this profile does is written in this file; there is no hidden logic.
+#
+# How a profile works
+#   * Rules are evaluated top to bottom and the FIRST rule whose `match` holds wins. A rule with
+#     no `match` matches every task, so it must be the last one (`dispatch validate` warns when
+#     rules follow it).
+#   * Pins (config.yaml `pins:`) and direct mappings are evaluated before this file.
+#   * Before any action runs, the router drops instances that are disabled, are the host itself,
+#     are below their hard quota threshold, or cannot take the task's autonomy. The host is
+#     always the implicit last step of a `fallback`.
+#   * Instance ids (claude, codex, antigravity, or your own such as claude-alt) come from
+#     `providers:` in ~/.dispatch/config.yaml.
+#
+# Match fields (all optional, all must hold):
+#   task_type: [test, docs, refactor, review, feature, bugfix]    paths: ["db/**"]
+#   tier: [fast, balanced, max]            autonomy: [read-only, worktree, direct]
+#   min_remaining_pct: { codex: 30 }       reliability: [real, estimated, stale, unknown]
+#   prior_outcome: [failed, timeout, quota_exhausted, rejected]
+#
+# Actions: provider{instance} | host | fallback{instances, strategy: ordered|most_remaining}
+#          | fanout{instances: 2+} | reject{reason}
 version: 1
 description: Delegate to the instance with the most remaining quota.
 rules:
+  # Read-only tasks (analysis, review) may also go to antigravity, which is read-only by design.
+  # Antigravity is disabled by default; while it is disabled this rule behaves like the next one.
+  - id: balance-readonly-most-remaining
+    description: Read-only tasks go to whichever external provider has the most quota left.
+    match: { autonomy: [read-only] }
+    action: { type: fallback, instances: [codex, claude, antigravity], strategy: most_remaining }
+
+  # Everything else: pick the external provider with the most remaining quota (the soft and hard
+  # thresholds of each instance still apply), then fall back to the next one, then to the host.
   - id: balance-most-remaining
+    description: Other tasks go to the codex/claude instance with the most quota left.
     action: { type: fallback, instances: [codex, claude], strategy: most_remaining }
