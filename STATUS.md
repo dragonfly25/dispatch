@@ -77,9 +77,10 @@ The 17 deviations in plan §7 apply. Additional ones taken during execution:
 4. Package name `@dragonfly25/dispatch` (bin `dispatch`), MIT license — placeholders until the owner decides; publishing to npm only with explicit go-ahead.
 5. Exit code when `CODEX_SANDBOX` is set: WP3 uses 6, the amendment says 3 — to be unified to 3 (`REJECTED`) in WP24.
 
-## Process notes
-
-- Repo-local git `user.email` set to the GitHub noreply address (pushes with the private email are rejected by GitHub).
 6. Antigravity read-only runs: the adapter maps SUCCESS-with-denied-actions to `failed`; the runner (WP19) reports read-only tasks with a non-empty answer as `success` with the denied actions logged, since text-only output is the expected result.
 7. Delegated-run artifacts (patch, events log) live in `<repo>/.dispatch/state/runs/<id>/` (gitignored by `.dispatch/.gitignore`) so host sessions can read the patch without extra permissions (WP8 finding); fallback `~/.dispatch/runs/<id>/` outside an installed repo.
 8. Claude plugin uninstall via the `claude` CLI leaves empty settings keys; `uninstall --global` removes exactly the keys Dispatch's install added (pre-install snapshot), restoring `~/.claude/settings.json` byte-for-byte.
+
+## Process notes
+
+- Repo-local git `user.email` set to the GitHub noreply address (pushes with the private email are rejected by GitHub).
