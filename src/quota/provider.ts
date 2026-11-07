@@ -116,6 +116,8 @@ export interface SnapshotOptions {
   hostInstanceId?: string | null;
   /** Evaluation time; default `clock.now()`. */
   now?: Date;
+  /** Re-read every channel even when its cached reading is fresh (`doctor` checks channel health). */
+  fresh?: boolean;
 }
 
 /** Outcome of the latest read attempt of one reader (for `doctor` / `status`). */
@@ -138,6 +140,8 @@ interface Ctx {
   readings: Map<string, Map<string, QuotaWindow>>;
   /** Kinds (or "all") whose latest read failed or was incoherent. */
   suspect: Map<string, Set<string> | "all">;
+  /** Skip the cache check and always read. */
+  fresh: boolean;
 }
 
 /** Default {@link QuotaProvider}; see the module comment for the ladder. */
@@ -194,6 +198,7 @@ export class DefaultQuotaProvider implements QuotaProvider {
       runs: this.#loadRuns(now),
       readings: this.#loadReadings(),
       suspect: new Map(),
+      fresh: options.fresh === true,
     };
     await Promise.all(instances.map((inst) => this.#refresh(inst, ctx)));
     ctx.readings = this.#loadReadings();
@@ -292,7 +297,7 @@ export class DefaultQuotaProvider implements QuotaProvider {
     const live = [...(ctx.readings.get(inst.id)?.values() ?? [])].filter(
       (w) => !isOld(w, ctx.now, this.#cfg),
     );
-    if (live.length > 0 && live.every((w) => isFresh(w, ctx.now, this.#cfg))) return;
+    if (!ctx.fresh && live.length > 0 && live.every((w) => isFresh(w, ctx.now, this.#cfg))) return;
 
     const outcomes = await Promise.all(readers.map((r) => runReader(r, inst, this.#timeoutMs)));
     const health: ReaderHealth[] = [];

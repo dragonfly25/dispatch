@@ -3,9 +3,26 @@ import { type AppContext, type AppEnv, loadAppContext } from "../../app/context.
 import { refreshHookCacheSafely } from "../../app/hook-cache.js";
 import type { Issue } from "../../config/index.js";
 import type { Clock, Spawner } from "../../core/contracts.js";
+import type { HostRegistry } from "../../hosts/_framework/registry.js";
+import type { ResolveFs } from "../../platform/resolve.js";
 import type { QuotaReaderRegistry } from "../../quota/reader.js";
+import type { SignalTarget } from "../../runner/lifecycle.js";
 import type { RunnerDeps } from "../../runner/orchestrate.js";
 import type { CliIo } from "../io.js";
+
+/** Test seams of `dispatch doctor`. */
+export interface DoctorExtras {
+  /** Doctor checks to run (default: the built-in registry). */
+  registry?: HostRegistry;
+  /** True when a person can answer the `--live` confirmation (default: stdin is a TTY). */
+  interactive?: boolean;
+  /** Answers the confirmation question. */
+  ask?: (question: string) => Promise<string>;
+  /** File access used to find the provider CLIs. */
+  resolveFs?: ResolveFs;
+  /** Where SIGINT/SIGTERM are trapped during `--live` (default: `process`; null disables). */
+  signals?: SignalTarget | null;
+}
 
 /** What the commands need from the process; injectable for tests. */
 export interface CliDeps {
@@ -21,6 +38,8 @@ export interface CliDeps {
   spawner?: Spawner;
   /** Quota readers override (tests pass an empty registry so no CLI is ever spawned). */
   quotaReaders?: QuotaReaderRegistry;
+  /** `dispatch doctor` seams. */
+  doctor?: DoctorExtras;
   /** Pause used by `logs --follow` between polls (tests inject a fake). */
   sleep?: (ms: number) => Promise<void>;
   /** Whether the process `pid` exists, for lease reaping in `gc` (tests inject a fake). */

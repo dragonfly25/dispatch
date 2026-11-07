@@ -78,7 +78,8 @@ export async function runCli(
       io.out(program.helpInformation());
       return ExitCode.OK;
     }
-    if (codexSandboxActive(ctx.env) && !INFO_ONLY.has(args[0] ?? "")) {
+    // `doctor` is exempt: it is how the user finds out why the rule did not match (--from-host).
+    if (codexSandboxActive(ctx.env) && !INFO_ONLY.has(args[0] ?? "") && args[0] !== "doctor") {
       io.err(`dispatch: ${CODEX_SANDBOX_MESSAGE}\n`);
       return ExitCode.REJECTED;
     }
