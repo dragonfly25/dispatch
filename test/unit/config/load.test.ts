@@ -53,7 +53,15 @@ describe("loadEffectiveConfig: defaults", () => {
       worktree: { bootstrap: "none", symlinkPaths: [], keep: false },
       timeouts: { defaultTaskMs: 600000 },
       quota: { cacheMinutes: 5, readers: {} },
+      retentionDays: 30,
     });
+  });
+
+  it("reads retention_days from the global config", () => {
+    const sb = sandbox();
+    sb.global("version: 1\nretention_days: 7\n");
+    const cfg = loadEffectiveConfig({ cwd: sb.home, env: sb.env });
+    expect(cfg.execution.retentionDays).toBe(7);
   });
 
   it("uses $DISPATCH_HOME over $HOME", () => {

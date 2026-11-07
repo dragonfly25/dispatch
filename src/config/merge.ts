@@ -57,6 +57,8 @@ export interface Settings {
   shadow_profiles: string[];
   timeouts: { default_task_ms: number };
   quota: { cache_minutes: number; readers: Record<string, { enabled: boolean }> };
+  /** Global-only: retention of finished runs and history, in days. */
+  retention_days: number;
 }
 
 export type Provenance = Record<keyof Settings, Source>;
@@ -128,6 +130,7 @@ function applyGlobal(s: Settings, g: GlobalConfigFile, prov: Provenance, issues:
   if (g.allowed_providers) set("allowed_providers", g.allowed_providers);
   if (g.concurrency) set("concurrency", { ...s.concurrency, ...defined(g.concurrency) });
   set("max_depth", g.max_depth);
+  set("retention_days", g.retention_days);
   set("network", g.network);
   if (g.worktree) set("worktree", { ...s.worktree, ...defined(g.worktree) });
   if (g.quota) {

@@ -52,6 +52,8 @@ export interface GcOptions {
   /** Minimum age (by mtime) before a terminal run's worktree is reaped. */
   olderThanMs: number;
   now: number;
+  /** Only report what would be removed; touch nothing. */
+  dryRun?: boolean;
 }
 
 /** Stable 12-hex id for a repository, derived from its common git dir. */
@@ -171,7 +173,8 @@ export class WorktreeSandbox implements Sandbox {
   /**
    * Reaps worktrees under `<dispatchHome>/worktrees` whose run is terminal and whose directory is
    * at least `olderThanMs` old, then prunes dangling worktree records of each affected repo.
-   * Worktrees of runs that are still active are never touched. Returns the removed paths.
+   * Worktrees of runs that are still active are never touched. Returns the removed paths (the
+   * ones that would be removed with `dryRun`, which changes nothing).
    */
   async gc(opts: GcOptions): Promise<string[]> {
     const base = join(opts.dispatchHome, "worktrees");
@@ -185,6 +188,10 @@ export class WorktreeSandbox implements Sandbox {
         if (!st?.isDirectory()) continue;
         if (opts.now - st.mtimeMs < opts.olderThanMs) continue;
         if (!(await opts.isTerminal(runId))) continue;
+        if (opts.dryRun) {
+          removed.push(path);
+          continue;
+        }
         const common = linkedCommonDir(path);
         if (common && existsSync(common)) {
           repos.add(common);
@@ -194,7 +201,7 @@ export class WorktreeSandbox implements Sandbox {
         await rm(path, { recursive: true, force: true });
         removed.push(path);
       }
-      await rmdir(hashDir).catch(() => {}); // only succeeds when empty
+      if (!opts.dryRun) await rmdir(hashDir).catch(() => {}); // only succeeds when empty
     }
     for (const common of repos) await worktreePrune(common).catch(() => {});
     return removed;

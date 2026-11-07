@@ -76,6 +76,8 @@ export interface ExecutionConfig {
   worktree: { bootstrap: "none" | "symlink-readonly"; symlinkPaths: string[]; keep: boolean };
   timeouts: { defaultTaskMs: number };
   quota: { cacheMinutes: number; readers: Record<string, { enabled: boolean }> };
+  /** How long `gc` keeps finished runs and history, in days. */
+  retentionDays: number;
 }
 
 export interface LoadOptions {
@@ -322,6 +324,7 @@ export function loadEffectiveConfig(opts: LoadOptions): EffectiveConfig {
     },
     timeouts: { defaultTaskMs: s.timeouts.default_task_ms },
     quota: { cacheMinutes: s.quota.cache_minutes, readers: s.quota.readers },
+    retentionDays: s.retention_days,
   };
 
   return {

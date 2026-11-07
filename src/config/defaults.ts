@@ -10,6 +10,8 @@ export const DEFAULT_EFFORT_NAMES: readonly string[] = DEFAULT_EFFORTS;
 export const DEFAULT_PROFILE = "balance";
 export const DEFAULT_PRESET = "mirror";
 export const DEFAULT_UNSPECIFIED_MODEL = "balanced";
+/** Default retention of finished runs and history (`retention_days`). */
+export const DEFAULT_RETENTION_DAYS = 30;
 
 const antigravity: MergedProvider = {
   ...newProvider("antigravity"),
@@ -39,5 +41,6 @@ export function defaultSettings(): Settings {
     shadow_profiles: [],
     timeouts: { default_task_ms: 10 * 60 * 1000 },
     quota: { cache_minutes: 5, readers: {} },
+    retention_days: DEFAULT_RETENTION_DAYS,
   };
 }
