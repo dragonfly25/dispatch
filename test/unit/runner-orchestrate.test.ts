@@ -206,6 +206,20 @@ describe("executeTask", () => {
     expect(again.status).toBe("returned_to_host");
   });
 
+  it("[UC12] the host instance is the one the composition root resolved, never invoked", async () => {
+    // E.g. a session on the second Claude account: `hostSelf` names that instance, whatever the
+    // adapter's default instance is called.
+    const { run, fakes } = setup({
+      action: FALLBACK,
+      overrides: { hostSelf: "claude" },
+      scenarios: { codex: [{ scenario: "success_edit", file: "a.txt", content: "a\n" }] },
+    });
+    const r = await run();
+    expect(r.externalAgent?.instance).toBe("codex");
+    expect(r.decisions[0]?.chain.find((c) => c.ruleId === "claude")?.effect).toMatch(/self/);
+    expect(fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
+  });
+
   it("[UC4] second target succeeds after the first one is exhausted", async () => {
     const { run, fakes } = setup({
       action: FALLBACK,

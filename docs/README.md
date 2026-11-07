@@ -6,6 +6,13 @@
   types, defaults, allowed values, security keys, precedence, trust and the order in which a task is
   routed. Generated from the schemas by `pnpm docs:config`; do not edit it by hand.
 
+## Testing
+
+- [Manual acceptance tests](manual-tests/README.md): step-by-step scripts for the parts that need a
+  real account ([UC1](manual-tests/UC1.md), [UC2](manual-tests/UC2.md), [UC3](manual-tests/UC3.md),
+  [UC12](manual-tests/UC12.md)), each with a results table. `pnpm acceptance` prints the automated
+  UC1-UC14 and AC1-AC7 table by test tag.
+
 ## Extending Dispatch
 
 - [Writing an adapter](guides/writing-an-adapter.md): add a provider CLI (or a second account of an

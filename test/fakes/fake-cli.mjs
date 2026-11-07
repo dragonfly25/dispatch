@@ -547,7 +547,7 @@ function agyUsage(cfg) {
   return { stdout: `${JSON.stringify(fixture)}\n` };
 }
 
-/** Long flags listed by `--help` (`codex exec --help` for codex): what the adapter probes look for. */
+/** Flags listed by `--help` (`codex exec --help` for codex), short ones as the real CLI prints them: what the adapter probes and `doctor` look for. */
 const HELP_FLAGS = {
   claude: [
     "--print",
@@ -570,11 +570,11 @@ const HELP_FLAGS = {
     "--ignore-rules",
     "--strict-config",
     "--disable",
-    "--cd",
-    "--model",
-    "--config",
-    "--output-last-message",
-    "--sandbox",
+    "-C, --cd",
+    "-m, --model",
+    "-c, --config",
+    "-o, --output-last-message",
+    "-s, --sandbox",
   ],
   agy: [
     "--print",

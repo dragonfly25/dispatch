@@ -43,6 +43,7 @@ export function runnerDeps(ctx: AppContext, overrides: Partial<RunnerDeps> = {})
       resolveBinary(name, { configured: instance.binary, env: ctx.env })?.path ?? null,
     env: ctx.env,
     host: ctx.host.detection,
+    hostSelf: ctx.host.self,
     dispatchHome: ctx.dispatchHome,
     addSecrets: (values) => ctx.secrets.push(...values),
     ...overrides,
