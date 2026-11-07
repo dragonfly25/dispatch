@@ -50,6 +50,23 @@ describe("snapshotBase [UC13]", () => {
     expect(await snapshotBase(repo)).toEqual({ baseRef: head, dirtySnapshot: false });
   });
 
+  it("[AC-dispatchdir] an untracked .dispatch/ directory does not make the tree dirty", async () => {
+    const repo = await makeRepo(dirs);
+    await put(repo, { ".dispatch/config.yaml": "version: 1\n", ".dispatch/hooks/x.json": "{}\n" });
+    const head = (await g(repo, "rev-parse", "HEAD")).trim();
+    expect(await snapshotBase(repo)).toEqual({ baseRef: head, dirtySnapshot: false });
+  });
+
+  it("[AC-dispatchdir] a genuine change still snapshots, and the snapshot omits .dispatch/", async () => {
+    const repo = await makeRepo(dirs);
+    await put(repo, { ".dispatch/config.yaml": "version: 1\n", "a.txt": "changed\n" });
+    const snap = await snapshotBase(repo);
+    expect(snap.dirtySnapshot).toBe(true);
+    const files = (await g(repo, "ls-tree", "-r", "--name-only", snap.baseRef)).split("\n");
+    expect(files).toContain("a.txt");
+    expect(files.some((f) => f.startsWith(".dispatch/"))).toBe(false);
+  });
+
   it("dirty tree -> snapshot with modified, staged, deleted and untracked files, without ignored ones", async () => {
     const repo = await makeRepo(dirs, { "gone.txt": "bye\n", "keep/b.txt": "b\n" });
     await put(repo, {

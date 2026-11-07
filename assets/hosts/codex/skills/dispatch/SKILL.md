@@ -35,7 +35,7 @@ The launcher is `{{LAUNCHER}}`. A rule lets only this exact command shape run ou
 
    The output is JSON. Read `runId` from it. If the exit code is not 0, show the error and stop.
 
-2. Wait for the result: `{{LAUNCHER}} wait <runId> --timeout {{WAIT_TIMEOUT}}`. This command can
+2. Wait for the result: `{{LAUNCHER}} wait <runId> --json --timeout {{WAIT_TIMEOUT}}`. This command can
    take minutes. If the shell tool returns before it exits (it reports a running session id and no
    exit code), the task is NOT finished and `wait` has NOT failed: poll that same session with
    write_stdin and empty input until the process exits. Do not start another `wait` meanwhile and

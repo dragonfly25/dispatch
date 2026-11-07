@@ -1,6 +1,6 @@
 /**
  * WP27 end to end [UC3]: the Codex PreToolUse hook denies a V2 spawn; the commands its reason
- * prescribes (`run --detach --json --task '…'`, then `wait <runId> --timeout 280`) are run exactly
+ * prescribes (`run --detach --json --task '…'`, then `wait <runId> --json --timeout 280`) are run exactly
  * as a model would, through `/bin/sh -c` and the real launcher script, against the bundled CLI and
  * a fake codex provider. No real CLI is involved.
  */
@@ -117,10 +117,10 @@ describe("codex deny_redirect → run --detach → wait [UC3]", () => {
     expect(runId).toMatch(/\S/);
 
     const waitCmd = command(reason, launcher, "wait").replace("<runId>", runId);
-    expect(waitCmd).toBe(`${launcher} wait ${runId} --timeout 280`);
-    let waited = sh(`${waitCmd} --json`);
+    expect(waitCmd).toBe(`${launcher} wait ${runId} --json --timeout 280`);
+    let waited = sh(waitCmd);
     for (let i = 0; waited.status === ExitCode.STILL_RUNNING && i < 5; i++) {
-      waited = sh(`${waitCmd} --json`);
+      waited = sh(waitCmd);
     }
     expect(waited.status).toBe(ExitCode.OK);
     const result = JSON.parse(waited.stdout) as RunResult;

@@ -246,35 +246,45 @@ export function registerStatus(program: Command, deps: CliDeps): void {
       if (opts.set !== undefined && pct === undefined) {
         throw usage("--set needs a percentage: dispatch status --set <instance> <pct>");
       }
+      if (opts.set === undefined && pct !== undefined && !/^\d+(\.\d+)?%?$/.test(pct)) {
+        throw usage(
+          `status shows quota, not runs: to see a run use \`dispatch logs --task ${pct}\` or \`dispatch wait ${pct}\``,
+        );
+      }
       if (opts.set === undefined && (pct !== undefined || opts.window || opts.ttl)) {
         throw usage("a percentage, --window and --ttl only make sense with --set");
       }
       if (!opts.compare && opts.since !== undefined) throw usage("--since needs --compare");
       const sinceMs = opts.since === undefined ? undefined : parseDuration(opts.since, "--since");
 
-      await withContext(deps, async (ctx) => {
-        reportIssues(io, ctx.config.issues);
-        if (opts.set !== undefined) {
-          const r = setStatus(ctx, opts.set, pct as string, opts);
-          if (opts.json) return printJson(io, r);
-          io.out(
-            `${r.instanceId}: ${r.remainingPct}% remaining (${r.window === "*" ? "all windows" : `window ${r.window}`}) until ${formatLocal(r.expiresAt)}\n`,
-          );
-          return;
-        }
-        if (opts.compare) {
-          const since =
-            sinceMs === undefined
-              ? undefined
-              : new Date(ctx.clock.now().getTime() - sinceMs).toISOString();
-          const result = await compareFromStore(ctx.store, since === undefined ? {} : { since });
-          if (opts.json) printJson(io, result);
-          else io.out(renderCompare(result));
-          return;
-        }
-        const report = await buildStatus(ctx);
-        if (opts.json) printJson(io, report);
-        else io.out(renderStatus(report));
-      });
+      const readOnly = opts.set === undefined;
+      await withContext(
+        deps,
+        async (ctx) => {
+          reportIssues(io, ctx.config.issues);
+          if (opts.set !== undefined) {
+            const r = setStatus(ctx, opts.set, pct as string, opts);
+            if (opts.json) return printJson(io, r);
+            io.out(
+              `${r.instanceId}: ${r.remainingPct}% remaining (${r.window === "*" ? "all windows" : `window ${r.window}`}) until ${formatLocal(r.expiresAt)}\n`,
+            );
+            return;
+          }
+          if (opts.compare) {
+            const since =
+              sinceMs === undefined
+                ? undefined
+                : new Date(ctx.clock.now().getTime() - sinceMs).toISOString();
+            const result = await compareFromStore(ctx.store, since === undefined ? {} : { since });
+            if (opts.json) printJson(io, result);
+            else io.out(renderCompare(result));
+            return;
+          }
+          const report = await buildStatus(ctx);
+          if (opts.json) printJson(io, report);
+          else io.out(renderStatus(report));
+        },
+        { readOnly },
+      );
     });
 }

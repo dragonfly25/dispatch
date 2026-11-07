@@ -95,6 +95,7 @@ export function registerDoctor(program: Command, deps: CliDeps): void {
           ...(deps.assetsDir ? { assetsDir: deps.assetsDir } : {}),
           ...(deps.spawner ? { spawner: deps.spawner } : {}),
           ...(deps.quotaReaders ? { quotaReaders: deps.quotaReaders } : {}),
+          ...(opts.live ? {} : { readOnly: true }),
         },
         registry: extras.registry ?? builtinRegistry(),
         fromHost: opts.fromHost === true,

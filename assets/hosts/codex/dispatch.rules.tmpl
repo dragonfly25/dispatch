@@ -6,7 +6,7 @@ prefix_rule(
     justification = "Dispatch launcher: delegates tasks to other providers; needs network and writes under ~/.dispatch",
     match = [
         ["{{LAUNCHER}}", "run", "--detach", "--json", "--task", "fix the bug"],
-        ["{{LAUNCHER}}", "wait", "run_abc", "--timeout", "{{WAIT_TIMEOUT}}"],
+        ["{{LAUNCHER}}", "wait", "run_abc", "--json", "--timeout", "{{WAIT_TIMEOUT}}"],
         ["{{LAUNCHER}}", "status"],
     ],
     not_match = [

@@ -125,6 +125,38 @@ describe("buildPatch: collect [UC13]", () => {
     expect(existsSync(r.patch.path)).toBe(false);
   });
 
+  it("[AC-dispatchdir] Dispatch's own untracked .dispatch/ does not set needsReview", async () => {
+    const repo = await makeRepo(dirs);
+    await put(repo, { ".dispatch/config.yaml": "version: 1\n" });
+    const home = await tmp(dirs, "wp12-home-");
+    const wt = await sandbox.create({
+      autonomy: "worktree",
+      repoPath: repo,
+      runId: "run1",
+      dispatchHome: home,
+    });
+    expect(wt.dirtySnapshot).toBe(false);
+    await put(wt.path, { "a.txt": "x\n" });
+    const r = await build({ repo, wt, runDir: join(home, "runs", "run1") });
+    expect(r.patch.needsReview).toBe(false);
+  });
+
+  it("[AC-dispatchdir] a genuinely modified user file still sets needsReview", async () => {
+    const repo = await makeRepo(dirs);
+    await put(repo, { ".dispatch/config.yaml": "version: 1\n", "a.txt": "user edit\n" });
+    const home = await tmp(dirs, "wp12-home-");
+    const wt = await sandbox.create({
+      autonomy: "worktree",
+      repoPath: repo,
+      runId: "run1",
+      dispatchHome: home,
+    });
+    expect(wt.dirtySnapshot).toBe(true);
+    await put(wt.path, { "b.txt": "x\n" });
+    const r = await build({ repo, wt, runDir: join(home, "runs", "run1") });
+    expect(r.patch.needsReview).toBe(true);
+  });
+
   it("dirty-snapshot base sets needsReview", async () => {
     const s = await setup();
     await put(s.wt.path, { "a.txt": "x\n" });

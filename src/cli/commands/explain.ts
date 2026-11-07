@@ -50,46 +50,50 @@ export function registerExplain(program: Command, deps: CliDeps): void {
       .option("--json", "machine-readable output"),
   ).action(async (opts: ExplainOptions) => {
     const { io } = deps;
-    await withContext(deps, async (ctx) => {
-      reportIssues(io, ctx.config.issues);
-      if (opts.replay !== undefined) {
-        if (opts.task !== undefined || opts.taskFile !== undefined) {
+    await withContext(
+      deps,
+      async (ctx) => {
+        reportIssues(io, ctx.config.issues);
+        if (opts.replay !== undefined) {
+          if (opts.task !== undefined || opts.taskFile !== undefined) {
+            throw new DispatchError(
+              "use either --replay or --task, not both",
+              ExitCode.USAGE,
+              "cli.usage",
+            );
+          }
+          const result = await replayDecision(ctx.store, opts.replay, {
+            ...(opts.withCurrentConfig
+              ? { withConfig: ctx.config.routing as unknown as Record<string, unknown> }
+              : {}),
+          });
+          if (opts.json) printJson(io, result);
+          else io.out(renderReplay(result));
+          return;
+        }
+        if (opts.withCurrentConfig) {
           throw new DispatchError(
-            "use either --replay or --task, not both",
+            "--with-current-config needs --replay",
             ExitCode.USAGE,
             "cli.usage",
           );
         }
-        const result = await replayDecision(ctx.store, opts.replay, {
-          ...(opts.withCurrentConfig
-            ? { withConfig: ctx.config.routing as unknown as Record<string, unknown> }
+        const result = await dryRun(ctx, buildTask(ctx, opts), {
+          ...(opts.sessionModel
+            ? { sessionModel: { value: opts.sessionModel, observed: true } }
             : {}),
         });
-        if (opts.json) printJson(io, result);
-        else io.out(renderReplay(result));
-        return;
-      }
-      if (opts.withCurrentConfig) {
-        throw new DispatchError(
-          "--with-current-config needs --replay",
-          ExitCode.USAGE,
-          "cli.usage",
-        );
-      }
-      const result = await dryRun(ctx, buildTask(ctx, opts), {
-        ...(opts.sessionModel
-          ? { sessionModel: { value: opts.sessionModel, observed: true } }
-          : {}),
-      });
-      if (opts.json) {
-        printJson(io, {
-          input: result.input,
-          decision: result.decision,
-          alternatives: result.alternatives,
-          explain: result.explain,
-          issues: ctx.config.issues,
-        });
-      } else io.out(result.explain);
-    });
+        if (opts.json) {
+          printJson(io, {
+            input: result.input,
+            decision: result.decision,
+            alternatives: result.alternatives,
+            explain: result.explain,
+            issues: ctx.config.issues,
+          });
+        } else io.out(result.explain);
+      },
+      { readOnly: true },
+    );
   });
 }

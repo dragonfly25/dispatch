@@ -128,7 +128,7 @@ describe("planSetup / applySetup / uninstallGlobal", () => {
     ).toContain("'/opt/d/hook.mjs' claude-code SessionStart");
     expect(
       readFileSync(join(h.home, ".agents", "skills", "dispatch", "SKILL.md"), "utf8"),
-    ).toContain(`${join(h.dispatchHome, "bin", "dispatch")} wait <runId> --timeout 280`);
+    ).toContain(`${join(h.dispatchHome, "bin", "dispatch")} wait <runId> --json --timeout 280`);
     const manifest = readManifest(h.dispatchHome);
     expect(manifest.entries).toHaveLength(plan.ops.length);
     expect(manifest.entries.find((e) => e.kind === "rules-file")?.trustGrant).toBe(

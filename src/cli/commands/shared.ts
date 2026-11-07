@@ -68,6 +68,8 @@ export function pidAlive(pid: number): boolean {
 export interface ContextOptions {
   /** `--provider <instance>`: see `LoadAppContextOptions.provider`. */
   provider?: string | undefined;
+  /** The command only reads state: never creates the database (see `LoadAppContextOptions.readOnly`). */
+  readOnly?: boolean;
 }
 
 /** Loads the app context, runs `fn` and always closes the context. */
@@ -78,6 +80,7 @@ export async function withContext<T>(
 ): Promise<T> {
   const ctx = loadAppContext({
     ...(options.provider === undefined ? {} : { provider: options.provider }),
+    ...(options.readOnly ? { readOnly: true } : {}),
     cwd: deps.cwd,
     env: deps.env,
     ...(deps.clock ? { clock: deps.clock } : {}),

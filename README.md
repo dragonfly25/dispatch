@@ -194,7 +194,7 @@ else:
 
 For long tasks start in the background and poll: `dispatch run --detach --json ...` prints a `runId`
 (add `--idempotency-key <key>` so a repeated call returns the same run);
-`dispatch wait <runId> --timeout 120` returns the result, or exits 75 while the run is still going
+`dispatch wait <runId> --json --timeout 120` returns the result, or exits 75 while the run is still going
 (the default timeout is 100 s inside Claude Code, 280 s inside Codex, none outside a host).
 `dispatch cancel <runId>` stops the agent; nothing is applied. Custom frameworks (LangGraph, CrewAI, your own) call `dispatch`
 the same way.
