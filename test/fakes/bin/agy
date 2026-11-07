@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake agy (see test/fakes/fake-cli.mjs). Per-run config comes from .fake-env next to this file
+# or next to a symlink to it (created by test/support/fakes.ts).
+d=$(dirname "$0")
+[ -f "$d/.fake-env" ] && . "$d/.fake-env"
+exec "${FAKE_NODE:-node}" "${FAKE_CLI_JS:-$d/../fake-cli.mjs}" agy "$@"
