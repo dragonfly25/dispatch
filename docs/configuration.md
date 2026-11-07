@@ -141,7 +141,7 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `concurrency.per_provider` | integer | `2` | at least 1 | global; repo and flags only tighten | Max concurrent runs on one instance (default 2). |
 | `concurrency.total` | integer | `4` | at least 1 | global; repo and flags only tighten | Max concurrent runs across all instances (default 4). |
 | `max_depth` | integer | `1` | at least 0 | global; repo and flags only tighten | `run` refuses when DISPATCH_DEPTH &gt;= max_depth (default 1). Delegated children run with `DISPATCH_DEPTH` set, so at the default of 1 a child cannot start another run. |
-| `network` | enum | `off` | `off` \| `on` | global; repo and flags only tighten | Network access for children. |
+| `network` | enum | `off` | `off` \| `delegated-agents` \| `all` \| `on` | global; repo and flags only tighten | Shell sandbox network for delegated agents (listen on localhost, Docker socket, internet): `off` (default), `delegated-agents` (runs a host session delegates: intercepted custom agents and general-purpose), `all` (also runs started by hand). Worktree runs only. Only the global file can turn it on; a repo or flag can only lower it. `on` is a deprecated alias of `all`. |
 | `worktree` | object |  |  | global; repo and flags only tighten | Worktree sandbox settings. |
 | `worktree.bootstrap` | enum | `none` | `none` \| `symlink-readonly` | global; repo and flags only tighten | How dependencies are made available in a worktree. `symlink-readonly` links `symlink_paths` into the worktree read-only; a repo can only choose `none` when the global value is `symlink-readonly`. |
 | `worktree.symlink_paths` | list of string | `[]` |  | global; repo and flags only tighten | Paths symlinked read-only by symlink-readonly. A repo list must be a subset of the global one. |
@@ -163,6 +163,7 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `thresholds.<instance>.hard` | number, required | `5` | 0 to 100 | global, repo, flags | Below this remaining %, never use. |
 | `timeouts` | object |  |  | global, repo, flags | Run timeouts. |
 | `timeouts.default_task_ms` | integer | `600000` | at least 1 | global, repo, flags | Timeout of a delegated task in milliseconds (default 600000). |
+| `network_agents` | list of string | `null` |  | global only | With `network: delegated-agents`: only these agents get the sandbox network (custom agent names; `general-purpose` for runs a host session starts without a handoff). Absent: every delegated agent. Global only. |
 | `retention_days` | number | `30` | greater than 0 | global only | How long `dispatch gc` keeps finished runs and their history (default 30). |
 | `quota` | object |  |  | global only | Quota reading settings (global file only). |
 | `quota.cache_minutes` | number | `5` | at least 0 | global only | Minutes a real quota reading stays fresh (default 5). |

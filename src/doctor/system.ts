@@ -134,6 +134,37 @@ export function configLines(
   return lines;
 }
 
+/** One-line risk of an open sandbox network (doctor warning and docs). */
+export const NETWORK_RISK =
+  "unsupervised agents can then reach the internet, localhost services, local databases and Docker (prompt-injection exfiltration, actions against real services)";
+
+/**
+ * `sandbox.network`: ok while the shell sandbox network is off (the default); a warning, never a
+ * failure, when the user turned it on, with its scope and the risk.
+ */
+export function networkLine(ctx: AppContext): DoctorLine {
+  const { network, networkAgents } = ctx.config.execution;
+  if (network === "off") {
+    return mkLine("ok", "system", "sandbox.network", "off: delegated agents have no shell network");
+  }
+  const scope =
+    network === "all"
+      ? "every worktree run, including runs started by hand"
+      : `worktree runs of ${networkAgents === undefined ? "every delegated agent (custom agents and general-purpose)" : `these agents: ${networkAgents.join(", ") || "(none)"}`}`;
+  const ignored =
+    network === "all" && networkAgents !== undefined ? "; network_agents is ignored with all" : "";
+  return mkLine(
+    "warn",
+    "system",
+    "sandbox.network",
+    `ON (${network}) for ${scope}${ignored}: ${NETWORK_RISK}`,
+    {
+      fix: "set `network: off` in ~/.dispatch/config.yaml to close it (a repo `network: off` closes it there)",
+      data: { network, networkAgents: networkAgents ?? null },
+    },
+  );
+}
+
 /** `repo.trust`: the repo's `.dispatch/` policy is trusted, or says how to trust it. */
 export function repoLine(ctx: AppContext): DoctorLine {
   const { status, repoId, hash, changed } = ctx.config.trust;

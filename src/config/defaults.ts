@@ -33,6 +33,7 @@ export function defaultSettings(): Settings {
     concurrency: { per_provider: 2, total: 4 },
     max_depth: 1,
     network: "off",
+    network_agents: null,
     worktree: { bootstrap: "none", symlink_paths: [], keep: false },
     unspecified_model: DEFAULT_UNSPECIFIED_MODEL,
     pins: [],

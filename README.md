@@ -246,11 +246,12 @@ and from you reviewing the result.
 
 | What | How |
 | --- | --- |
-| Worktree and native sandbox | Each task gets its own git worktree. The real boundary is each CLI's own sandbox; if it is unavailable Dispatch fails closed. Minimal child environment, `max_depth` against recursion, timeout. Network is not restricted, because the CLIs need it. |
+| Worktree and native sandbox | Each task gets its own git worktree. The real boundary is each CLI's own sandbox; if it is unavailable Dispatch fails closed. Minimal child environment, `max_depth` against recursion, timeout. The agent's shell has no network unless you open it (below). |
 | Autonomy levels | `read-only` (text back) or `worktree` (default: edits in the worktree, patch back). `direct` is not implemented in v0.1: adapters refuse it. |
 | Patch filter | Rejected or trimmed if it touches `..`, absolute paths, symlinks, `.git*`, `.dispatch/`, host config, `.env*` or pinned paths. Secret scan sets `needsReview`; `git apply --check` runs against your tree. |
 | No automatic apply | Dispatch never commits or opens PRs, and applies a patch only for an intercepted Claude Code custom agent (auto-apply, see above; `hosts.claude-code.auto_apply: false` turns it off). Otherwise you or the host review the diff. |
 | Untrusted output | The summary is marked `EXTERNAL_AGENT_OUTPUT`; the host treats it as data, never as instructions. |
+| Shell network (opt-in) | Off by default: a delegated agent cannot start a server on localhost, reach Docker or the internet. To let builder agents run your API, database and tests, add `network: delegated-agents` (runs a Claude Code or Codex session delegates; narrow with `network_agents: [builder, general-purpose]`) or `network: all` (also runs you start by hand) to `~/.dispatch/config.yaml`; `network: off` closes it (a repo can only close it). **Warning:** an unsupervised agent with network can be steered by prompt injection to send out your code or data, or act on real services, local databases and containers. `dispatch doctor` warns while it is on. Details: [docs/security.md](docs/security.md) T15. |
 | MCP servers | Children load no MCP server of yours, except, with the MCP forwarding grant, exactly the ones the delegated agent needs (codex children only; claude's `--safe-mode` cannot load them). Secrets pass by variable name. |
 | Settings only tighten | Security keys can be loosened only in your global config; a repo or flag can only be stricter, and repo policy is ignored until you `dispatch trust` it. |
 | Secrets | Credentials are never copied, stored, logged or sent, and no private provider API is called with your tokens. State is redacted before it is written. |

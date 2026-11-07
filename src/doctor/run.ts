@@ -24,7 +24,7 @@ import {
   loadFixtureVersions,
   quotaLine,
 } from "./provider.js";
-import { configLines, launcherLine, platformLine, repoLine } from "./system.js";
+import { configLines, launcherLine, networkLine, platformLine, repoLine } from "./system.js";
 import { type DoctorLine, mkLine } from "./types.js";
 
 /** Inputs of {@link collectChecks}. */
@@ -74,7 +74,7 @@ export async function collectChecks(opts: CollectOptions): Promise<Collected> {
 
   const reports = new Map<string, InstanceReport>();
   if (ctx) {
-    lines.push(repoLine(ctx));
+    lines.push(networkLine(ctx), repoLine(ctx));
     const deps: InstanceCheckDeps = {
       spawner: ctx.spawner,
       resolveFs: opts.resolveFs,

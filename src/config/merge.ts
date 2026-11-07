@@ -2,7 +2,7 @@
  * Layering (plan §2 "Config"): defaults → global → trusted repo → flags.
  *
  * Ordinary keys: the later layer wins. SECURITY keys (autonomy, allowed_providers, concurrency,
- * max_depth, network, worktree.*, and per-instance enabled / binary / max_autonomy /
+ * max_depth, network (global-only network_agents), worktree.*, and per-instance enabled / binary / max_autonomy /
  * concurrency / env_passthrough) take the most restrictive value of global, repo and flags.
  * A repo or flag value that would loosen is ignored and reported as an error issue
  * (`run` maps those to exit 2). The global file is the user's own and may set anything,
@@ -48,7 +48,9 @@ export interface Settings {
   allowed_providers: string[] | null;
   concurrency: { per_provider: number; total: number };
   max_depth: number;
-  network: "off" | "on";
+  network: NetworkScope;
+  /** Global-only: agents `network: delegated-agents` is limited to; null = every delegated agent. */
+  network_agents: string[] | null;
   worktree: { bootstrap: "none" | "symlink-readonly"; symlink_paths: string[]; keep: boolean };
   unspecified_model: string;
   pins: RuleFile[];
@@ -79,7 +81,14 @@ export type Provenance = Record<keyof Settings, Source>;
 
 /** Autonomy levels, least permissive first. */
 export const AUTONOMY_ORDER: readonly Autonomy[] = ["read-only", "worktree", "direct"];
-export const NETWORK_ORDER = ["off", "on"] as const;
+export const NETWORK_ORDER = ["off", "delegated-agents", "all"] as const;
+/** Sandbox network scope, least permissive first ({@link NETWORK_ORDER}). */
+export type NetworkScope = (typeof NETWORK_ORDER)[number];
+
+/** Normalizes a file value: the deprecated `on` means `all`. */
+function networkScope(v: NetworkScope | "on"): NetworkScope {
+  return v === "on" ? "all" : v;
+}
 export const BOOTSTRAP_ORDER = ["none", "symlink-readonly"] as const;
 
 /** The more restrictive of two autonomy levels. */
@@ -147,7 +156,17 @@ function applyGlobal(s: Settings, g: GlobalConfigFile, prov: Provenance, issues:
   set("retention_days", g.retention_days);
   set("forward_mcp", g.hosts?.["claude-code"]?.forward_mcp);
   set("forward_web", g.hosts?.["claude-code"]?.forward_web);
-  set("network", g.network);
+  if (g.network !== undefined) {
+    if (g.network === "on") {
+      issues.push({
+        level: "warning",
+        key: "network",
+        message: "`network: on` is deprecated and means `all`; write `all` or `delegated-agents`",
+      });
+    }
+    set("network", networkScope(g.network));
+  }
+  if (g.network_agents) set("network_agents", [...g.network_agents]);
   if (g.worktree) set("worktree", { ...s.worktree, ...defined(g.worktree) });
   if (g.quota) {
     set("quota", {
@@ -246,8 +265,8 @@ function applyOverlay(
     }
   }
   if (o.network !== undefined) {
-    const r = tightenRank(NETWORK_ORDER, s.network, o.network);
-    if (r === null) loosen("network", `${o.network} > ${s.network}`);
+    const r = tightenRank(NETWORK_ORDER, s.network, networkScope(o.network));
+    if (r === null) loosen("network", `${networkScope(o.network)} > ${s.network}`);
     else {
       s.network = r;
       accept("network");

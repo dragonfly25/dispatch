@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Opt-in shell sandbox network for delegated agents (off by default): `network: off |
+  delegated-agents | all` in the global config (the old `on` is a deprecated alias of `all`), plus
+  global-only `network_agents: [names]` to narrow `delegated-agents` (`general-purpose` = runs a host
+  session starts without a handoff). Worktree runs get codex
+  `-c sandbox_workspace_write.network_access=true` or claude `sandbox.network` (localhost binding,
+  Unix sockets, all domains; credential `denyRead` kept), plus per-attempt npm/pnpm caches under
+  TMPDIR. Read-only runs never get it. Tighten-only: a repo or flag can only lower it. The decision
+  is recorded as `sandboxNetwork` in the run result and shown by `run`, `run --json` and `logs`;
+  `doctor` warns (`sandbox.network`) while it is on. Live spikes: `docs/spikes/sandbox-network.md`;
+  threat model T15.
 - Web access for delegated custom agents: an intercepted agent whose `tools:` list `WebSearch` or
   `WebFetch` is now delegated (it used to stay on Claude). Codex gets `-c web_search="cached"`
   (WebSearch) or `"live"` (WebFetch), claude instances get the web tools pre-approved; the shell

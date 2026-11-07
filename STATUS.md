@@ -197,6 +197,22 @@ Taken during execution:
   `curl` stayed offline; claude 2.1.301 `--safe-mode` used both tools): `docs/spikes/web-access.md`.
   The `network` key still does not govern this (the shell sandbox network is unchanged); runs
   without a web request keep codex's default argv. Threat model: docs/security.md T14.
+- **Opt-in sandbox network for delegated agents** (owner-approved, off by default): the dormant
+  `network` security key now has an effect, with values `off | delegated-agents | all` (`on` kept
+  as a deprecated alias of `all`, with a warning) and a global-only `network_agents` list. The
+  brief suggested a new `sandbox.network` key; the existing tighten-only `network` key was reused
+  instead, to avoid two keys for one switch. A run's agent is the handoff's custom agent, else
+  `general-purpose` when a host session started it (host detected from env), else none (by hand):
+  Dispatch cannot tell a hard-mode `general-purpose` relay run from any other run a host session
+  starts, so `delegated-agents` covers both. Worktree attempts get codex
+  `-c sandbox_workspace_write.network_access=true` or claude `sandbox.network` in `--settings`, and
+  `npm_config_cache` / `npm_config_store_dir` in a per-attempt TMPDIR directory (allowWrite for
+  claude). Read-only runs never get it (codex has no read-only network setting). Both adapters are
+  capable, so no routing hint is needed. `BuildInvocationWithNetwork` and `RunResultWithNetwork`
+  (field `sandboxNetwork`, present only when the scope is not `off`) are structural supersets; the
+  frozen contracts are untouched (`run --json` re-adds the field after the schema check). Doctor
+  `sandbox.network` warns while it is on; setup never asks. Verified live: one codex run and three
+  claude runs, `docs/spikes/sandbox-network.md`. Threat model: docs/security.md T15.
 - **Per-agent MCP forwarding** (owner-approved, one-time consent): `src/mcp/` reads the user's
   Claude MCP config read-only (local > `.mcp.json` (approved only) > user scope) and decides which
   servers are forwardable (pure `${VAR}` env/header references only; values never copied).

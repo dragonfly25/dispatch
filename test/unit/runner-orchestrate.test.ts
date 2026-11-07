@@ -1,10 +1,20 @@
 /** WP19 runner core: end-to-end with fake CLIs, temp HOME/DISPATCH_HOME and temp git repos. */
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { disabledReaders, loadAppContext } from "../../src/app/context.js";
 import { runnerDeps } from "../../src/app/runner.js";
+import { renderRunResult } from "../../src/cli/commands/run.js";
 import type { ExecutionConfig } from "../../src/config/load.js";
 import type {
   ProbeResult,
@@ -22,6 +32,7 @@ import {
   executeTask,
   MAX_SUMMARY_CHARS,
   type RunnerDeps,
+  type RunResultWithNetwork,
   reportedPatch,
 } from "../../src/runner/orchestrate.js";
 import { ProcessSpawner } from "../../src/runner/proc.js";
@@ -671,5 +682,96 @@ describe("web access [UC2]", () => {
     expect(r2.status).toBe("returned_to_host");
     expect(r2.summary).toMatch(/no enabled provider can give the agent web access/);
     expect(agy.fakes.readLog({ kind: "run" })).toEqual([]);
+  });
+});
+
+describe("sandbox network [SEC-network]", () => {
+  const tmps: string[] = [];
+  afterEach(() => {
+    for (const t of tmps.splice(0)) rmSync(t, { recursive: true, force: true });
+  });
+  const netSetup = (o: SetupOptions) => {
+    const tmp = mkdtempSync(join(tmpdir(), "dispatch-net-test-"));
+    tmps.push(tmp);
+    return { ...setup({ ...o, env: { TMPDIR: tmp, ...o.env } }), tmp };
+  };
+  const go = (deps: RunnerDeps, t: Partial<Task> = {}, agent?: string) =>
+    executeTask(deps, task(t), {
+      repoPath: repo?.dir ?? "",
+      signals: null,
+      leaseWaitMs: 0,
+      ...(agent === undefined ? {} : { agent }),
+    }) as Promise<RunResultWithNetwork>;
+  const edit: FakeScenarioMap = {
+    codex: [{ scenario: "success_edit", file: "math.js", content: "x\n" }],
+  };
+
+  it("a delegated agent's worktree run gets codex network and caches; recorded in the result", async () => {
+    const { deps, fakes, tmp } = netSetup({
+      scenarios: edit,
+      exec: { network: "delegated-agents", networkAgents: ["builder"] },
+    });
+    const r = await go(deps, {}, "builder");
+    valid(r);
+    expect(r.sandboxNetwork).toEqual({
+      enabled: true,
+      scope: "delegated-agents",
+      agent: "builder",
+      reason: "delegated agent builder (network: delegated-agents)",
+    });
+    const [call] = fakes.readLog({ cli: "codex", kind: "run" });
+    expect(call?.args).toContain("sandbox_workspace_write.network_access=true");
+    const cache = call?.env.npm_config_cache ?? "";
+    expect(cache.startsWith(join(realpathSync(tmp), "dispatch-net", r.runId))).toBe(true);
+    expect(call?.env.npm_config_store_dir).toMatch(/pnpm-store$/);
+    // The per-attempt cache is removed with the attempt.
+    expect(existsSync(dirname(cache))).toBe(false);
+    const stored = (await (deps.store as SqliteStateStore).getRun(r.runId))?.result as
+      | RunResultWithNetwork
+      | undefined;
+    expect(stored?.sandboxNetwork?.enabled).toBe(true);
+    expect(readFileSync(r.log.path, "utf8")).toContain('"type":"network"');
+  });
+
+  it("a run by hand, an agent outside network_agents and a read-only run stay closed", async () => {
+    const a = netSetup({ scenarios: edit, exec: { network: "delegated-agents" } });
+    const byHand = await go(a.deps);
+    expect(byHand.sandboxNetwork).toMatchObject({ enabled: false, agent: null });
+    expect(a.fakes.readLog({ cli: "codex", kind: "run" })[0]?.args.join(" ")).not.toContain(
+      "network_access",
+    );
+    const b = netSetup({
+      scenarios: edit,
+      exec: { network: "delegated-agents", networkAgents: ["builder"] },
+      env: { CLAUDECODE: "1" },
+    });
+    const gp = await go(b.deps);
+    expect(gp.sandboxNetwork).toMatchObject({ enabled: false, agent: "general-purpose" });
+    const c = netSetup({
+      scenarios: { codex: [{ scenario: "fail" }] },
+      exec: { network: "all" },
+    });
+    const ro = await go(c.deps, { autonomy: "read-only" });
+    expect(ro.sandboxNetwork?.enabled).toBe(true);
+    const [call] = c.fakes.readLog({ cli: "codex", kind: "run" });
+    expect(call?.args.join(" ")).not.toContain("network_access");
+    expect(call?.env.npm_config_cache).toBeUndefined();
+  });
+
+  it("default off: no field, no flag; claude gets sandbox.network in --settings", async () => {
+    const off = netSetup({ scenarios: edit });
+    const r = await go(off.deps, {}, "builder");
+    expect(r.sandboxNetwork).toBeUndefined();
+    const cl = netSetup({
+      action: { type: "provider", instance: "claude" },
+      scenarios: { claude: [{ scenario: "success_edit", file: "math.js", content: "x\n" }] },
+      exec: { network: "all" },
+    });
+    const r2 = await go(cl.deps);
+    expect(r2.externalAgent?.instance).toBe("claude");
+    const [call] = cl.fakes.readLog({ cli: "claude", kind: "run" });
+    const settings = JSON.parse(call?.args[(call?.args.indexOf("--settings") ?? 0) + 1] ?? "{}");
+    expect(settings.sandbox.network).toMatchObject({ allowLocalBinding: true });
+    expect(renderRunResult(r2)).toContain("Sandbox network: on (network: all)");
   });
 });

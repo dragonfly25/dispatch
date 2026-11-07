@@ -136,7 +136,9 @@ const OTHER_OPTIONS: Option[] = [
       "  allowed_providers  instance ids that may be used (absent = every enabled instance)",
       "  concurrency        max concurrent runs per instance and in total (defaults 2 and 4)",
       "  max_depth          `run` refuses when DISPATCH_DEPTH >= max_depth (default 1)",
-      "  network            network access for child agents: off | on (default off)",
+      "  network            agent shell network (localhost, Docker, internet): off (default) |",
+      "                     delegated-agents | all; network_agents: [names] narrows it.",
+      "                     RISK: unsupervised agents with network (docs/security.md T15)",
       "  worktree           bootstrap: none | symlink-readonly, symlink_paths, keep",
     ],
     example: [

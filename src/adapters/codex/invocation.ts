@@ -2,7 +2,12 @@ import { join } from "node:path";
 import type { Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import type { McpServer } from "../../mcp/resolve.js";
-import type { BuildInvocationWithWeb, WebAccess } from "../../web/index.js";
+import {
+  type BuildInvocationWithNetwork,
+  packageCacheEnv,
+  type SandboxNetwork,
+} from "../../sandbox/network.js";
+import type { WebAccess } from "../../web/index.js";
 
 /** Name of the file `codex exec -o` writes the final agent message to, inside `runDir`. */
 export const CODEX_OUTPUT_FILE = "last.txt";
@@ -138,14 +143,29 @@ export function webOverride(web: WebAccess | undefined): string[] {
 }
 
 /**
+ * The sandbox network override (live-verified on 0.167, docs/spikes/sandbox-network.md): with
+ * `sandbox_workspace_write.network_access=true` the workspace-write shell can listen on 127.0.0.1,
+ * reach the Docker socket and the internet; writes outside the worktree and TMPDIR stay blocked.
+ * Worktree runs only: the read-only sandbox has no network setting.
+ */
+export function networkOverride(
+  network: SandboxNetwork | undefined,
+  autonomy: BuildInvocationWithNetwork["autonomy"],
+): string[] {
+  if (network === undefined || autonomy !== "worktree") return [];
+  return ["-c", "sandbox_workspace_write.network_access=true"];
+}
+
+/**
  * Builds the `codex exec` child command (pure). Prompt goes on stdin (trailing `-`).
  * `worktree` and `repoRoot` must be canonical (realpath) paths, since codex keys project trust
  * on them. `mcpServers` (optional) adds only those MCP servers ({@link mcpOverrides}); the user's
- * own MCP config stays ignored. `web` (optional) turns on codex's web search ({@link webOverride}).
+ * own MCP config stays ignored. `web` (optional) turns on codex's web search ({@link webOverride});
+ * `network` (optional, worktree only) opens the shell sandbox network ({@link networkOverride}).
  * Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
  * required isolation feature is unknown to the installed CLI (fail closed).
  */
-export function buildCodexInvocation(args: BuildInvocationWithWeb): Invocation {
+export function buildCodexInvocation(args: BuildInvocationWithNetwork): Invocation {
   const { probe, autonomy, worktree, repoRoot, runDir, target, instance } = args;
   if (autonomy === "direct") {
     throw new DispatchError(
@@ -185,6 +205,7 @@ export function buildCodexInvocation(args: BuildInvocationWithWeb): Invocation {
     untrustedProjectsOverride([worktree, repoRoot]),
     ...mcpOverrides(args.mcpServers ?? []),
     ...webOverride(args.web),
+    ...networkOverride(args.network, autonomy),
     "-C",
     worktree,
     "-m",
@@ -200,6 +221,8 @@ export function buildCodexInvocation(args: BuildInvocationWithWeb): Invocation {
 
   const env: Record<string, string> = { ...args.baseEnv };
   if (instance.configDir) env.CODEX_HOME = instance.configDir;
+  const net = networkOverride(args.network, autonomy).length > 0 ? args.network : undefined;
+  if (net) Object.assign(env, packageCacheEnv(net));
 
   return {
     binary: probe.binaryPath,
@@ -213,6 +236,7 @@ export function buildCodexInvocation(args: BuildInvocationWithWeb): Invocation {
       ...CODEX_SIDE_EFFECT_GUARDS,
       ...(args.mcpServers?.length ? ["codex-mcp-forwarded-only"] : []),
       ...(args.web ? ["codex-web-model-side-only"] : []),
+      ...(net ? ["codex-network-opt-in"] : []),
     ],
   };
 }

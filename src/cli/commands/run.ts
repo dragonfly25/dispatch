@@ -28,9 +28,14 @@ import {
   HandoffError,
   loadHandoff,
 } from "../../hosts/claude-code/handoff.js";
-import { executeTask, type RunnerStore } from "../../runner/orchestrate.js";
+import {
+  executeTask,
+  type RunnerStore,
+  type RunResultWithNetwork,
+} from "../../runner/orchestrate.js";
 import { exitCodeForResult } from "../../runner/result.js";
 import { repoRoot } from "../../sandbox/git.js";
+import { describeNetwork } from "../../sandbox/network.js";
 import { withWeb } from "../../web/index.js";
 import { ExitRequest } from "../exit.js";
 import { addTaskOptions } from "../options.js";
@@ -103,7 +108,7 @@ function summaryBlock(r: RunResult, ui: Ui, home: string | undefined): string[] 
  * Concise human rendering of a result; the external agent's words sit in a marked block. Plain
  * (the default) is the stable text form; decorated output swaps the head for a summary block.
  */
-export function renderRunResult(r: RunResult, opts: RunRenderOptions = {}): string {
+export function renderRunResult(r: RunResultWithNetwork, opts: RunRenderOptions = {}): string {
   const ui = opts.ui ?? plainUi;
   const lines: string[] = [];
   if (ui.enabled) lines.push(...summaryBlock(r, ui, opts.home));
@@ -111,6 +116,7 @@ export function renderRunResult(r: RunResult, opts: RunRenderOptions = {}): stri
     lines.push(`Run ${r.runId}: ${r.status}${r.outcome ? ` (${r.outcome})` : ""}`);
     const decision = r.decisions.at(-1);
     if (decision) lines.push(`Decision: ${decision.action} - ${decision.reason}`);
+    if (r.sandboxNetwork) lines.push(`Sandbox network: ${describeNetwork(r.sandboxNetwork)}`);
     if (r.externalAgent) {
       const a = r.externalAgent;
       lines.push(`Provider: ${a.provider} (instance ${a.instance}), model ${a.model}`);
@@ -325,12 +331,13 @@ export function registerRun(program: Command, deps: CliDeps): void {
               (ev) => spin.update(phaseText(chosen, ev)),
             );
           }
-          let result: RunResult;
+          let result: RunResultWithNetwork;
           try {
             result = await executeTask(rd, task, {
               repoPath: ctx.cwd,
               ...(from?.h.mcpServers.length ? { mcpServers: from.h.mcpServers } : {}),
               ...withWeb(from?.h),
+              ...(from ? { agent: from.h.agent.name } : {}),
             });
           } finally {
             spin?.stop();
@@ -347,8 +354,12 @@ export function registerRun(program: Command, deps: CliDeps): void {
               "run.invalid_result",
             );
           }
-          if (opts.json) printJson(io, checked.data);
-          else io.out(renderRunResult(checked.data, { ui: outUi(io), home: deps.env.HOME }));
+          // The schema strips unknown keys: keep the sandbox network decision (a superset field).
+          const shown: RunResultWithNetwork = result.sandboxNetwork
+            ? { ...checked.data, sandboxNetwork: result.sandboxNetwork }
+            : checked.data;
+          if (opts.json) printJson(io, shown);
+          else io.out(renderRunResult(shown, { ui: outUi(io), home: deps.env.HOME }));
           const code = exitCodeForResult(checked.data);
           if (code !== ExitCode.OK) throw new ExitRequest(code);
         } catch (err) {

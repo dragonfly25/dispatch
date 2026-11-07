@@ -4,6 +4,7 @@
  * finalize → quota bookkeeping → patch → cleanup (lease released, worktree disposed unless kept).
  */
 import { mkdir, readFile, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   AdapterOutcome,
@@ -14,9 +15,14 @@ import type {
 } from "../core/contracts.js";
 import type { McpServer } from "../mcp/resolve.js";
 import { ingestClaudeObservations } from "../quota/readers/claude-passive.js";
+import {
+  type BuildInvocationWithNetwork,
+  cacheDirFor,
+  type SandboxNetwork,
+} from "../sandbox/network.js";
 import { buildPatch, type PatchResult } from "../sandbox/patch.js";
 import type { WorktreeHandle } from "../sandbox/worktree.js";
-import type { BuildInvocationWithWeb, WebAccess } from "../web/index.js";
+import type { WebAccess } from "../web/index.js";
 import { buildChildEnv } from "./env.js";
 import { acquireLease, holdLease } from "./lease.js";
 import type { ProbeCache } from "./lifecycle.js";
@@ -49,6 +55,24 @@ export interface RunContext {
   mcpServers?: readonly McpServer[];
   /** Web access given to the child (routing only picked instances that can give it). */
   web?: WebAccess;
+  /** True when worktree attempts get the sandbox network (`network:` config, see decideNetwork). */
+  network?: boolean;
+}
+
+/**
+ * Creates the package-cache directory of a network-enabled worktree attempt (0700, canonical
+ * path, under the child's TMPDIR, which both sandboxes may write).
+ */
+async function networkFor(
+  rc: RunContext,
+  autonomy: Autonomy,
+  tmp: string,
+  index: number,
+): Promise<SandboxNetwork | undefined> {
+  if (rc.network !== true || autonomy !== "worktree") return undefined;
+  const dir = cacheDirFor(await realpath(tmp), rc.runId, index + 1);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  return { cacheDir: dir };
 }
 
 /** What one attempt produced. `outcome` is null when the target was skipped before spawning. */
@@ -150,6 +174,7 @@ export async function runAttempt(
   const release = holdLease(deps.store, runId, deps.clock);
 
   let wt: WorktreeHandle | undefined;
+  let network: SandboxNetwork | undefined;
   try {
     wt = await deps.sandbox.create({
       repoPath: rc.repoPath,
@@ -187,7 +212,8 @@ export async function runAttempt(
     rc.secrets.push(...withheld);
     deps.addSecrets?.(withheld);
     const worktree = await realpath(wt.path);
-    const args: BuildInvocationWithWeb = {
+    network = await networkFor(rc, autonomy, child.env.TMPDIR ?? tmpdir(), index);
+    const args: BuildInvocationWithNetwork = {
       task,
       target,
       autonomy,
@@ -199,9 +225,17 @@ export async function runAttempt(
       baseEnv: child.env,
       mcpServers,
       ...(rc.web === undefined ? {} : { web: rc.web }),
+      ...(network === undefined ? {} : { network }),
     };
     const inv = adapter.buildInvocation(args);
-    rc.log.write({ type: "attempt.start", attempt: index + 1, target, autonomy, worktree });
+    rc.log.write({
+      type: "attempt.start",
+      attempt: index + 1,
+      target,
+      autonomy,
+      worktree,
+      ...(network === undefined ? {} : { network: true }),
+    });
 
     const ctx: AdapterRunContext = {
       runId,
@@ -303,6 +337,7 @@ export async function runAttempt(
     };
   } finally {
     release();
+    if (network) await rm(network.cacheDir, { recursive: true, force: true }).catch(() => {});
     if (wt) await deps.sandbox.dispose(wt.path, exec.worktree.keep).catch(() => {});
   }
 }
