@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!docs", "!pnpm-lock.yaml", "!test/__snapshots__", "!test/fixtures/*/*"]
+    "includes": ["**", "!docs", "!pnpm-lock.yaml", "!test/__snapshots__", "!test/fixtures/*/*", "!**/*.md"]
   },
   "formatter": {
     "enabled": true,
