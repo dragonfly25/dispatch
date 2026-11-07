@@ -47,6 +47,15 @@ const RULES: readonly Rule[] = [
   { kind: "bearer", re: /(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, keep: "$1" },
 ];
 
+/**
+ * The detection patterns behind {@link redact}, as `{kind, re}` pairs in priority order. Shared
+ * with the patch secret scan so both agree on what a credential looks like. The regexes carry the
+ * `g` flag: clone them before using `test`/`exec` to avoid shared `lastIndex` state.
+ */
+export const SECRET_PATTERNS: readonly { readonly kind: string; readonly re: RegExp }[] = RULES.map(
+  ({ kind, re }) => ({ kind, re }),
+);
+
 /** Explicit secret values shorter than this are ignored: they would mangle ordinary text. */
 export const MIN_SECRET_LENGTH = 4;
 
