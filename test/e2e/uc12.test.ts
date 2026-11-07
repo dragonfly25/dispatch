@@ -94,7 +94,8 @@ describe("[UC12] second account of the same provider", () => {
     expect(e.input.host.self).toBe("claude-alt");
     expect(e.decision.chain.find((c) => c.ruleId === "claude-alt")?.effect).toMatch(/self/);
     const status = w.dispatch(["status"], { env }).stdout;
-    expect(status).toMatch(/^claude-alt .*\(host — interactive usage not visible\)/m);
+    // The claude-usage reader sees the whole account, interactive sessions included.
+    expect(status).toMatch(/^claude-alt .*\(host — includes interactive usage\)/m);
     expect(status).not.toMatch(/^claude .*\(host — interactive/m);
 
     const viaDefault = w.run(["--provider", "claude"], { env });

@@ -56,7 +56,10 @@ export interface Settings {
   profile: string;
   shadow_profiles: string[];
   timeouts: { default_task_ms: number };
-  quota: { cache_minutes: number; readers: Record<string, { enabled: boolean }> };
+  quota: {
+    cache_minutes: number;
+    readers: Record<string, { enabled?: boolean; llm_fallback?: boolean }>;
+  };
   /** Global-only: retention of finished runs and history, in days. */
   retention_days: number;
 }

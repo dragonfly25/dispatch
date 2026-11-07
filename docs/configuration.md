@@ -166,8 +166,9 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `retention_days` | number | `30` | greater than 0 | global only | How long `dispatch gc` keeps finished runs and their history (default 30). |
 | `quota` | object |  |  | global only | Quota reading settings (global file only). |
 | `quota.cache_minutes` | number | `5` | at least 0 | global only | Minutes a real quota reading stays fresh (default 5). |
-| `quota.readers` | map of object | `{}` |  | global only | Quota readers by instance id; `enabled: false` turns a reader off. Routing works with every reader disabled (the estimator takes over). |
-| `quota.readers.<instance>.enabled` | boolean, required |  |  | global only | `false` turns this instance's quota reader off. |
+| `quota.readers` | map of object | `{}` |  | global only | Quota readers by reader id (`claude-usage`, `claude-passive`, `codex-app-server`, `agy-usage`) or instance id; `enabled: false` turns a reader off. Routing works with every reader disabled (the estimator takes over). |
+| `quota.readers.<instance>.enabled` | boolean |  |  | global only | `false` turns this reader (or every reader of this instance) off. |
+| `quota.readers.<instance>.llm_fallback` | boolean |  |  | global only | `claude-usage` only: when `/usage` output cannot be parsed, let Haiku extract the quota lines (only the quota header is sent; only in `status`/`doctor`; default true). |
 | `hosts` | object |  |  | global only | Host integration settings (global file only). |
 | `hosts.codex` | object |  |  | global only | Codex host integration. |
 | `hosts.codex.hard` | boolean |  |  | global only | Redirect Codex native sub-agent spawns to Dispatch in trusted repos whose policy delegates (default true); false keeps only the SessionStart context. |

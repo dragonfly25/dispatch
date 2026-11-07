@@ -12,6 +12,7 @@ import { existsSync, readFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLAUDE_QUOTA_UNREAD,
   createWorld,
   HELP,
   MATH_JS,
@@ -96,7 +97,7 @@ describe("[UC13] timeout and a patch that does not apply", () => {
     const edit = { scenario: "success_edit" as const, file: "math.js", content: "x\n" };
     const keep = createWorld({
       global: `${THREE_PROVIDERS}worktree: { keep: true }\n`,
-      scenarios: { codex: [edit] },
+      scenarios: { codex: [edit], ...CLAUDE_QUOTA_UNREAD },
     });
     const kept = keep.run();
     expect(kept.result?.status).toBe("completed");
@@ -106,7 +107,10 @@ describe("[UC13] timeout and a patch that does not apply", () => {
     expect(readFileSync(join(keep.repo.dir, "math.js"), "utf8")).toBe(MATH_JS);
     expect(keep.repo.git("status", "--porcelain")).toBe("");
 
-    const dropped = createWorld({ global: THREE_PROVIDERS, scenarios: { codex: [edit] } });
+    const dropped = createWorld({
+      global: THREE_PROVIDERS,
+      scenarios: { codex: [edit], ...CLAUDE_QUOTA_UNREAD },
+    });
     expect(dropped.run().result?.status).toBe("completed");
     expect(worktreeCount(dropped)).toBe(0);
     // gc removes a kept worktree of a finished run once it is old enough (and not before).

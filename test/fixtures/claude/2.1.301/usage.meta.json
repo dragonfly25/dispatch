@@ -1,0 +1,11 @@
+{
+  "cli": "claude",
+  "cliVersion": "2.1.301",
+  "scenario": "usage",
+  "date": "2026-11-07",
+  "argv": ["claude", "-p", "/usage", "--safe-mode"],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": ["usage.txt"],
+  "notes": "Quota-free. Header lines as observed live (Max 20x, macOS, 2026-11-07); the local-usage breakdown after them is sanitized and invented (fake subagent names, PRIVATE-BREAKDOWN-MARKER) so tests can prove it is dropped."
+}

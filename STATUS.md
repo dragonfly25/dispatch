@@ -96,7 +96,7 @@ Security tags: all 15 `[SEC-*]` groups PASS. Total: 1,398 tests passed, 1 skippe
 
 | Risk | State at v0.1.0 | Notes |
 |---|---|---|
-| Quota channels change/disappear | Mitigated | Codex app-server is official; Claude passive `rate_limit_event`; agy `/usage`; estimator + `stale`; UC11/AC4 tested. |
+| Quota channels change/disappear | Mitigated | Codex app-server is official; Claude passive `rate_limit_event` + `claude -p /usage` (after v0.1.0); agy `/usage`; estimator + `stale`; UC11/AC4 tested. |
 | No hard interception in Claude Code | Accepted (spec: soft) | PreToolUse on `Agent` exists in current Claude Code; candidate for v0.2. |
 | Codex `SubagentStart` can't redirect | Resolved | UC3 via PreToolUse `deny_redirect` (multi-agent V2 encrypts spawn messages; proxy rewrite impossible). |
 | Antigravity streaming/hooks | Resolved technically; **ToS-restricted** | Experimental, off by default, read-only, explicit ToS acknowledgement; child user hooks cannot be disabled (disclosed by doctor). |
@@ -140,6 +140,21 @@ Taken during execution:
 23. Codex hard mode switch `hosts.codex.hard` (default true); Claude stays soft.
 24. Package `@dragonfly25/dispatch`, MIT — placeholders for the owner; npm publishing is a manual
     workflow (publish.yml), never triggered by tags.
+
+## After v0.1.0
+
+- **Claude quota reader `claude-usage`** (`claude -p /usage --safe-mode`, quota-free): real Claude
+  windows (`5h`, `7d`, per-model `7d:<model>`), including the user's interactive usage. Only the
+  official CLI command is used (spec §2.2 compliant; no OAuth endpoint, no credential access). The
+  local-usage breakdown in the output is discarded immediately.
+- **Deviation:** an optional Haiku fallback (default on, `quota.readers.claude-usage.llm_fallback`)
+  parses the trimmed header when the deterministic parser fails; it runs only with a reader budget
+  of at least 20 s (`status`, `doctor`), never on the routing path, spends a small amount of quota,
+  and its readings (`source: claude-usage+llm`) are kept only when grounded in the header text.
+- **Risk:** `/usage` is human-oriented text, not a stable format. Mitigation: tolerant parser,
+  fallback, UC11 behaviour (stale/estimate) when both fail; `doctor` reports the channel.
+- Per-model windows have no plan-table capacity (no published allowance): they are shown and count
+  in routing as real readings only, never estimated.
 
 ## Process notes
 

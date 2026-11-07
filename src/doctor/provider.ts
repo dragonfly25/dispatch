@@ -21,6 +21,7 @@ import type {
 } from "../core/contracts.js";
 import { type ResolvedBinary, type ResolveFs, resolveBinary } from "../platform/resolve.js";
 import type { ReaderHealth } from "../quota/provider.js";
+import { ClaudeUsageReader } from "../quota/readers/claude-usage.js";
 import { type DoctorLine, type DoctorStatus, mkLine } from "./types.js";
 
 /** Name of each adapter's executable. */
@@ -451,6 +452,14 @@ export function quotaLine(
     );
   }
   const windows = snapshot?.instances[inst.id]?.windows ?? [];
+  const ran = new Set(health.map((h) => h.readerId));
+  const names = readers
+    .filter((r) => ran.size === 0 || ran.has(r.id))
+    .map((r) =>
+      r instanceof ClaudeUsageReader
+        ? `${r.id} (LLM fallback ${r.llmFallback ? "on" : "off"}${r.zoneAssumed ? ", resets read in the local zone" : ""})`
+        : r.id,
+    );
   const summary = windows
     .filter((w) => w.usedPct !== null)
     .map((w) => `${w.kind} ${pct(w.usedPct)} used (${w.reliability})`)
@@ -459,6 +468,6 @@ export function quotaLine(
     inst,
     "ok",
     "quota",
-    `${readers.map((r) => r.id).join(", ")} healthy${summary ? `: ${summary}` : " (no readings yet)"}`,
+    `${names.join(", ")} healthy${summary ? `: ${summary}` : " (no readings yet)"}`,
   );
 }

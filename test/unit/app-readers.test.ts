@@ -68,6 +68,25 @@ describe("default quota readers", () => {
     }
   });
 
+  it("passes the claude-usage LLM fallback switch from the config (default on)", () => {
+    const sb = sandbox();
+    let ctx = ctxFor(sb);
+    try {
+      ctx.readers.all();
+      expect((spy.options as DefaultReadersOptions).claudeLlmFallback).toBe(true);
+    } finally {
+      ctx.close();
+    }
+    sb.global("version: 1\nquota:\n  readers:\n    claude-usage: { llm_fallback: false }\n");
+    ctx = ctxFor(sb);
+    try {
+      ctx.readers.all();
+      expect((spy.options as DefaultReadersOptions).claudeLlmFallback).toBe(false);
+    } finally {
+      ctx.close();
+    }
+  });
+
   it("an explicit registry wins over the defaults", () => {
     const sb = sandbox();
     const registry = new QuotaReaderRegistry();

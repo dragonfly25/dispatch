@@ -75,7 +75,10 @@ export interface ExecutionConfig {
   network: "off" | "on";
   worktree: { bootstrap: "none" | "symlink-readonly"; symlinkPaths: string[]; keep: boolean };
   timeouts: { defaultTaskMs: number };
-  quota: { cacheMinutes: number; readers: Record<string, { enabled: boolean }> };
+  quota: {
+    cacheMinutes: number;
+    readers: Record<string, { enabled?: boolean; llm_fallback?: boolean }>;
+  };
   /** How long `gc` keeps finished runs and history, in days (the loader always sets it; default 30). */
   retentionDays?: number;
 }

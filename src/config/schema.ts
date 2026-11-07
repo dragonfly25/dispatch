@@ -279,12 +279,23 @@ export const GlobalConfigFileSchema = z
             Id,
             z
               .object({
-                enabled: z.boolean().describe("`false` turns this instance's quota reader off."),
+                enabled: z
+                  .boolean()
+                  .optional()
+                  .describe("`false` turns this reader (or every reader of this instance) off."),
+                llm_fallback: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    "`claude-usage` only: when `/usage` output cannot be parsed, let Haiku extract the quota lines (only the quota header is sent; only in `status`/`doctor`; default true).",
+                  ),
               })
               .strict(),
           )
           .optional()
-          .describe("Quota readers by instance id; `enabled: false` turns a reader off."),
+          .describe(
+            "Quota readers by reader id (`claude-usage`, `claude-passive`, `codex-app-server`, `agy-usage`) or instance id; `enabled: false` turns a reader off.",
+          ),
       })
       .strict()
       .optional()

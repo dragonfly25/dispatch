@@ -118,7 +118,15 @@ export interface SnapshotOptions {
   now?: Date;
   /** Re-read every channel even when its cached reading is fresh (`doctor` checks channel health). */
   fresh?: boolean;
+  /**
+   * Per-reader-call timeout for this snapshot (default: the provider's `readerTimeoutMs`). Commands
+   * the user waits on (`status`, `doctor`) pass {@link INTERACTIVE_READER_TIMEOUT_MS}; routing never.
+   */
+  readerTimeoutMs?: number;
 }
+
+/** Reader timeout of commands the user waits on: long enough for slower fallbacks of a reader. */
+export const INTERACTIVE_READER_TIMEOUT_MS = 30_000;
 
 /** Outcome of the latest read attempt of one reader (for `doctor` / `status`). */
 export interface ReaderHealth {
@@ -142,6 +150,8 @@ interface Ctx {
   suspect: Map<string, Set<string> | "all">;
   /** Skip the cache check and always read. */
   fresh: boolean;
+  /** Per-reader-call timeout. */
+  timeoutMs: number;
 }
 
 /** Default {@link QuotaProvider}; see the module comment for the ladder. */
@@ -199,6 +209,7 @@ export class DefaultQuotaProvider implements QuotaProvider {
       readings: this.#loadReadings(),
       suspect: new Map(),
       fresh: options.fresh === true,
+      timeoutMs: options.readerTimeoutMs ?? this.#timeoutMs,
     };
     await Promise.all(instances.map((inst) => this.#refresh(inst, ctx)));
     ctx.readings = this.#loadReadings();
@@ -299,7 +310,7 @@ export class DefaultQuotaProvider implements QuotaProvider {
     );
     if (!ctx.fresh && live.length > 0 && live.every((w) => isFresh(w, ctx.now, this.#cfg))) return;
 
-    const outcomes = await Promise.all(readers.map((r) => runReader(r, inst, this.#timeoutMs)));
+    const outcomes = await Promise.all(readers.map((r) => runReader(r, inst, ctx.timeoutMs)));
     const health: ReaderHealth[] = [];
     const fetched = new Map<string, QuotaWindow>();
     let anyOk = false;

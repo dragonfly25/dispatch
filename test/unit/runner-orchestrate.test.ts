@@ -302,6 +302,7 @@ describe("executeTask", () => {
     const ctx = loadAppContext({ cwd: process.cwd(), env: tempHome().env });
     expect(disabledReaders({ ...ctx.config, execution: exec }, ctx.readers)).toEqual([
       "claude-passive",
+      "claude-usage",
       "codex-app-server",
     ]);
     ctx.close();

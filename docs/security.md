@@ -195,8 +195,16 @@ module.
 
 - **Mitigation.**
   - Dispatch never opens credential files.
-  - Quota comes from official channels: Claude's passive `rate_limit_event`, the Codex
-    app-server, and agy `/usage`.
+  - Quota comes from official channels: Claude's passive `rate_limit_event` and the official
+    `claude -p /usage` command (spec §2.2: no undocumented endpoint, no credential access; the CLI
+    uses its own login), the Codex app-server, and agy `/usage`.
+  - `claude -p /usage` also prints a breakdown of local sessions (subagent names, request counts).
+    The reader cuts the output to the `Current …` quota lines as soon as the child exits; the
+    breakdown is never stored, logged or sent to a model. Only if those lines cannot be parsed, and
+    only in `status`/`doctor` (never while routing), the trimmed header is sent to Haiku
+    (`claude -p --model haiku --tools ""`, one turn, no session file), which spends a little Claude
+    quota; its answer is dropped unless every number and time appears literally in that header.
+    Turn it off with `quota.readers.claude-usage.llm_fallback: false`.
   - Every string bound for SQLite, the run log or stdout is redacted, using both patterns and the
     withheld env values.
   - The summary is redacted and length-capped.

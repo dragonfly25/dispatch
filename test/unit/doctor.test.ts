@@ -189,6 +189,24 @@ describe("doctor: checks", () => {
     expect(lineOf(report, "codex.login").status).toBe("ok");
   });
 
+  it("[UC11] claude.quota reports the /usage reader, its LLM fallback switch and a broken channel", async () => {
+    h = doctorHarness();
+    let q = lineOf((await h.report()).report, "claude.quota");
+    expect(q.status).toBe("ok");
+    expect(q.message).toContain("claude-usage (LLM fallback on)");
+    expect(q.message).toContain("7d 34% used (real)");
+
+    h.cleanup();
+    h = doctorHarness({ "claude:usage": { variant: "unauthenticated" } });
+    h.config("version: 1\nquota:\n  readers:\n    claude-usage: { llm_fallback: false }\n");
+    const { code, report } = await h.report();
+    expect(code).toBe(4);
+    q = lineOf(report, "claude.quota");
+    expect(q.status).toBe("fail");
+    expect(q.message).toContain("claude-usage [cli:/usage]: not authenticated");
+    expect(h.fakes.readLog({ key: "usage-llm" })).toEqual([]);
+  });
+
   it("[UC11] a reader switched off in the config is not a failure", async () => {
     h = doctorHarness({ "codex:app-server": { variant: "changed_format" } });
     h.config("version: 1\nquota:\n  readers:\n    codex: { enabled: false }\n");

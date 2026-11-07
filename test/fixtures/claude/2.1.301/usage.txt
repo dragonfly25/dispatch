@@ -1,0 +1,10 @@
+You are currently using your subscription to power your Claude Code usage
+
+Current week (all models): 34% used · resets Nov 11 at 10am (Europe/Tirane)
+Current week (Fable): 8% used · resets Nov 11 at 10am (Europe/Tirane)
+
+What's contributing to your limits usage?
+Approximate, based on local sessions on this machine — PRIVATE-BREAKDOWN-MARKER
+Last 24h · 1234 requests · 5 sessions
+  100% of your usage came from subagent-heavy sessions
+  Top subagents: zebra-crawler-secret 61%, quokka-indexer-secret 39%

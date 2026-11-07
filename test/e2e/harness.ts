@@ -39,6 +39,14 @@ export const EDIT_CODEX: FakeScenarioMap = {
 export const MATH_JS = "function add(a, b) {\n  return a + b;\n}\n";
 
 /** Global config enabling the three providers (antigravity is opt-in and read-only). */
+/**
+ * Fake `claude -p /usage` answering "not logged in": Claude quota stays unknown, so routing
+ * prefers the instances with a known quota (as before the claude-usage reader existed).
+ */
+export const CLAUDE_QUOTA_UNREAD: FakeScenarioMap = {
+  "claude:usage": { variant: "unauthenticated" },
+};
+
 export const THREE_PROVIDERS = `providers:
   claude: { plan: max }
   codex: { plan: plus }

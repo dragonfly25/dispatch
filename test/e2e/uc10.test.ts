@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CLAUDE_QUOTA_UNREAD,
   createWorld,
   EDIT_CODEX,
   parseJson,
@@ -30,7 +31,10 @@ describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framewo
     // Even when the test itself runs inside a Claude Code or Codex session, the script's own
     // environment has no host marker (it scrubs them, as a framework launched from cron would not
     // have them).
-    const w = createWorld({ global: THREE_PROVIDERS, scenarios: EDIT_CODEX });
+    const w = createWorld({
+      global: THREE_PROVIDERS,
+      scenarios: { ...EDIT_CODEX, ...CLAUDE_QUOTA_UNREAD },
+    });
     const before = snapshotTree(w.repo.dir);
     const r = w.exec("python3", ["-I", script, process.execPath, bundles().cli, w.repo.dir], {
       env: { CLAUDECODE: "1", CODEX_THREAD_ID: "leaked-from-the-test-runner" },

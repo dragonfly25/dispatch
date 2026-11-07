@@ -125,13 +125,17 @@ const windowOf = (
 describe("readers wired into the quota core [UC11]", () => {
   it("registers the readers by adapter id", () => {
     const { readers } = setup();
-    expect(readers.forAdapter("claude").map((r) => r.id)).toEqual(["claude-passive"]);
+    expect(readers.forAdapter("claude").map((r) => r.id)).toEqual([
+      "claude-passive",
+      "claude-usage",
+    ]);
     expect(readers.forAdapter("codex").map((r) => r.id)).toEqual(["codex-app-server"]);
     expect(readers.forAdapter("antigravity").map((r) => r.id)).toEqual(["agy-usage"]);
     expect(readers.forAdapter("fake")).toEqual([]);
     const minimal = defaultReaders({ clock, spawner: new NodeSpawner(), store });
     expect(minimal.all().map((r) => r.id)).toEqual([
       "claude-passive",
+      "claude-usage",
       "codex-app-server",
       "agy-usage",
     ]);
@@ -141,7 +145,7 @@ describe("readers wired into the quota core [UC11]", () => {
       store,
       reliability: { cacheMinutes: 1 },
     });
-    expect(tuned.all()).toHaveLength(3);
+    expect(tuned.all()).toHaveLength(4);
   });
 
   it("codex ok: real windows in the snapshot, healthy reader", async () => {

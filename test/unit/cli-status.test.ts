@@ -71,6 +71,20 @@ describe("status", () => {
     expect(r.out).toMatch(/5h +\[\.{10}\] +unknown +reset unknown +\[unknown\]/);
   });
 
+  it("the host marker says interactive usage is included once claude-usage has read it", async () => {
+    const h = opsHarness();
+    h.sb.global(THREE_PROVIDERS);
+    h.store.recordQuotaReading(
+      "claude",
+      reading({ kind: "7d", usedPct: 34, source: "claude-usage" }),
+    );
+    const r = await h.run(["status"], { env: HOST });
+    expect(r.out).toContain(
+      "claude  (claude)  enabled  pool subscription  plan max5x  (host — includes interactive usage)",
+    );
+    expect(r.out).toMatch(/7d +\[[#-]{10}\] +66% remaining .*\[real\] +source claude-usage/);
+  });
+
   it("without a host nothing is marked as the host; a disabled agy is listed but not read", async () => {
     const h = opsHarness();
     const r = await h.run(["status"]);
