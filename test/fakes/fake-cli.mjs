@@ -684,6 +684,18 @@ async function main() {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([k]) => !k.startsWith("FAKE_")),
   );
+  let signalReceived = null;
+  process.on("exit", (code) =>
+    writeLog("end", { endedAt: new Date().toISOString(), exitCode: code, signalReceived }),
+  );
+  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    if (sig === "SIGTERM" && entry?.scenario === "hang_ignore_term") continue;
+    process.on(sig, () => {
+      signalReceived = sig;
+      process.exit(128 + os.constants.signals[sig]);
+    });
+  }
+
   writeLog("start", {
     cli,
     kind,
@@ -699,18 +711,6 @@ async function main() {
     pgid: currentPgid(),
     startedAt: new Date().toISOString(),
   });
-
-  let signalReceived = null;
-  process.on("exit", (code) =>
-    writeLog("end", { endedAt: new Date().toISOString(), exitCode: code, signalReceived }),
-  );
-  for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
-    if (sig === "SIGTERM" && entry?.scenario === "hang_ignore_term") continue;
-    process.on(sig, () => {
-      signalReceived = sig;
-      process.exit(128 + os.constants.signals[sig]);
-    });
-  }
 
   if (kind === "subcommand") return runSubcommand(key, entry ?? {});
 
