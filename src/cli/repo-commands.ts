@@ -8,11 +8,14 @@ import { globalConfigPath, type PathEnv } from "../config/paths.js";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import { installRepo, requireRepo, uninstallRepo } from "../install/repo.js";
+import type { AnswerFlags } from "../setup/answers.js";
 import type { CliIo } from "./program.js";
-import { runSetup, type SetupCommandDeps } from "./setup.js";
+import { addAnswerOptions, runSetup, type SetupCommandDeps } from "./setup.js";
 
 /** What `ensureGlobalSetup` receives. */
 export interface SetupContext {
+  /** The answer flags of `install` (--host, --plan, --autonomy, ...), handed to the wizard. */
+  answers: AnswerFlags;
   env: PathEnv;
   io: CliIo;
   /** Interactive terminal available (the real `setup` may ask questions). */
@@ -62,7 +65,11 @@ function setupRunner(setup: SetupCommandDeps): RepoCommandDeps["ensureGlobalSetu
   return async (ctx) => {
     if (existsSync(globalConfigPath(ctx.env))) return true;
     ctx.io.out("No global Dispatch setup yet: running `dispatch setup` first.\n");
-    await runSetup(ctx.io, setup, { yes: ctx.yes, nonInteractive: ctx.nonInteractive });
+    await runSetup(ctx.io, setup, {
+      ...ctx.answers,
+      yes: ctx.yes,
+      nonInteractive: ctx.nonInteractive,
+    });
     return true;
   };
 }
@@ -78,7 +85,7 @@ function defaultDeps(setup: SetupCommandDeps): RepoCommandDeps {
   };
 }
 
-interface InstallFlags {
+interface InstallFlags extends Omit<AnswerFlags, "profile"> {
   nonInteractive?: boolean;
   profile?: string;
   unspecifiedModel?: string;
@@ -128,7 +135,7 @@ export function registerRepoCommands(
     };
   };
 
-  program
+  const install = program
     .command("install")
     .description("create .dispatch/ (config, profiles, mappings) in the current git repository")
     .option("--non-interactive", "never prompt; use flags and defaults")
@@ -137,44 +144,55 @@ export function registerRepoCommands(
     .option("--yes", "do not ask for confirmation")
     .option("--no-trust", "do not trust the new policy files (run `dispatch trust` later)")
     .option("--force", "use an existing .dispatch/, creating only the files that are missing")
-    .option("--skip-setup", "do not run `dispatch setup` when the global config is missing")
-    .action(async (flags: InstallFlags) => {
-      const confirm = confirmFor(flags.yes || flags.nonInteractive);
-      const interactive = deps.isInteractive() && !flags.nonInteractive;
-      const cwd = deps.cwd();
-      requireRepo(cwd);
-      const setupCtx = {
-        env: deps.env,
-        io,
-        interactive,
-        yes: Boolean(flags.yes),
-        nonInteractive: Boolean(flags.nonInteractive),
-      };
-      if (!flags.skipSetup && !(await deps.ensureGlobalSetup(setupCtx))) {
-        throw new DispatchError("global setup missing", ExitCode.USAGE, "install.no_setup");
-      }
-      const result = await installRepo({
-        cwd,
-        env: deps.env,
-        now: deps.now(),
-        say,
+    .option("--skip-setup", "do not run `dispatch setup` when the global config is missing");
+  // The answer flags only matter when `install` has to run `setup` first (no global config yet).
+  addAnswerOptions(install);
+  install.action(async (flags: InstallFlags) => {
+    const confirm = confirmFor(flags.yes || flags.nonInteractive);
+    const interactive = deps.isInteractive() && !flags.nonInteractive;
+    const cwd = deps.cwd();
+    requireRepo(cwd);
+    const setupCtx: SetupContext = {
+      answers: {
+        answers: flags.answers,
+        host: flags.host,
         profile: flags.profile,
-        unspecifiedModel: flags.unspecifiedModel,
-        force: flags.force,
-        trust: flags.trust,
-        allowNewGlobalConfig: !flags.skipSetup,
-        confirm,
-      });
-      if (result.status === "aborted") return;
-      refresh(cwd);
-      say(
-        `\nInstalled: ${result.created.length} file(s) in .dispatch/${result.trusted ? " (trusted)" : ""}.\n` +
-          "Next steps:\n" +
-          "  dispatch doctor   check the CLIs, logins and hooks\n" +
-          "  dispatch status   see the quota of each provider\n" +
-          "  git add .dispatch && git commit   share the policy with your team\n",
-      );
+        autonomy: flags.autonomy,
+        plan: flags.plan,
+        enableAntigravity: flags.enableAntigravity,
+        acceptAgyTerms: flags.acceptAgyTerms,
+      },
+      env: deps.env,
+      io,
+      interactive,
+      yes: Boolean(flags.yes),
+      nonInteractive: Boolean(flags.nonInteractive),
+    };
+    if (!flags.skipSetup && !(await deps.ensureGlobalSetup(setupCtx))) {
+      throw new DispatchError("global setup missing", ExitCode.USAGE, "install.no_setup");
+    }
+    const result = await installRepo({
+      cwd,
+      env: deps.env,
+      now: deps.now(),
+      say,
+      profile: flags.profile,
+      unspecifiedModel: flags.unspecifiedModel,
+      force: flags.force,
+      trust: flags.trust,
+      allowNewGlobalConfig: !flags.skipSetup,
+      confirm,
     });
+    if (result.status === "aborted") return;
+    refresh(cwd);
+    say(
+      `\nInstalled: ${result.created.length} file(s) in .dispatch/${result.trusted ? " (trusted)" : ""}.\n` +
+        "Next steps:\n" +
+        "  dispatch doctor   check the CLIs, logins and hooks\n" +
+        "  dispatch status   see the quota of each provider\n" +
+        "  git add .dispatch && git commit   share the policy with your team\n",
+    );
+  });
 
   return {
     uninstall: async (_io, opts) => {

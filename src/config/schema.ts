@@ -257,6 +257,9 @@ export const GlobalConfigFileSchema = z
       .record(Id, ProviderFileSchema)
       .optional()
       .describe("Provider instances by id, merged over the built-in claude/codex/antigravity."),
+    main_host: Id.optional().describe(
+      "Informational: the client you mainly use as host (claude-code | codex), recorded by `dispatch setup`; host-independent commands may use it as a default.",
+    ),
     ...securityKeys,
     ...ordinaryKeys,
     retention_days: z
