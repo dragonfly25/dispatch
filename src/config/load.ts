@@ -76,8 +76,8 @@ export interface ExecutionConfig {
   worktree: { bootstrap: "none" | "symlink-readonly"; symlinkPaths: string[]; keep: boolean };
   timeouts: { defaultTaskMs: number };
   quota: { cacheMinutes: number; readers: Record<string, { enabled: boolean }> };
-  /** How long `gc` keeps finished runs and history, in days. */
-  retentionDays: number;
+  /** How long `gc` keeps finished runs and history, in days (the loader always sets it; default 30). */
+  retentionDays?: number;
 }
 
 export interface LoadOptions {

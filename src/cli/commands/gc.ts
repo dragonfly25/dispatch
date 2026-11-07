@@ -5,6 +5,7 @@
  */
 import type { Command } from "commander";
 import type { AppContext } from "../../app/context.js";
+import { DEFAULT_RETENTION_DAYS } from "../../config/index.js";
 import { WorktreeSandbox } from "../../sandbox/worktree.js";
 import { LEASE_STALE_MS, type LeaseRecord, type PruneCounts } from "../../state/store.js";
 import { formatLocal, parseDuration } from "../time.js";
@@ -31,7 +32,7 @@ export async function runGc(
 ): Promise<GcReport> {
   const now = ctx.clock.now();
   const store = ctx.store;
-  const retentionDays = ctx.config.execution.retentionDays;
+  const retentionDays = ctx.config.execution.retentionDays ?? DEFAULT_RETENTION_DAYS;
 
   // Unknown runs (no record) count as terminal: nothing can be running behind them.
   const terminal = new Map<string, boolean>();
