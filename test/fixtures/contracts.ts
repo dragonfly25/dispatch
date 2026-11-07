@@ -1,11 +1,14 @@
 /** Canonical sample values for every core contract; reused by later WPs' tests. */
 import type {
+  AdapterCapabilities,
   AdapterOutcome,
   Decision,
   DecisionInput,
   DecisionRecord,
   EditOp,
   Invocation,
+  NormalizedEvent,
+  ProbeResult,
   QuotaSnapshot,
   RunRecord,
   RunResult,
@@ -95,8 +98,39 @@ export const adapterOutcome: AdapterOutcome = {
     costUsd: 0,
     raw: { any: "thing" },
   },
+  deniedActions: [],
   durationMs: 4200,
 };
+
+/** agy-style run: SUCCESS on the wire, but the only useful action was denied. */
+export const deniedOutcome: AdapterOutcome = {
+  outcome: "failed",
+  summary: "",
+  nativeError: "denied: write_file",
+  deniedActions: ["write_file"],
+  durationMs: 2831,
+};
+
+/** Codex usage-limit failure (docs/spikes/codex.md). */
+export const quotaOutcome: AdapterOutcome = {
+  outcome: "quota_exhausted",
+  summary: "",
+  resetAt: "2026-01-01T15:05:00.000Z",
+  nativeError: "You\u2019ve hit your usage limit. Try again at 3:05 PM.",
+  deniedActions: [],
+  quotaSignal: {
+    source: "codex.turn_failed.usage_limit",
+    raw: "You\u2019ve hit your usage limit. Try again at 3:05 PM.",
+  },
+  durationMs: 900,
+};
+
+export const events: NormalizedEvent[] = [
+  { kind: "reading", ts: T0, path: "src/math.js" },
+  { kind: "editing", ts: T0, path: "src/math.js" },
+  { kind: "denied", ts: T0, detail: "write_file hello.txt" },
+  { kind: "done", ts: T0 },
+];
 
 export const runResult: RunResult = {
   schemaVersion: 1,
@@ -152,15 +186,102 @@ export const runRecord: RunRecord = {
 
 export const invocation: Invocation = {
   binary: "/usr/local/bin/codex",
-  argv: ["exec", "--json", "-"],
+  argv: [
+    "exec",
+    "--json",
+    "--ephemeral",
+    "-c",
+    "agents.enabled=false",
+    "-c",
+    'projects={"/tmp/wt"={trust_level="untrusted"},"/tmp/repo"={trust_level="untrusted"}}',
+    "-o",
+    "/tmp/run/last.txt",
+    "-",
+  ],
   env: { PATH: "/usr/bin:/bin", DISPATCH_DEPTH: "1" },
   cwd: "/tmp/wt",
   stdin: "## Task data\n...",
+  outputFile: "/tmp/run/last.txt",
+  redactArgvIndexes: [],
+  sideEffectGuards: ["codex-project-trust-untrusted", "codex-agents-disabled"],
+};
+
+/** agy takes the prompt in argv (`-p=<prompt>`), so stdin is null and argv[0] is redacted. */
+export const argvInvocation: Invocation = {
+  binary: "/opt/homebrew/bin/agy",
+  argv: ["-p=## Task data\n...", "--output-format", "stream-json", "--sandbox"],
+  env: { PATH: "/usr/bin:/bin", DISPATCH_DEPTH: "1" },
+  cwd: "/tmp/wt",
+  stdin: null,
+  redactArgvIndexes: [0],
+  sideEffectGuards: ["agy-no-skip-permissions"],
 };
 
 export const editOp: EditOp = {
-  file: "~/.codex/hooks.json",
+  file: "/home/u/.codex/hooks.json",
   kind: "json-entry",
   signature: "dispatch:SessionStart",
   content: '{"command":"..."}',
+  trustGrant: null,
+};
+
+export const rulesEditOp: EditOp = {
+  file: "/home/u/.codex/rules/dispatch.rules",
+  kind: "rules-file",
+  signature: "dispatch:rules",
+  content: "prefix_rule(...)\n",
+  mode: "0644",
+  sha256: "0".repeat(64),
+  trustGrant:
+    "Lets /home/u/.dispatch/bin/dispatch run|wait|cancel|status run outside the Codex sandbox",
+};
+
+export const codexCaps: AdapterCapabilities = {
+  id: "codex",
+  version: "0.1.0",
+  cliRange: ">=0.167.0 <0.168.0",
+  streaming: true,
+  autonomy: ["read-only", "worktree"],
+  quotaChannel: "passive+reader",
+  pool: "subscription",
+  experimental: false,
+  promptChannel: "stdin",
+  isolation: {
+    userHooks: "disabled",
+    userPlugins: "disabled",
+    userMcp: "disabled",
+    projectConfig: "disabled",
+  },
+  sandbox: "os",
+  childNetwork: "none",
+};
+
+export const agyCaps: AdapterCapabilities = {
+  id: "antigravity",
+  version: "0.1.0",
+  cliRange: ">=1.5.2 <1.6.0",
+  streaming: true,
+  autonomy: ["read-only"],
+  quotaChannel: "reader",
+  pool: "subscription",
+  experimental: true,
+  promptChannel: "argv",
+  isolation: {
+    userHooks: "not_disableable",
+    userPlugins: "not_disableable",
+    userMcp: "not_disableable",
+    projectConfig: "not_disableable",
+  },
+  sandbox: "permission-only",
+  childNetwork: "none",
+};
+
+export const probeResult: ProbeResult = {
+  binaryPath: "/opt/homebrew/bin/codex",
+  realpath: "/opt/homebrew/Caskroom/codex/0.167.0/codex",
+  version: "0.167.0",
+  flags: ["--json", "--ephemeral", "--ignore-user-config"],
+  features: ["hooks", "plugins", "apps", "memories", "multi_agent"],
+  loggedIn: true,
+  outsideCliRange: false,
 };

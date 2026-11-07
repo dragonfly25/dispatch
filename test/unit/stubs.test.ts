@@ -1,7 +1,13 @@
 import { stat } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import * as fx from "../fixtures/contracts.js";
-import { FakeClock, FakeSandbox, MemoryStateStore, StubQuotaProvider } from "../stubs/index.js";
+import {
+  FakeClock,
+  FakeSandbox,
+  MemoryStateStore,
+  ScriptedSpawner,
+  StubQuotaProvider,
+} from "../stubs/index.js";
 
 describe("test stubs", () => {
   it("FakeClock advances wall and monotonic time; set() moves wall time only", () => {
@@ -67,5 +73,26 @@ describe("test stubs", () => {
     expect(sandbox.kept).toEqual([b.path]);
     expect((await stat(b.path)).isDirectory()).toBe(true);
     await sandbox.dispose(b.path, false);
+  });
+
+  it("ScriptedSpawner records requests and replays scripts in order", async () => {
+    const spawner = new ScriptedSpawner([
+      { stdout: ["a"], stderr: ["b"] },
+      { result: { exitCode: 3 } },
+    ]);
+    const lines: string[] = [];
+    const req = {
+      binary: "/bin/x",
+      argv: [],
+      env: {},
+      cwd: "/tmp",
+      onLine: (s: "stdout" | "stderr", l: string) => lines.push(`${s}:${l}`),
+    };
+    expect(await spawner.spawn(req)).toEqual({ exitCode: 0, signal: null, timedOut: false });
+    expect((await spawner.spawn(req)).exitCode).toBe(3);
+    expect((await spawner.spawn({ ...req, onLine: undefined })).exitCode).toBe(3);
+    expect(lines).toEqual(["stdout:a", "stderr:b"]);
+    expect(spawner.requests).toHaveLength(3);
+    expect((await new ScriptedSpawner([]).spawn(req)).exitCode).toBe(0);
   });
 });
