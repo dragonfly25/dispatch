@@ -2,7 +2,7 @@
 
 Maintained by the lead engineer after every merge. Plan: [docs/PLAN.md](docs/PLAN.md) (incl. "Amendments after WP1 spike").
 
-_Last update: 2026-11-07_
+_Last update: 2026-11-07 (after PR #21)_
 
 ## Work packages
 
@@ -11,16 +11,32 @@ _Last update: 2026-11-07_
 | WP0 | Bootstrap, CI, core contracts | Opus · medium | ✅ merged | #1 |
 | WP0b | Shared RoutingConfig contract (lead) | Opus (lead) | ✅ merged | #3 |
 | WP1 | Live spike + contract freeze | Opus · medium | ✅ merged | #2, #4 |
-| WP2 | Fake CLI harness | Sonnet · high | 🔨 in progress | |
-| WP3 | Launcher, binary resolution, host detection | Sonnet · high | 🔎 in review | #5 |
-| WP4 | Config, layering, trust | Opus · medium | 🔨 in progress | |
-| WP5 | Router + explain | Opus · medium | 🔨 in progress | |
-| WP6 | State store | Sonnet · high | 🔨 in progress | |
-| WP7 | Worktree sandbox | Sonnet · high | 🔨 in progress | |
-| WP8 | Host prototype (real CLIs) | Sonnet · high | 🔨 in progress | |
-| WP9–WP31 | — | see plan §4 | ⏳ pending | |
+| WP2 | Fake CLI harness | Sonnet · high | ✅ merged | #9, #22 |
+| WP3 | Launcher, binary resolution, host detection | Sonnet · high | ✅ merged | #5 |
+| WP4 | Config, layering, trust | Opus · medium | ✅ merged | #10 |
+| WP5 | Router + explain | Opus · medium | ✅ merged | #8 |
+| WP6 | State store | Sonnet · high | ✅ merged | #7 |
+| WP7 | Worktree sandbox | Sonnet · high | ✅ merged | #6 |
+| WP8 | Host prototype (real CLIs) | Sonnet · high | ✅ merged | #11 |
+| WP9 | Validate, presets, model tables | Sonnet · high | ✅ merged | #18 |
+| WP10 | Shadow decisions + compare | Sonnet · high | ✅ merged | #14 |
+| WP11 | Quota core | Sonnet · high | ✅ merged | #13 |
+| WP12 | Patch pipeline | Opus · medium | ✅ merged | #12 |
+| WP13 | Process supervisor | Sonnet · high | 🔧 fixing macOS CI (orphan after SIGINT) | #19 |
+| WP14 | Claude adapter | Opus · medium | ✅ merged | #17 |
+| WP15 | Codex adapter | Opus · medium | ✅ merged | #15 |
+| WP16 | Antigravity adapter (read-only) | Sonnet · high | ✅ merged | #16 |
+| WP17 | Setup framework + hook entry | Opus · medium | ✅ merged | #21 |
+| WP18 | Quota readers | Sonnet · high | ✅ merged | #20 |
+| WP19 | Runner core | Opus · medium | 🔨 in progress | |
+| WP20 | Composition root + CLI read commands | Sonnet · high | 🔨 in progress | |
+| WP21 | Repo install/uninstall | Sonnet · high | 🔎 rebasing onto WP17 | #23 |
+| WP22 | Claude Code host (soft) | Sonnet · high | 🔨 in progress | |
+| WP23–WP31 | — | see plan §4 | ⏳ pending | |
 
 Escalations Sonnet → Opus: none so far.
+
+CI hygiene fixes by the lead: biome excludes raw fixtures and Markdown; fake CLI signal race on macOS (#22).
 
 ## Acceptance checklist (spec §12)
 
@@ -28,12 +44,12 @@ Escalations Sonnet → Opus: none so far.
 |---|---|
 | UC1–UC14 | ⏳ not yet testable (core packages in progress) |
 | AC1 automated UC tests | ⏳ |
-| AC2 install+uninstall empty diff | ⏳ |
+| AC2 install+uninstall empty diff | 🟡 global part byte-identical (WP17); repo part in PR #23 |
 | AC3 every decision reproducible + logged | ⏳ |
 | AC4 works with all quota readers disabled | ⏳ |
-| AC5 invisible to collaborators | ⏳ (hook guard tested in WP3) |
+| AC5 invisible to collaborators | 🟡 hook guard + silent hook entry tested (WP3, WP17); e2e in WP29 |
 | AC6 English docs | ⏳ |
-| AC7 no credentials copied/logged/sent | ⏳ |
+| AC7 no credentials copied/logged/sent | 🟡 redaction canaries (WP6), patch secret scan (WP12), readers never open credential files (WP18); suite in WP28 |
 
 ## Open risks (spec §12 table + new)
 
@@ -64,3 +80,6 @@ The 17 deviations in plan §7 apply. Additional ones taken during execution:
 ## Process notes
 
 - Repo-local git `user.email` set to the GitHub noreply address (pushes with the private email are rejected by GitHub).
+6. Antigravity read-only runs: the adapter maps SUCCESS-with-denied-actions to `failed`; the runner (WP19) reports read-only tasks with a non-empty answer as `success` with the denied actions logged, since text-only output is the expected result.
+7. Delegated-run artifacts (patch, events log) live in `<repo>/.dispatch/state/runs/<id>/` (gitignored by `.dispatch/.gitignore`) so host sessions can read the patch without extra permissions (WP8 finding); fallback `~/.dispatch/runs/<id>/` outside an installed repo.
+8. Claude plugin uninstall via the `claude` CLI leaves empty settings keys; `uninstall --global` removes exactly the keys Dispatch's install added (pre-install snapshot), restoring `~/.claude/settings.json` byte-for-byte.
