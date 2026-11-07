@@ -1,86 +1,147 @@
 # Dispatch — Project status
 
-Maintained by the lead engineer after every merge. Plan: [docs/PLAN.md](docs/PLAN.md) (incl. "Amendments after WP1 spike").
+Maintained by the lead engineer after every merge. Plan: [docs/PLAN.md](docs/PLAN.md) (including the
+"Amendments after WP1 spike" section).
 
-_Last update: 2026-11-07 (after PR #21)_
+_Last update: 2026-11-07 — release v0.1.0_
 
 ## Work packages
 
-| WP | Title | Model · effort | State | PR |
-|---|---|---|---|---|
-| WP0 | Bootstrap, CI, core contracts | Opus · medium | ✅ merged | #1 |
-| WP0b | Shared RoutingConfig contract (lead) | Opus (lead) | ✅ merged | #3 |
-| WP1 | Live spike + contract freeze | Opus · medium | ✅ merged | #2, #4 |
-| WP2 | Fake CLI harness | Sonnet · high | ✅ merged | #9, #22 |
-| WP3 | Launcher, binary resolution, host detection | Sonnet · high | ✅ merged | #5 |
-| WP4 | Config, layering, trust | Opus · medium | ✅ merged | #10 |
-| WP5 | Router + explain | Opus · medium | ✅ merged | #8 |
-| WP6 | State store | Sonnet · high | ✅ merged | #7 |
-| WP7 | Worktree sandbox | Sonnet · high | ✅ merged | #6 |
-| WP8 | Host prototype (real CLIs) | Sonnet · high | ✅ merged | #11 |
-| WP9 | Validate, presets, model tables | Sonnet · high | ✅ merged | #18 |
-| WP10 | Shadow decisions + compare | Sonnet · high | ✅ merged | #14 |
-| WP11 | Quota core | Sonnet · high | ✅ merged | #13 |
-| WP12 | Patch pipeline | Opus · medium | ✅ merged | #12 |
-| WP13 | Process supervisor | Sonnet · high | 🔧 fixing macOS CI (orphan after SIGINT) | #19 |
-| WP14 | Claude adapter | Opus · medium | ✅ merged | #17 |
-| WP15 | Codex adapter | Opus · medium | ✅ merged | #15 |
-| WP16 | Antigravity adapter (read-only) | Sonnet · high | ✅ merged | #16 |
-| WP17 | Setup framework + hook entry | Opus · medium | ✅ merged | #21 |
-| WP18 | Quota readers | Sonnet · high | ✅ merged | #20 |
-| WP19 | Runner core | Opus · medium | 🔨 in progress | |
-| WP20 | Composition root + CLI read commands | Sonnet · high | 🔨 in progress | |
-| WP21 | Repo install/uninstall | Sonnet · high | 🔎 rebasing onto WP17 | #23 |
-| WP22 | Claude Code host (soft) | Sonnet · high | 🔨 in progress | |
-| WP23–WP31 | — | see plan §4 | ⏳ pending | |
+All work packages are merged. Model · effort is the development sub-agent profile used.
 
-Escalations Sonnet → Opus: none so far.
+| WP | Title | Model · effort | PR |
+|---|---|---|---|
+| WP0 | Bootstrap, CI, core contracts | Opus · medium | #1 |
+| WP0b | Shared RoutingConfig contract (lead) | Opus (lead) | #3 |
+| WP1 | Live spike + contract freeze | Opus · medium | #2, #4 |
+| WP2 | Fake CLI harness | Sonnet · high | #9, #22 |
+| WP3 | Launcher, binary resolution, host detection | Sonnet · high | #5 |
+| WP4 | Config, layering, trust | Opus · medium | #10 |
+| WP5 | Router + explain | Opus · medium | #8 |
+| WP6 | State store | Sonnet · high | #7 |
+| WP7 | Worktree sandbox | Sonnet · high | #6 |
+| WP8 | Host prototype (real CLIs) | Sonnet · high | #11 |
+| WP9 | Validate, presets, model tables | Sonnet · high | #18 |
+| WP10 | Shadow decisions + compare | Sonnet · high | #14 |
+| WP11 | Quota core | Sonnet · high | #13 |
+| WP12 | Patch pipeline | Opus · medium | #12 |
+| WP13 | Process supervisor | Sonnet · high | #19 |
+| WP14 | Claude adapter | Opus · medium | #17 |
+| WP15 | Codex adapter | Opus · medium | #15 |
+| WP16 | Antigravity adapter (read-only) | Sonnet · high | #16 |
+| WP17 | Setup framework + hook entry | Opus · medium | #21 |
+| WP17b | Setup wizard (global config) — added during execution | Sonnet · high | #34 |
+| WP18 | Quota readers | Sonnet · high | #20 |
+| WP19 | Runner core | Opus · medium | #26 |
+| WP20 | Composition root + CLI read commands | Sonnet · high | #24 |
+| WP21 | Repo install/uninstall | Sonnet · high | #23 |
+| WP22 | Claude Code host (soft) | Sonnet · high | #25 |
+| WP23 | Runner multi: fanout, detach/wait/cancel | Opus · medium | #33 |
+| WP24 | CLI run + hook-cache writer | Sonnet · high | #29 |
+| WP25 | CLI status/logs/gc | Sonnet · high | #28 |
+| WP26 | doctor + --live | Sonnet · high | #30 |
+| WP27 | Codex host (hard, deny_redirect) | Opus · medium | #35 |
+| WP28 | Security suite + threat model | Opus · medium | #31 |
+| WP29 | Acceptance suite + manual tests | Sonnet · high | #37 |
+| WP30 | Docs (configuration, guides, README) | Sonnet · high | #27, #32 |
+| — | Fixes from live verification | Sonnet · high | #36 |
+| WP31 | Release v0.1.0 (lead) | Opus (lead) | #38 |
 
-CI hygiene fixes by the lead: biome excludes raw fixtures and Markdown; fake CLI signal race on macOS (#22).
+Escalations Sonnet → Opus: none were needed. Lead-side CI hygiene fixes: biome excludes raw fixtures and
+Markdown; macOS signal race in the fake CLI (#22); merge-train rebases of parallel PRs.
 
-## Acceptance checklist (spec §12)
+## Acceptance checklist (spec §12) — `pnpm acceptance` on main
 
-| Item | State |
+| Item | Result |
 |---|---|
-| UC1–UC14 | ⏳ not yet testable (core packages in progress) |
-| AC1 automated UC tests | ⏳ |
-| AC2 install+uninstall empty diff | 🟡 global part byte-identical (WP17); repo part in PR #23 |
-| AC3 every decision reproducible + logged | ⏳ |
-| AC4 works with all quota readers disabled | ⏳ |
-| AC5 invisible to collaborators | 🟡 hook guard + silent hook entry tested (WP3, WP17); e2e in WP29 |
-| AC6 English docs | ⏳ |
-| AC7 no credentials copied/logged/sent | 🟡 redaction canaries (WP6), patch secret scan (WP12), readers never open credential files (WP18); suite in WP28 |
+| UC1 first setup | PASS (88/88 tagged tests) |
+| UC2 soft delegation from Claude Code | PASS (67/67) + **live** (real Claude host → real Codex) |
+| UC3 hard interception from Codex | PASS (58/58) + **live** (real Codex host → real Claude; see notes) |
+| UC4 quota fallback | PASS (66/66) |
+| UC5 pinned task | PASS (19/19) |
+| UC6 unspecified model | PASS (14/14) |
+| UC7 second opinion | PASS (8/8) |
+| UC8 profile experimentation | PASS (18/18) |
+| UC9 collaborator without Dispatch | PASS (84/84) |
+| UC10 no host | PASS (19/19) |
+| UC11 broken quota channel | PASS (48/48) |
+| UC12 second account / API pool | PASS (16/16); live part documented in docs/manual-tests/UC12.md |
+| UC13 timeout and non-applicable patch | PASS (72/72) |
+| UC14 uninstall | PASS (35/35) |
+| AC1 UC1–UC14 automated + manual documented | PASS |
+| AC2 install + uninstall leave the repo identical | PASS |
+| AC3 every decision reproducible and logged | PASS |
+| AC4 works with every quota reader disabled | PASS |
+| AC5 collaborator notices nothing | PASS |
+| AC6 English docs (README, config reference, two guides) | PASS |
+| AC7 no credential copied, logged or transmitted | PASS |
+
+Security tags: all 15 `[SEC-*]` groups PASS. Total: 1,398 tests passed, 1 skipped (opt-in perf).
+
+### Live verification on this machine (real CLIs: claude 2.1.301, codex 0.167.0, agy 1.5.2)
+- `dispatch doctor`: 0 failures; Codex quota read live via app-server; agy not started (disabled).
+- `dispatch doctor --live --provider claude,codex`: both produced the expected one-file patch (5 s / 6.5 s).
+- UC3 live: Codex host with Dispatch's hooks and rules → `run --detach` executed outside the Codex
+  sandbox via the rules file, router chose Claude, `wait` returned the result, the model applied the patch.
+  In these runs the model followed the skill/SessionStart policy and called Dispatch directly, so the
+  PreToolUse deny itself was exercised synthetically (and live in the WP1/WP8 spikes).
+- UC2 live: Claude host with the plugin loaded via `--plugin-dir` → `dispatch` sub-agent → Codex chosen,
+  patch returned, no recursive Claude child.
+- `~/.codex/config.toml`, `~/.claude/settings.json` and other host files verified byte-identical after
+  every live experiment; `~/.dispatch` is never created by read-only commands.
+- Not exercised live: Antigravity as a delegation target (ToS caution — quota-free probes only), quota
+  exhaustion on a real account, Codex hook trust via the `/hooks` TUI (user step).
 
 ## Open risks (spec §12 table + new)
 
-| Risk | Current state | Notes |
+| Risk | State at v0.1.0 | Notes |
 |---|---|---|
-| Quota channels change/disappear | Lower | Codex app-server is official; Claude passive `rate_limit_event`; agy `/usage` CLI command. |
-| No hard interception in Claude Code | Accepted for v0.1 | PreToolUse on `Agent` exists now; Claude stays soft per spec. |
-| Codex `SubagentStart` can't redirect | Resolved | UC3 = `deny_redirect` via PreToolUse (verified live, WP1). |
-| Antigravity streaming/hooks | Resolved technically; ToS-restricted | Experimental, opt-in, read-only; user hooks in child not disableable (disclosed). |
-| Billing/OAuth changes | Active | Claude fan-out grey area; Google forbids wrapping on consumer plans. README disclosure (WP30). |
-| Prompt injection | Open (inherent) | Native sandboxes, credential read-deny verified live (WP1), patch filter, untrusted-output marker. |
-| **New** Codex rules file = sandbox-escape surface | Accepted trust grant | Rule semantics verified from source (compound commands split; `$`/backticks/redirects never match). |
-| **New** `codex exec` writes trust into `~/.codex/config.toml` | Mitigated | Side-effect guard `-c projects=…untrusted` (WP1); golden-argv test in WP15. |
-| **New** Codex hooks need TUI `/hooks` trust | Open | Setup instructions + doctor heartbeat. |
-| **New** CLI churn (agy auto-update, codex flags) | Open | cliRange + probe gating + fixtures per version. |
-| **New** node:sqlite experimental | Low | DbPort abstraction (WP6). |
+| Quota channels change/disappear | Mitigated | Codex app-server is official; Claude passive `rate_limit_event`; agy `/usage`; estimator + `stale`; UC11/AC4 tested. |
+| No hard interception in Claude Code | Accepted (spec: soft) | PreToolUse on `Agent` exists in current Claude Code; candidate for v0.2. |
+| Codex `SubagentStart` can't redirect | Resolved | UC3 via PreToolUse `deny_redirect` (multi-agent V2 encrypts spawn messages; proxy rewrite impossible). |
+| Antigravity streaming/hooks | Resolved technically; **ToS-restricted** | Experimental, off by default, read-only, explicit ToS acknowledgement; child user hooks cannot be disabled (disclosed by doctor). |
+| Billing/OAuth rule changes | Active | Claude automated use of subscriptions is a grey area; Google forbids wrapping on consumer plans; README discloses; `pool` shown in `status`. |
+| Prompt injection | Open (inherent) | Native sandboxes, credential read-deny, patch filter, untrusted-output marker, no auto-apply; docs/security.md. |
+| Codex rules file = sandbox-escape surface | Accepted trust grant | Absolute launcher, subcommand allow-list, compound commands never match, flags tighten-only. |
+| Codex hooks need TUI `/hooks` trust | Open (user step) | Setup preview + doctor heartbeat check. |
+| `codex exec` writes project trust into `~/.codex/config.toml` | Mitigated | Side-effect guard, verified live. |
+| CLI churn (agy auto-update, Codex flags) | Open | `cliRange`, probe gating, fail closed, fixtures per CLI version; doctor warns outside range. |
+| node:sqlite experimental | Low | DbPort abstraction; warning filtered in the CLI. |
 
 ## Deviations from the spec
 
-The 17 deviations in plan §7 apply. Additional ones taken during execution:
+Decided in planning (details in docs/PLAN.md §7):
+1. Undocumented Claude OAuth quota endpoint not used (violates §2.2); official/passive channels instead.
+2. No edits to AGENTS.md, CLAUDE.md or `.claude/settings.json`; host integration is user-scope only.
+3. UC1/UC14: the repo diff contains only `.dispatch/`; host changes are user-scope.
+4. `setup` (per user) / `install` (per repo) / `uninstall [--global]` instead of a single install.
+5. Antigravity as target: experimental, off by default, read-only, ToS opt-in; no agy host integration.
+6. UC3: the native spawn is denied and redirected to `dispatch run --detach` + `wait` (deny_redirect).
+7. New Codex host file `~/.codex/rules/dispatch.rules` (trust grant).
+8. Security keys are global-only and tighten-only (including flags); repo policy requires `dispatch trust`.
+9. No `.dispatch/hooks/` scripts; hooks are inline guards with absolute paths.
+10. Worktrees in `~/.dispatch/worktrees`; the patch is checked against the current tree.
+11. Isolation boundary = each CLI's native sandbox; fail closed without it.
+12. `reserve_for_host` dropped; `unspecified_model` default `balanced` (session model often unobservable).
+13. Commands added: setup, trust, wait, cancel, gc; `watch` → `logs --follow`; `status --history` dropped.
+14. UC8 shadow results are decisions recomputed on recorded snapshots; consumption labelled estimated.
+15. State in SQLite. 16. Windows unsupported. 17. `doctor` spends no quota unless `--live`.
 
-1. UC3 mechanism is `deny_redirect` only; `proxy_subagent` dropped (multi-agent V2 encrypts the spawn message). UC3 wording: the native spawn is denied and the result arrives via `dispatch wait`.
-2. Codex child gets an extra side-effect guard so `codex exec` cannot persist project trust into the user's `~/.codex/config.toml` (spec §2.3).
-3. agy read-only is enforced by headless auto-deny (not `--mode plan`, which is ineffective); runs with denied actions are reported as `failed`.
-4. Package name `@dragonfly25/dispatch` (bin `dispatch`), MIT license — placeholders until the owner decides; publishing to npm only with explicit go-ahead.
-5. Exit code when `CODEX_SANDBOX` is set: WP3 uses 6, the amendment says 3 — to be unified to 3 (`REJECTED`) in WP24.
-
-6. Antigravity read-only runs: the adapter maps SUCCESS-with-denied-actions to `failed`; the runner (WP19) reports read-only tasks with a non-empty answer as `success` with the denied actions logged, since text-only output is the expected result.
-7. Delegated-run artifacts (patch, events log) live in `<repo>/.dispatch/state/runs/<id>/` (gitignored by `.dispatch/.gitignore`) so host sessions can read the patch without extra permissions (WP8 finding); fallback `~/.dispatch/runs/<id>/` outside an installed repo.
-8. Claude plugin uninstall via the `claude` CLI leaves empty settings keys; `uninstall --global` removes exactly the keys Dispatch's install added (pre-install snapshot), restoring `~/.claude/settings.json` byte-for-byte.
+Taken during execution:
+18. agy read-only is enforced by headless auto-deny (`--mode plan` is ineffective); read-only runs with a
+    text answer are reported as success with the denied actions logged.
+19. Run artifacts (patch, events) live in `<repo>/.dispatch/state/runs/<id>/` (gitignored) so host
+    sessions can read the patch; `~/.dispatch/runs/<id>/` outside an installed repo.
+20. Claude plugin uninstall leaves empty settings keys; `uninstall --global` removes exactly what install
+    added (pre-install snapshot), restoring `~/.claude/settings.json` byte-for-byte.
+21. `direct` autonomy is not implemented in v0.1 (adapters refuse it; the runner uses a worktree).
+22. `returned_to_host` exits 0 (the host proceeds natively); exit 5 only when a completed run ended
+    quota-exhausted.
+23. Codex hard mode switch `hosts.codex.hard` (default true); Claude stays soft.
+24. Package `@dragonfly25/dispatch`, MIT — placeholders for the owner; npm publishing is a manual
+    workflow (publish.yml), never triggered by tags.
 
 ## Process notes
 
-- Repo-local git `user.email` set to the GitHub noreply address (pushes with the private email are rejected by GitHub).
+- Repo-local git `user.email` set to the GitHub noreply address (GitHub rejects the private email).
+- 38 PRs, each with tests and green CI (macOS + Linux × Node 22/24) before merge.
