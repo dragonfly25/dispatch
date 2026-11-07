@@ -1,0 +1,7 @@
+# Built-in profile "preserve": keep the host free for interactive work.
+# TODO(WP9): complete the shipped profiles.
+version: 1
+description: Delegate everything delegable; the host only orchestrates.
+rules:
+  - id: preserve-delegate-all
+    action: { type: fallback, instances: [codex, claude], strategy: ordered }

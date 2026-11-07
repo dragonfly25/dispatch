@@ -1,0 +1,14 @@
+# Model table of the claude adapter: tier -> model + native effort; reverse map for the host model.
+# TODO(WP9): placeholder values; verify model names, efforts and costs.
+version: 1
+models:
+  claude:
+    tiers:
+      fast: { model: haiku, effort: { low: low, medium: medium, high: high }, relative_cost: 1 }
+      balanced:
+        { model: sonnet, effort: { low: low, medium: medium, high: high }, relative_cost: 3 }
+      max: { model: opus, effort: { low: low, medium: medium, high: high }, relative_cost: 10 }
+    reverse:
+      - { pattern: "*haiku*", tier: fast }
+      - { pattern: "*sonnet*", tier: balanced }
+      - { pattern: "*opus*", tier: max }

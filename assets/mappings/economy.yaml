@@ -1,0 +1,7 @@
+# Built-in preset "economy": same tier, one effort level lower on delegated tasks.
+# TODO(WP9): complete the shipped presets.
+version: 1
+preset:
+  description: Same tier, effort -1.
+  effort_shift: -1
+  tier_by_task_type: {}

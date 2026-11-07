@@ -1,0 +1,7 @@
+# Built-in profile "balance": keep every provider usable until the end of the week.
+# TODO(WP9): complete the shipped profiles.
+version: 1
+description: Delegate to the instance with the most remaining quota.
+rules:
+  - id: balance-most-remaining
+    action: { type: fallback, instances: [codex, claude], strategy: most_remaining }

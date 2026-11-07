@@ -1,0 +1,7 @@
+# Built-in preset "mirror": same tier and same effort on every provider (default).
+# TODO(WP9): complete the shipped presets.
+version: 1
+preset:
+  description: Same tier, same effort.
+  effort_shift: 0
+  tier_by_task_type: {}

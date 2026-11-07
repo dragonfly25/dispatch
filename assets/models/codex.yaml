@@ -1,0 +1,13 @@
+# Model table of the codex adapter.
+# TODO(WP9): placeholder values; verify model names, efforts and costs.
+version: 1
+models:
+  codex:
+    tiers:
+      fast:
+        { model: gpt-6-luna, effort: { low: low, medium: medium, high: high }, relative_cost: 1 }
+      balanced: { model: gpt-6, effort: { low: low, medium: medium, high: high }, relative_cost: 3 }
+      max: { model: gpt-6, effort: { low: medium, medium: high, high: xhigh }, relative_cost: 6 }
+    reverse:
+      - { pattern: "*luna*", tier: fast }
+      - { pattern: "gpt-*", tier: balanced }
