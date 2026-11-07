@@ -167,6 +167,28 @@ Taken during execution:
 - **Deviation:** spec §5 ("Claude Code: Soft" at launch) is superseded for `general-purpose`
   sub-agents, as approved by the owner. The frozen `SubagentStrategy` enum has no "rewrite" value, so
   the Claude integration still reports `subagentStrategy: "none"`; an ADR could add one.
+- **Claude Code custom agents** (UC2): `hosts.claude-code.intercept` now defaults to `auto`:
+  `general-purpose` plus every eligible agent of `<repo>/.claude/agents/` and `~/.claude/agents/`
+  (`CLAUDE_CONFIG_DIR` respected; matched by file name, then frontmatter `name:`). Eligible: only
+  file tools (read tools → read-only, edit tools or Bash or no `tools:` → worktree), MCP tools only
+  for servers in the hook cache's `policy.forwardableMcp` (written by the MCP forwarding work; absent
+  = none), never `Claude_Browser`, instructions ≤ 32 KB. The hook writes a 0600 handoff
+  (`~/.dispatch/handoffs/<id>.json`) and points the relay at `run --handoff <id>`; the agent's
+  `model:` goes through the claude reverse table (`*fable*` → max added), `effort:` xhigh/max → high.
+  New `hosts.claude-code.exclude`, `auto_apply`; doctor `claude-code.hard-mode` lists every agent of
+  the current repo and why it stays on Claude. Handed-back runs write a one-shot passthrough so the
+  caller's identical retry runs natively. Verified live once on Claude Code 2.1.301 (haiku,
+  `--plugin-dir`): the parent's `Agent{subagent_type: "reader"}` ran as the Dispatch relay with a
+  handoff id, the relay ran `run --detach --json --handoff <id>`, and the 0600 handoff existed with
+  the agent's instructions, model and read-only autonomy.
+- **Deviation (auto-apply):** "Dispatch never applies patches" no longer holds for runs started from
+  a handoff: the relay runs `dispatch apply <runId>`, which applies a successful, clean, unreviewed-
+  flag-free patch to the working tree (no index, no commit), as approved by the owner
+  (`hosts.claude-code.auto_apply`, default true, global only). The Codex host does not auto-apply.
+- **Deviation (web tools):** agents with `WebFetch`/`WebSearch` stay on Claude. `codex exec` 0.167
+  can search the web (`-c web_search="live"`, what the top-level `--search` flag sets), but the
+  frozen `Task`/`BuildInvocationArgs` contracts carry no web request and `network: off` is the
+  default security key; wiring it needs an ADR.
 
 ## Process notes
 

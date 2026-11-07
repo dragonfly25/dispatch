@@ -81,7 +81,7 @@ describe("claude-code plan and setup [UC1]", () => {
         `  - run ${claudeBin()} plugin install dispatch@dispatch-local -s user --json -y`,
         "",
         "Trust grants (they give a host extra authority; read them carefully):",
-        `  - ${claudeBin()}: installs the Dispatch plugin (a sub-agent, a SessionStart hook, and a PreToolUse hook that redirects general-purpose sub-agents to Dispatch in trusted repos) for every Claude Code session of this user`,
+        `  - ${claudeBin()}: installs the Dispatch plugin (a sub-agent, a SessionStart hook, and a PreToolUse hook that redirects general-purpose and eligible custom sub-agents to Dispatch in trusted repos, reading but never changing your agent files) for every Claude Code session of this user`,
         "",
         "Hosts detected: claude-code",
         "",

@@ -39,10 +39,23 @@ export interface PolicySummary {
    */
   claudeHard?: boolean;
   /**
-   * Sub-agent types the Claude hook intercepts (`hosts.claude-code.intercept`); `"*"` means every
-   * type. Absent: `["general-purpose"]`.
+   * Sub-agent types the Claude hook intercepts (`hosts.claude-code.intercept`): `"auto"` means
+   * general-purpose plus every eligible custom agent, `"*"` every eligible type, other entries
+   * are an allow-list. Absent: `["auto"]`.
    */
   claudeIntercept?: string[];
+  /** Sub-agent types the Claude hook never intercepts (`hosts.claude-code.exclude`). */
+  claudeExclude?: string[];
+  /**
+   * Successful runs of intercepted custom agents are applied by the relay
+   * (`hosts.claude-code.auto_apply`, default true). Absent: true.
+   */
+  claudeAutoApply?: boolean;
+  /**
+   * MCP server names that may be forwarded to the external agent for this repo (written by the
+   * MCP forwarding feature). Absent: none, so custom agents that use MCP tools stay on Claude.
+   */
+  forwardableMcp?: string[];
   /** One short paragraph for the host model (`additionalContext`). */
   summary: string;
 }
@@ -62,6 +75,11 @@ type Env = Readonly<Record<string, string | undefined>>;
 export function hookDispatchHome(env: Env): string | null {
   if (env.DISPATCH_HOME) return env.DISPATCH_HOME;
   return env.HOME ? join(env.HOME, ".dispatch") : null;
+}
+
+/** True for `undefined` or an array of strings. */
+function optionalStrings(v: unknown): boolean {
+  return v === undefined || (Array.isArray(v) && v.every((t) => typeof t === "string"));
 }
 
 function isCache(v: unknown): v is HookCache {
@@ -84,9 +102,10 @@ function isCache(v: unknown): v is HookCache {
     typeof p.hardMode === "boolean" &&
     (p.hardInterception === undefined || typeof p.hardInterception === "boolean") &&
     (p.claudeHard === undefined || typeof p.claudeHard === "boolean") &&
-    (p.claudeIntercept === undefined ||
-      (Array.isArray(p.claudeIntercept) &&
-        p.claudeIntercept.every((t) => typeof t === "string"))) &&
+    optionalStrings(p.claudeIntercept) &&
+    optionalStrings(p.claudeExclude) &&
+    (p.claudeAutoApply === undefined || typeof p.claudeAutoApply === "boolean") &&
+    optionalStrings(p.forwardableMcp) &&
     typeof p.summary === "string"
   );
 }

@@ -105,23 +105,18 @@ describe("claude-code PreToolUse hard mode [UC2]", () => {
     }
   });
 
-  it('"*" intercepts every type except the Dispatch sub-agent', () => {
+  it('"*" intercepts general-purpose and eligible agents, never built-ins without a file', () => {
     const { input, env } = setup({ ...HARD, claudeIntercept: ["*"] });
-    for (const t of ["Explore", "feature-builder-x", "general-purpose"]) {
-      const o = rewritten(preToolUseResponse(withAgent(input, { subagent_type: t }), env));
-      expect(o.updatedInput.prompt).toContain(`"${t}" sub-agent task was redirected`);
+    const o = rewritten(preToolUseResponse(input, env));
+    expect(o.updatedInput.prompt).toContain('"general-purpose" sub-agent task was redirected');
+    for (const t of ["Explore", "feature-builder-x", "dispatch:dispatch"]) {
+      expect(preToolUseResponse(withAgent(input, { subagent_type: t }), env)).toEqual(SILENT);
     }
-    expect(
-      preToolUseResponse(withAgent(input, { subagent_type: "dispatch:dispatch" }), env),
-    ).toEqual(SILENT);
   });
 
   it("a custom intercept list replaces the default", () => {
     const { input, env } = setup({ ...HARD, claudeIntercept: ["Explore"] });
     expect(preToolUseResponse(input, env)).toEqual(SILENT);
-    expect(
-      rewritten(preToolUseResponse(withAgent(input, { subagent_type: "Explore" }), env)),
-    ).toBeDefined();
   });
 
   it.each<[string, Partial<PolicySummary>]>([
@@ -167,12 +162,16 @@ describe("claude-code SessionStart wording with hard mode [UC2]", () => {
   it("names the redirected sub-agent types only when hard mode applies", () => {
     const on = policyText(cacheFor("/r"), "/l");
     expect(on).toContain(
-      'Sub-agent calls (Agent tool) of type "general-purpose" are redirected to Dispatch in this repository.',
+      'Sub-agent calls (Agent tool) of type "general-purpose" are redirected to Dispatch in this repository;',
     );
     expect(on).toContain("instead of being done in this session, unless the user says otherwise");
-    expect(policyText(cacheFor("/r", { ...HARD, claudeIntercept: ["*"] }), "/l")).toContain(
-      "of every type except Dispatch's are redirected",
-    );
+    expect(on).not.toContain("Exception:");
+    const auto = policyText(cacheFor("/r", { ...HARD, claudeIntercept: ["auto"] }), "/l");
+    expect(auto).toContain("of your own sub-agents (.claude/agents) that Dispatch can run");
+    expect(auto).toContain("Exception: when a redirected custom sub-agent's run succeeds");
+    expect(
+      policyText(cacheFor("/r", { ...HARD, claudeIntercept: ["*"], claudeAutoApply: false }), "/l"),
+    ).not.toContain("Exception:");
     for (const p of [
       { ...HARD, claudeHard: false },
       { ...HARD, hardInterception: false },

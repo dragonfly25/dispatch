@@ -82,6 +82,14 @@ describe("host asset templates [UC2][UC3][UC9]", () => {
     }
   });
 
+  it("claude agent starts handoffs with --handoff and applies only through `apply` [UC2]", () => {
+    const text = render("claude-code/agents/dispatch.md", values);
+    expect(text).toContain("/home/u/.dispatch/bin/dispatch run --detach --json --handoff <id>");
+    expect(text).toContain("/home/u/.dispatch/bin/dispatch apply <runId> --json");
+    expect(text).toContain("SAME sub-agent again with the SAME prompt");
+    expect(text).toContain("`run`, `wait`, `apply`, `cancel` and `status`");
+  });
+
   it("codex skill tells the model to poll a yielded wait instead of re-running it", () => {
     expect(read("codex/skills/dispatch/SKILL.md")).toContain("write_stdin");
   });

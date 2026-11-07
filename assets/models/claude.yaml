@@ -39,3 +39,4 @@ models:
       - { pattern: "*haiku*", tier: fast }
       - { pattern: "*sonnet*", tier: balanced }
       - { pattern: "*opus*", tier: max }
+      - { pattern: "*fable*", tier: max }

@@ -5,7 +5,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { loadAppContext } from "../../src/app/context.js";
@@ -455,6 +455,55 @@ describe("supervisor (in process)", () => {
       // A second failure report does not overwrite a finished run.
       await s.cli(["__supervise", runId, "--run-dir", runDir]);
       expect((await s.store.getRun(runId))?.result?.summary).toBe(rec?.result?.summary);
+    },
+    TEST_MS,
+  );
+});
+
+describe("supervisor of a handoff run [UC2][SEC-handoff]", () => {
+  it(
+    "a handed-back handoff run records the passthrough; a successful one does not",
+    async () => {
+      // The process-wide probe cache may point at an earlier test's fakes, so the expectation
+      // follows the recorded result rather than the scenario.
+      for (const scenario of ["success_edit", "fail"] as const) {
+        const s = setup({ codex: [{ scenario, file: "n.txt", content: "n\n" }] });
+        const runId = newRunId();
+        const runDir = join(s.home.dispatchHome, "runs", runId);
+        mkdirSync(runDir, { recursive: true });
+        const handoff = {
+          agent: "a",
+          passthroughKey: `k-${scenario}`,
+          autoApply: true,
+          mcpServers: [],
+        };
+        writeFileSync(
+          join(runDir, TASK_FILE),
+          JSON.stringify({ task: s.task, repoPath: s.repo.dir, handoff }),
+        );
+        const at = new Date().toISOString();
+        await s.store.recordRun({
+          runId,
+          status: "running",
+          createdAt: at,
+          updatedAt: at,
+          instance: null,
+          pid: null,
+          result: null,
+        });
+        await s.cli(["__supervise", runId, "--run-dir", runDir]);
+        const file = join(s.home.dispatchHome, "hook-passthrough.json");
+        const keys = existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, "utf8"))) : [];
+        const r = (await s.store.getRun(runId))?.result;
+        const ok = r?.status === "completed" && r.outcome === "success";
+        if (scenario === "fail") expect(ok).toBe(false);
+        expect(keys, scenario).toEqual(ok ? [] : [`k-${scenario}`]);
+        s.store.close();
+        s.fakes.dispose();
+        s.home.cleanup();
+        s.repo.cleanup();
+        store = fakes = home = repo = undefined;
+      }
     },
     TEST_MS,
   );

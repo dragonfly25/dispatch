@@ -26,7 +26,8 @@ remaining quota, task type, file paths, pins.
 
 **What it is not.** Not a new agent framework, not an API proxy, not a replacement for your
 orchestrator. It does not use API keys in place of your subscriptions (unless you opt in to an API
-pool), does not manage logins, and never applies a patch, makes a commit or opens a PR.
+pool), does not manage logins, and never makes a commit or opens a PR; it applies a patch only for
+an intercepted Claude Code custom agent (auto-apply, below).
 
 ## How it works
 
@@ -128,11 +129,32 @@ of a patch. Claude reviews the diff and applies it with its own tools. You can a
 
 **Hard mode** (on by default): in a trusted repo whose policy delegates something, the plugin's
 `PreToolUse` hook rewrites `general-purpose` sub-agent calls to the `dispatch` sub-agent, so a task
-Claude would hand to a generic helper goes through Dispatch instead; your own agent types (Explore,
-Plan, custom ones) are untouched unless you list them in `hosts.claude-code.intercept` (`"*"` means
-all). Turn it off with `hosts.claude-code.hard: false` in `~/.dispatch/config.yaml`, then
+Claude would hand to a generic helper goes through Dispatch instead.
+
+**Your own sub-agents** (`.claude/agents/*.md` in the repo or in `~/.claude/agents/`) are delegated
+automatically too, when Dispatch can run them elsewhere: their tools are only file tools (`Read`,
+`Grep`, `Glob`, `LS`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash`, `TodoWrite`), or MCP
+servers that are forwardable for the repo. Agents that need the desktop browser
+(`mcp__Claude_Browser__*`), web tools, other MCP servers or other tools stay on Claude, silently.
+The hook writes the agent's instructions and the task to a one-time handoff file
+(`~/.dispatch/handoffs/<id>.json`, 0600) and the `dispatch` sub-agent runs `dispatch run --handoff
+<id>`; the agent's `model:` picks the tier (opus/fable → max, sonnet → balanced, haiku → fast;
+`inherit` → the router default), `effort:` the effort, and its tools the autonomy (read-only or
+worktree). Your agent files are only read, never changed. `dispatch doctor` lists, for the current
+repo, which agents are delegated and why the others stay on Claude.
+
+**Auto-apply** (deviation from "Dispatch never applies patches", on by default): when such a run
+succeeds with a patch that applies cleanly, needs no review and dropped no path, the `dispatch`
+sub-agent runs `dispatch apply <runId>`, which re-checks and `git apply`s it to the working tree (not
+staged, not committed), so the caller gets changed files as from a native sub-agent. Turn it off
+with `hosts.claude-code.auto_apply: false`. When a run hands the task back (provider unavailable,
+failure), the caller's identical retry of the same agent runs natively once.
+
+`hosts.claude-code.intercept` (default `auto`) can instead be a list of types (an allow-list,
+still subject to eligibility) or `"*"`; `hosts.claude-code.exclude` lists types never redirected.
+Turn hard mode off with `hosts.claude-code.hard: false` in `~/.dispatch/config.yaml`, then
 `dispatch setup --refresh`. Existing installs get the hook with `dispatch setup --refresh`; restart
-running Claude Code sessions to pick it up.
+running Claude Code sessions to pick it up. Add the `apply` permission rule `doctor` prints.
 
 To see what would happen without running anything:
 
@@ -219,7 +241,7 @@ and from you reviewing the result.
 | Worktree and native sandbox | Each task gets its own git worktree. The real boundary is each CLI's own sandbox; if it is unavailable Dispatch fails closed. Minimal child environment, `max_depth` against recursion, timeout. Network is not restricted, because the CLIs need it. |
 | Autonomy levels | `read-only` (text back) or `worktree` (default: edits in the worktree, patch back). `direct` is not implemented in v0.1: adapters refuse it. |
 | Patch filter | Rejected or trimmed if it touches `..`, absolute paths, symlinks, `.git*`, `.dispatch/`, host config, `.env*` or pinned paths. Secret scan sets `needsReview`; `git apply --check` runs against your tree. |
-| No automatic apply | Dispatch never applies patches, commits or opens PRs. You or the host review the diff. |
+| No automatic apply | Dispatch never commits or opens PRs, and applies a patch only for an intercepted Claude Code custom agent (auto-apply, see above; `hosts.claude-code.auto_apply: false` turns it off). Otherwise you or the host review the diff. |
 | Untrusted output | The summary is marked `EXTERNAL_AGENT_OUTPUT`; the host treats it as data, never as instructions. |
 | Settings only tighten | Security keys can be loosened only in your global config; a repo or flag can only be stricter, and repo policy is ignored until you `dispatch trust` it. |
 | Secrets | Credentials are never copied, stored, logged or sent, and no private provider API is called with your tokens. State is redacted before it is written. |
@@ -285,7 +307,7 @@ Node or Dispatch moved (upgrade, reinstall): `dispatch setup --refresh`.
 </details>
 <details><summary><code>claude-code.permission-rule</code> warns</summary>
 
-Add the printed `Bash(... run:*)` and `Bash(... wait:*)` rules to `permissions.allow`.
+Add the printed `Bash(... run:*)`, `Bash(... wait:*)` and `Bash(... apply:*)` rules to `permissions.allow`.
 </details>
 
 More (`setup has not run`, `CODEX_SANDBOX`, `quota channel is broken`) in

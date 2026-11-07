@@ -4,8 +4,14 @@
  * starts the run in a supervisor and prints `{ runId }` at once; `wait` collects it (UC3).
  */
 import type { Command } from "commander";
-import { buildTask, type TaskFlags } from "../../app/context.js";
+import { type AppContext, buildTask, type TaskFlags } from "../../app/context.js";
 import { dryRun } from "../../app/dry-run.js";
+import {
+  detachHandoff,
+  finishHandoffRun,
+  handoffTask,
+  writeHandoffRun,
+} from "../../app/handoff.js";
 import { runnerDeps } from "../../app/runner.js";
 import {
   type DecisionRecord,
@@ -13,10 +19,18 @@ import {
   type NormalizedEvent,
   type RunResult,
   RunResultSchema,
+  type Task,
 } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import {
+  addPassthrough,
+  type Handoff,
+  HandoffError,
+  loadHandoff,
+} from "../../hosts/claude-code/handoff.js";
 import { executeTask, type RunnerStore } from "../../runner/orchestrate.js";
 import { exitCodeForResult } from "../../runner/result.js";
+import { repoRoot } from "../../sandbox/git.js";
 import { ExitRequest } from "../exit.js";
 import { addTaskOptions } from "../options.js";
 import { formatSpan } from "../time.js";
@@ -31,6 +45,7 @@ export interface RunOptions extends TaskFlags {
   json?: boolean;
   detach?: boolean;
   idempotencyKey?: string;
+  handoff?: string;
 }
 
 /** Indents every line of `text` by two spaces. */
@@ -175,6 +190,44 @@ export function tapStore<S extends Pick<RunnerStore, "appendEvent" | "recordDeci
   });
 }
 
+/** A loaded handoff, the repo it runs in and its task. */
+interface OpenHandoff {
+  h: Handoff;
+  root: string;
+  task: Task;
+}
+
+/** Loads (and consumes) handoff `id` and builds its task; a bad handoff is a usage error. */
+async function openHandoff(ctx: AppContext, id: string): Promise<OpenHandoff> {
+  let h: Handoff;
+  try {
+    h = loadHandoff(ctx.dispatchHome, id, ctx.clock.now().getTime());
+  } catch (err) {
+    if (!(err instanceof HandoffError)) throw err;
+    throw new DispatchError(err.message, ExitCode.USAGE, "handoff.invalid");
+  }
+  const root = (await repoRoot(ctx.cwd).catch(() => null)) ?? ctx.cwd;
+  try {
+    return { h, root, task: handoffTask(ctx, h, root) };
+  } catch (err) {
+    addPassthrough(ctx.dispatchHome, h.passthroughKey, ctx.clock.now().getTime());
+    throw err;
+  }
+}
+
+/** Records the handoff run for `dispatch apply`. */
+function recordHandoffRun(ctx: AppContext, from: OpenHandoff, runId: string): void {
+  writeHandoffRun(ctx.dispatchHome, {
+    version: 1,
+    runId,
+    repoRoot: from.root,
+    agent: from.h.agent.name,
+    autoApply: from.h.autoApply,
+    createdAt: ctx.clock.now().toISOString(),
+    appliedAt: null,
+  });
+}
+
 /** Registers `run`. */
 export function registerRun(program: Command, deps: CliDeps): void {
   addTaskOptions(
@@ -192,83 +245,114 @@ export function registerRun(program: Command, deps: CliDeps): void {
       .option(
         "--idempotency-key <key>",
         "with --detach: a repeated call with the same key returns the same run",
+      )
+      .option(
+        "--handoff <id>",
+        "run the task of a Claude Code hard-mode handoff (instead of --task; used once)",
       ),
   ).action(async (opts: RunOptions) => {
     const { io } = deps;
     if (opts.idempotencyKey !== undefined && !opts.detach) {
       throw new DispatchError("--idempotency-key needs --detach", ExitCode.USAGE, "cli.usage");
     }
+    if (
+      opts.handoff !== undefined &&
+      (opts.task !== undefined || opts.taskFile !== undefined || opts.dryRun)
+    ) {
+      throw new DispatchError(
+        "--handoff cannot be combined with --task, --task-file or --dry-run",
+        ExitCode.USAGE,
+        "cli.usage",
+      );
+    }
     const provider = opts.provider === "auto" ? undefined : opts.provider;
     await withContext(
       deps,
       async (ctx) => {
         reportIssues(io, ctx.config.issues);
-        const task = buildTask(ctx, opts);
-        if (opts.dryRun) {
-          const result = await dryRun(ctx, task);
-          if (opts.json) {
-            printJson(io, {
-              schemaVersion: 1,
-              dryRun: true,
-              input: result.input,
-              decision: result.decision,
-              alternatives: result.alternatives,
-              explain: result.explain,
-              issues: ctx.config.issues,
-            });
-          } else io.out(result.explain);
-          return;
-        }
-        // A config error (e.g. a repo or flag trying to loosen a security key) is never run past:
-        // the loosening value is ignored, but the user must see and fix it first (merge.ts).
-        const errors = ctx.config.issues.filter((i) => i.level === "error").length;
-        if (errors > 0) {
-          throw new DispatchError(
-            `configuration has ${errors} error(s); fix them (see \`dispatch validate\`) before running`,
-            ExitCode.USAGE,
-            "config.invalid",
-          );
-        }
-        if (opts.detach) {
-          await detachRun(deps, ctx, task, {
-            ...(provider === undefined ? {} : { provider }),
-            ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: opts.idempotencyKey }),
-          });
-          return;
-        }
-        const rd = runnerDeps(ctx, deps.runner);
-        // Progress spinner on stderr: TTY only (a no-op otherwise), never with --json.
-        const spin =
-          opts.json || !io.decorate?.err ? null : startSpinner(io, phaseText(null, undefined));
-        let chosen: string | null = null;
-        if (spin) {
-          rd.store = tapStore(
-            rd.store,
-            (instance) => {
-              chosen = instance;
-              spin.update(phaseText(chosen, undefined));
-            },
-            (ev) => spin.update(phaseText(chosen, ev)),
-          );
-        }
-        let result: RunResult;
+        const from = opts.handoff === undefined ? null : await openHandoff(ctx, opts.handoff);
+        const task = from === null ? buildTask(ctx, opts) : from.task;
         try {
-          result = await executeTask(rd, task, { repoPath: ctx.cwd });
-        } finally {
-          spin?.stop();
+          if (opts.dryRun) {
+            const result = await dryRun(ctx, task);
+            if (opts.json) {
+              printJson(io, {
+                schemaVersion: 1,
+                dryRun: true,
+                input: result.input,
+                decision: result.decision,
+                alternatives: result.alternatives,
+                explain: result.explain,
+                issues: ctx.config.issues,
+              });
+            } else io.out(result.explain);
+            return;
+          }
+          // A config error (e.g. a repo or flag trying to loosen a security key) is never run past:
+          // the loosening value is ignored, but the user must see and fix it first (merge.ts).
+          const errors = ctx.config.issues.filter((i) => i.level === "error").length;
+          if (errors > 0) {
+            throw new DispatchError(
+              `configuration has ${errors} error(s); fix them (see \`dispatch validate\`) before running`,
+              ExitCode.USAGE,
+              "config.invalid",
+            );
+          }
+          if (opts.detach) {
+            const runId = await detachRun(deps, ctx, task, {
+              ...(provider === undefined ? {} : { provider }),
+              ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: opts.idempotencyKey }),
+              ...(from === null
+                ? {}
+                : { idempotencyKey: `handoff:${opts.handoff}`, handoff: detachHandoff(from.h) }),
+            });
+            if (from !== null) recordHandoffRun(ctx, from, runId);
+            return;
+          }
+          const rd = runnerDeps(ctx, deps.runner);
+          // Progress spinner on stderr: TTY only (a no-op otherwise), never with --json.
+          const spin =
+            opts.json || !io.decorate?.err ? null : startSpinner(io, phaseText(null, undefined));
+          let chosen: string | null = null;
+          if (spin) {
+            rd.store = tapStore(
+              rd.store,
+              (instance) => {
+                chosen = instance;
+                spin.update(phaseText(chosen, undefined));
+              },
+              (ev) => spin.update(phaseText(chosen, ev)),
+            );
+          }
+          let result: RunResult;
+          try {
+            result = await executeTask(rd, task, { repoPath: ctx.cwd });
+          } finally {
+            spin?.stop();
+          }
+          if (from !== null) {
+            recordHandoffRun(ctx, from, result.runId);
+            finishHandoffRun(ctx.dispatchHome, from.h, result, ctx.clock.now().getTime());
+          }
+          const checked = RunResultSchema.safeParse(result);
+          if (!checked.success) {
+            throw new DispatchError(
+              `internal error: the run result is not valid (${checked.error.issues[0]?.message ?? "unknown"})`,
+              ExitCode.FAILED,
+              "run.invalid_result",
+            );
+          }
+          if (opts.json) printJson(io, checked.data);
+          else io.out(renderRunResult(checked.data, { ui: outUi(io), home: deps.env.HOME }));
+          const code = exitCodeForResult(checked.data);
+          if (code !== ExitCode.OK) throw new ExitRequest(code);
+        } catch (err) {
+          // A handoff run that could not start hands the task back: let the retry through.
+          if (from !== null && err instanceof DispatchError) {
+            addPassthrough(ctx.dispatchHome, from.h.passthroughKey, ctx.clock.now().getTime());
+          }
+          throw err;
         }
-        const checked = RunResultSchema.safeParse(result);
-        if (!checked.success) {
-          throw new DispatchError(
-            `internal error: the run result is not valid (${checked.error.issues[0]?.message ?? "unknown"})`,
-            ExitCode.FAILED,
-            "run.invalid_result",
-          );
-        }
-        if (opts.json) printJson(io, checked.data);
-        else io.out(renderRunResult(checked.data, { ui: outUi(io), home: deps.env.HOME }));
-        const code = exitCodeForResult(checked.data);
-        if (code !== ExitCode.OK) throw new ExitRequest(code);
       },
       { provider },
     );

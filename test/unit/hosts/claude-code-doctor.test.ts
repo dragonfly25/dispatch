@@ -226,7 +226,7 @@ describe("claude-code.permission-rule [UC1]", () => {
   const run = (env: Record<string, string> = {}) =>
     check("claude-code.permission-rule", { fs: FOUND }).run(dctx(env));
 
-  it("prints the run and wait rules for the user to add, and never writes them", async () => {
+  it("prints the run, wait and apply rules for the user to add, and never writes them", async () => {
     h = tempHome();
     mkdirSync(join(h.home, ".claude"));
     const settings = join(h.home, ".claude", "settings.json");
@@ -234,13 +234,16 @@ describe("claude-code.permission-rule [UC1]", () => {
     const r = await run();
     const launcher = join(h.dispatchHome, "bin", "dispatch");
     expect(r.status).toBe("warn");
-    expect(r.message).toContain(`  Bash(${launcher} run:*)\n  Bash(${launcher} wait:*)`);
+    expect(r.message).toContain(
+      `  Bash(${launcher} run:*)\n  Bash(${launcher} wait:*)\n  Bash(${launcher} apply:*)`,
+    );
     expect(r.message).toContain(settings);
     expect(r.fix).toContain(`Bash(${launcher} run:*)`);
     expect(readFileSync(settings, "utf8")).toBe('{ "model": "opus" }\n');
     expect(permissionRules("/x/dispatch")).toEqual([
       "Bash(/x/dispatch run:*)",
       "Bash(/x/dispatch wait:*)",
+      "Bash(/x/dispatch apply:*)",
     ]);
   });
 
@@ -334,7 +337,7 @@ describe("claude-code.hard-mode [UC2]", () => {
       message: expect.stringContaining("hard mode is on: Agent calls of general-purpose"),
     });
     cache({ hardInterception: false, claudeHard: true, claudeIntercept: ["*"] });
-    expect((await run()).message).toMatch(/every sub-agent type.*delegates nothing/);
+    expect((await run()).message).toMatch(/every eligible custom agent.*delegates nothing/);
     cache({ hardInterception: true, claudeHard: false });
     expect(await run()).toMatchObject({
       status: "ok",

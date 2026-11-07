@@ -5,7 +5,9 @@
  */
 import type { Command } from "commander";
 import type { AppContext } from "../../app/context.js";
+import { gcHandoffRuns } from "../../app/handoff.js";
 import { DEFAULT_RETENTION_DAYS } from "../../config/index.js";
+import { gcHandoffs, gcPassthrough } from "../../hosts/claude-code/handoff.js";
 import { WorktreeSandbox } from "../../sandbox/worktree.js";
 import { LEASE_STALE_MS, type LeaseRecord, type PruneCounts } from "../../state/store.js";
 import { formatLocal, parseDuration } from "../time.js";
@@ -22,6 +24,12 @@ export interface GcReport {
   leases: Pick<LeaseRecord, "runId" | "instanceId" | "pid" | "heartbeatAt">[];
   /** Rows deleted per table; null for a dry run (the store has no counting mode). */
   pruned: PruneCounts | null;
+  /** Claude hard-mode handoff files older than 1 h (never used). */
+  handoffs: string[];
+  /** Expired passthrough entries. */
+  passthrough: number;
+  /** Handoff-run records older than the retention. */
+  handoffRuns: string[];
 }
 
 /** Runs the collection. */
@@ -51,6 +59,8 @@ export async function runGc(
     ? store.listLeases().filter((l) => !live(l))
     : store.reapStaleLeases(now, (pid) => isAlive(pid));
   const pruned = opts.dryRun ? null : store.prune({ olderThanDays: retentionDays, now });
+  const ms = now.getTime();
+  const home = ctx.dispatchHome;
 
   return {
     dryRun: opts.dryRun,
@@ -64,6 +74,9 @@ export async function runGc(
       heartbeatAt,
     })),
     pruned,
+    handoffs: gcHandoffs(home, ms, opts.dryRun),
+    passthrough: gcPassthrough(home, ms, opts.dryRun),
+    handoffRuns: gcHandoffRuns(home, ms, retentionDays * 86_400_000, opts.dryRun),
   };
 }
 
@@ -79,6 +92,12 @@ export function renderGc(r: GcReport): string {
         `  run ${l.runId} on ${l.instanceId} (pid ${l.pid}, last heartbeat ${formatLocal(l.heartbeatAt)})`,
     ),
   ];
+  const handoffs = r.handoffs.length + r.passthrough + r.handoffRuns.length;
+  if (handoffs > 0) {
+    lines.push(
+      `${verb} ${r.handoffs.length} stale handoff(s), ${r.passthrough} expired passthrough entr${r.passthrough === 1 ? "y" : "ies"}, ${r.handoffRuns.length} old handoff-run record(s)`,
+    );
+  }
   if (r.pruned === null) {
     lines.push(
       `Would prune history older than ${r.retentionDays} day(s) (not counted in a dry run)`,

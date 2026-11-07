@@ -40,6 +40,17 @@ export const CANCELLED = "cancelled";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
+/** A run started from a Claude hard-mode handoff (`run --handoff`). */
+export interface DetachHandoff {
+  /** The custom agent's name. */
+  agent: string;
+  /** Recorded as a passthrough when the run hands the task back. */
+  passthroughKey: string;
+  autoApply: boolean;
+  /** MCP servers the agent needs (forwarded only by builds that support it). */
+  mcpServers: string[];
+}
+
 /** What the supervisor needs to run the task (the content of {@link TASK_FILE}). */
 export interface DetachPayload {
   task: Task;
@@ -48,6 +59,8 @@ export interface DetachPayload {
   sessionModel?: HostContext["sessionModel"];
   /** `run --provider <instance>`, re-applied by the supervisor when it loads the config. */
   provider?: string;
+  /** Set for `run --handoff`. */
+  handoff?: DetachHandoff;
 }
 
 /** Store operations used to start a detached run. */
@@ -137,6 +150,7 @@ export async function startDetached(
     repoPath: opts.repoPath,
     ...(opts.sessionModel ? { sessionModel: opts.sessionModel } : {}),
     ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
+    ...(opts.handoff !== undefined ? { handoff: opts.handoff } : {}),
   };
   writeFileSync(join(runDir, TASK_FILE), JSON.stringify(payload), { mode: 0o600 });
   const createdAt = clock.now().toISOString();
@@ -216,6 +230,8 @@ export interface SuperviseDeps {
   signals?: Pick<NodeJS.Process, "on" | "off">;
   /** Default {@link SUPERVISOR_HEARTBEAT_MS}. */
   heartbeatMs?: number;
+  /** Called with the final result (errors are ignored). */
+  onFinished?(payload: DetachPayload, result: RunResult): void;
 }
 
 /**
@@ -258,6 +274,11 @@ export async function superviseRun(
     if (cancelled && result.outcome !== "success") {
       result = { ...result, ...failedRun(CANCELLED) };
       await runner.store.updateRun(runId, { status: result.status, result });
+    }
+    try {
+      deps.onFinished?.(payload, result);
+    } catch {
+      // best effort: the result is recorded either way
     }
     return result;
   } finally {

@@ -276,7 +276,7 @@ describe("Codex hard-mode fields [UC3]", () => {
     ctx.close();
   });
 
-  it("claudeHard and claudeIntercept follow hosts.claude-code (defaults true, general-purpose) [UC2]", () => {
+  it("claudeHard and claudeIntercept follow hosts.claude-code (defaults true, auto) [UC2]", () => {
     home = tempHome();
     mkdirSync(home.dispatchHome, { recursive: true });
     const config = join(home.dispatchHome, "config.yaml");
@@ -284,17 +284,23 @@ describe("Codex hard-mode fields [UC3]", () => {
     const ctx = loadAppContext({ cwd: process.cwd(), env: home.env });
     expect(buildHookCache(ctx).policy).toMatchObject({
       claudeHard: true,
-      claudeIntercept: ["general-purpose"],
+      claudeIntercept: ["auto"],
+      claudeExclude: [],
+      claudeAutoApply: true,
     });
     writeFileSync(
       config,
-      'version: 1\nhosts:\n  claude-code:\n    hard: false\n    intercept: ["*", "Explore"]\n',
+      'version: 1\nhosts:\n  claude-code:\n    hard: false\n    intercept: ["*", "Explore"]\n    exclude: [a]\n    auto_apply: false\n',
     );
     expect(buildHookCache(ctx).policy).toMatchObject({
       claudeHard: false,
       claudeIntercept: ["*", "Explore"],
+      claudeExclude: ["a"],
+      claudeAutoApply: false,
       hardMode: true,
     });
+    writeFileSync(config, "version: 1\nhosts:\n  claude-code:\n    intercept: auto\n");
+    expect(buildHookCache(ctx).policy.claudeIntercept).toEqual(["auto"]);
     ctx.close();
   });
 });

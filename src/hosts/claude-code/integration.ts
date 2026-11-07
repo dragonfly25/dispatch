@@ -159,7 +159,7 @@ export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostInte
               ],
             },
           },
-          "installs the Dispatch plugin (a sub-agent, a SessionStart hook, and a PreToolUse hook that redirects general-purpose sub-agents to Dispatch in trusted repos) for every Claude Code session of this user",
+          "installs the Dispatch plugin (a sub-agent, a SessionStart hook, and a PreToolUse hook that redirects general-purpose and eligible custom sub-agents to Dispatch in trusted repos, reading but never changing your agent files) for every Claude Code session of this user",
         ),
       ];
     },
