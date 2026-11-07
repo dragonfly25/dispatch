@@ -100,6 +100,9 @@ export interface FakeSubConfig {
 
 /** Keys of subcommand configs: `<cli>:<sub>`. Each has its own call counter. */
 export type FakeSubKey =
+  | "claude:help"
+  | "codex:help"
+  | "agy:help"
   | "claude:version"
   | "claude:plugin"
   | "codex:version"

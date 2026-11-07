@@ -110,6 +110,15 @@ describe("dispatch run", () => {
     expect(input.input.host.self).toBeNull();
   });
 
+  it("[SEC-flags] a config error (unknown profile) stops the run with exit 2 before spawning", async () => {
+    const { run, fakes } = setup({ config: "profile: nope\n" });
+    const { code, err } = await run([...TASK, "--json"]);
+    expect(code).toBe(2);
+    expect(err).toMatch(/unknown profile "nope"/);
+    expect(err).toMatch(/configuration has 1 error/);
+    expect(fakes.readLog({ kind: "run" })).toEqual([]);
+  });
+
   it("[UC2] inside Claude Code with the preserve profile: codex runs, fake claude never starts", async () => {
     const { run, fakes } = setup({ config: "profile: preserve\n" });
     const { code, out } = await run([...TASK, "--json"], { CLAUDECODE: "1" });
@@ -305,5 +314,22 @@ describe("exit code mapping [UC2]", () => {
     expect(withPatch).toContain("needs review");
     expect(withPatch).toContain("dropped paths: .env");
     expect(withPatch).toContain("  line2");
+  });
+
+  it("[SEC-patch] renders an all-rejected patch as nothing to apply, listing the dropped paths", () => {
+    const text = renderRunResult(
+      result({
+        patch: {
+          path: "/p.diff",
+          diffstat: "",
+          applies: false,
+          rejectedPaths: [".git/hooks/pre-commit", "link"],
+          needsReview: false,
+        },
+      }),
+    );
+    expect(text).toContain("Patch: none (every change was rejected; nothing to apply)");
+    expect(text).not.toContain("/p.diff");
+    expect(text).toContain("dropped paths: .git/hooks/pre-commit, link");
   });
 });

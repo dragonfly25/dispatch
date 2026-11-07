@@ -68,13 +68,16 @@ export function renderRunResult(r: RunResult): string {
   }
   if (r.patch) {
     const p = r.patch;
-    lines.push(`Patch: ${p.path}`);
-    if (p.diffstat.trim() !== "") lines.push(indent(p.diffstat.trimEnd()));
-    lines.push(
-      p.applies
-        ? "  applies cleanly to the working tree (Dispatch never applies it)"
-        : "  does NOT apply to the current working tree",
-    );
+    if (p.diffstat.trim() === "") {
+      lines.push("Patch: none (every change was rejected; nothing to apply)");
+    } else {
+      lines.push(`Patch: ${p.path}`, indent(p.diffstat.trimEnd()));
+      lines.push(
+        p.applies
+          ? "  applies cleanly to the working tree (Dispatch never applies it)"
+          : "  does NOT apply to the current working tree",
+      );
+    }
     if (p.needsReview) lines.push("  needs review (secret scan hit or dirty base)");
     if (p.rejectedPaths.length > 0) lines.push(`  dropped paths: ${p.rejectedPaths.join(", ")}`);
   }
@@ -129,6 +132,16 @@ export function registerRun(program: Command, deps: CliDeps): void {
             });
           } else io.out(result.explain);
           return;
+        }
+        // A config error (e.g. a repo or flag trying to loosen a security key) is never run past:
+        // the loosening value is ignored, but the user must see and fix it first (merge.ts).
+        const errors = ctx.config.issues.filter((i) => i.level === "error").length;
+        if (errors > 0) {
+          throw new DispatchError(
+            `configuration has ${errors} error(s); fix them (see \`dispatch validate\`) before running`,
+            ExitCode.USAGE,
+            "config.invalid",
+          );
         }
         const result = await executeTask(runnerDeps(ctx, deps.runner), task, { repoPath: ctx.cwd });
         const checked = RunResultSchema.safeParse(result);

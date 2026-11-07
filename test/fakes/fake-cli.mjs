@@ -106,6 +106,9 @@ function classify() {
   const a = args;
   const sub = (key) => ({ kind: "subcommand", key });
   if (["--version", "-v", "-V"].includes(a[0])) return sub("version");
+  // `--help` is a subcommand (built-in flag list, or the config's stdout) only when the scenario
+  // file has a "<cli>:help" key; otherwise it is a run, answered by the run scenarios as before.
+  if (a.includes("--help") && loadScenarioFile()[`${cli}:help`] !== undefined) return sub("help");
   if (cli === "claude" && (a[0] === "plugin" || a[0] === "plugins")) return sub("plugin");
   if (cli === "codex") {
     if (a[0] === "login" && a[1] === "status") return sub("login");
@@ -128,7 +131,36 @@ function classify() {
 
 process.stdout.on("error", () => {});
 process.stderr.on("error", () => {});
-const write = (stream, s) => new Promise((resolve) => stream.write(s, () => resolve()));
+/** Last codex `agent_message` printed; `codex exec -o <file>` writes it there, like the real CLI. */
+let lastAgentMessage = null;
+function noteStdout(s) {
+  for (const line of s.split("\n")) {
+    try {
+      const e = JSON.parse(line);
+      if (e?.type === "item.completed" && e.item?.type === "agent_message") {
+        lastAgentMessage = e.item.text;
+      }
+    } catch {
+      // not a JSON event
+    }
+  }
+}
+const write = (stream, s) => {
+  if (cli === "codex" && stream === process.stdout) noteStdout(s);
+  return new Promise((resolve) => stream.write(s, () => resolve()));
+};
+
+/** `codex exec ... -o <file>`: the real CLI writes the final agent message to <file>. */
+function writeCodexOutputFile() {
+  const i = args.indexOf("-o");
+  const file = i >= 0 ? args[i + 1] : undefined;
+  if (cli !== "codex" || !file || lastAgentMessage === null) return;
+  try {
+    fs.writeFileSync(file, lastAgentMessage);
+  } catch {
+    // like a real CLI that cannot write: the runner falls back to the stream
+  }
+}
 const asLine = (l) => (typeof l === "string" ? l : JSON.stringify(l));
 async function emitLines(lines) {
   for (const l of lines) await write(process.stdout, `${asLine(l)}\n`);
@@ -515,8 +547,52 @@ function agyUsage(cfg) {
   return { stdout: `${JSON.stringify(fixture)}\n` };
 }
 
+/** Long flags listed by `--help` (`codex exec --help` for codex): what the adapter probes look for. */
+const HELP_FLAGS = {
+  claude: [
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "--effort",
+    "--max-turns",
+    "--settings",
+    "--permission-mode",
+    "--tools",
+    "--disallowedTools",
+  ],
+  codex: [
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--strict-config",
+    "--disable",
+    "--cd",
+    "--model",
+    "--config",
+    "--output-last-message",
+    "--sandbox",
+  ],
+  agy: [
+    "--print",
+    "--output-format",
+    "--sandbox",
+    "--disable-slash-commands",
+    "--model",
+    "--effort",
+    "--print-timeout",
+    "--dangerously-skip-permissions",
+  ],
+};
+
 const defaults = {
   version: () => ({ stdout: `${VERSION_TEXT[cli]}\n` }),
+  help: () => ({
+    stdout: `Usage: ${cli} [options]\n\nOptions:\n${HELP_FLAGS[cli].map((f) => `  ${f}`).join("\n")}\n`,
+  }),
   login: (cfg) =>
     cfg.loggedIn === false
       ? { exitCode: 1, stderr: "Not logged in\n" }
@@ -731,7 +807,9 @@ async function main() {
     await write(process.stderr, `fake-cli: unknown scenario ${JSON.stringify(entry.scenario)}\n`);
     return 98;
   }
-  return run(entry);
+  const code = await run(entry);
+  writeCodexOutputFile();
+  return code;
 }
 
 main().then(

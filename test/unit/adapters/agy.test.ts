@@ -671,21 +671,18 @@ const processSpawner: Spawner = {
 
 describe("agy probe (fake CLI)", () => {
   it("[UC4] probes the fake agy: version, help flags, /usage login", async () => {
-    await withFakes(
-      { agy: [{ scenario: "fail", stdout: `${HELP.join("\n")}\n`, exitCode: 0 }] },
-      async (ctx) => {
-        const p = await adapter.probe(instance, deps(processSpawner, join(ctx.binDir, "agy")));
-        expect(p).toMatchObject({ version: "1.5.2", loggedIn: true, outsideCliRange: false });
-        expect(p.flags).toContain("--disable-slash-commands");
-        expect(ctx.readLog({ cli: "agy" }).map((i) => i.key)).toEqual(["version", null, "usage"]);
-      },
-    );
+    await withFakes({ "agy:help": { stdout: `${HELP.join("\n")}\n` } }, async (ctx) => {
+      const p = await adapter.probe(instance, deps(processSpawner, join(ctx.binDir, "agy")));
+      expect(p).toMatchObject({ version: "1.5.2", loggedIn: true, outsideCliRange: false });
+      expect(p.flags).toContain("--disable-slash-commands");
+      expect(ctx.readLog({ cli: "agy" }).map((i) => i.key)).toEqual(["version", "help", "usage"]);
+    });
   });
 
   it("[UC4] reports logged out when the fake /usage is unauthenticated", async () => {
     await withFakes(
       {
-        agy: [{ scenario: "fail", stdout: `${HELP.join("\n")}\n`, exitCode: 0 }],
+        "agy:help": { stdout: `${HELP.join("\n")}\n` },
         "agy:usage": { variant: "unauthenticated" },
       },
       async (ctx) => {
