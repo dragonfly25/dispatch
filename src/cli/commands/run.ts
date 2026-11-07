@@ -31,6 +31,7 @@ import {
 import { executeTask, type RunnerStore } from "../../runner/orchestrate.js";
 import { exitCodeForResult } from "../../runner/result.js";
 import { repoRoot } from "../../sandbox/git.js";
+import { withWeb } from "../../web/index.js";
 import { ExitRequest } from "../exit.js";
 import { addTaskOptions } from "../options.js";
 import { formatSpan } from "../time.js";
@@ -329,6 +330,7 @@ export function registerRun(program: Command, deps: CliDeps): void {
             result = await executeTask(rd, task, {
               repoPath: ctx.cwd,
               ...(from?.h.mcpServers.length ? { mcpServers: from.h.mcpServers } : {}),
+              ...withWeb(from?.h),
             });
           } finally {
             spin?.stop();

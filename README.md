@@ -140,8 +140,10 @@ Claude would hand to a generic helper goes through Dispatch instead.
 **Your own sub-agents** (`.claude/agents/*.md` in the repo or in `~/.claude/agents/`) are delegated
 automatically too, when Dispatch can run them elsewhere: their tools are only file tools (`Read`,
 `Grep`, `Glob`, `LS`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash`, `TodoWrite`), or MCP
-servers that are forwardable for the repo. Agents that need the desktop browser
-(`mcp__Claude_Browser__*`), web tools, other MCP servers or other tools stay on Claude, silently.
+servers that are forwardable for the repo, and the web tools `WebSearch` / `WebFetch` (the external
+agent gets web search; `hosts.claude-code.forward_web: false` keeps such agents on Claude). Agents
+that need the desktop browser (`mcp__Claude_Browser__*`), other MCP servers or other tools stay on
+Claude, silently.
 The hook writes the agent's instructions and the task to a one-time handoff file
 (`~/.dispatch/handoffs/<id>.json`, 0600) and the `dispatch` sub-agent runs `dispatch run --handoff
 <id>`; the agent's `model:` picks the tier (opus/fable → max, sonnet → balanced, haiku → fast;

@@ -23,6 +23,8 @@ export interface TrustedRepo {
    * Absent or empty: none. Read it through {@link forwardableMcpFor}.
    */
   forwardableMcp?: string[];
+  /** False when this repo's merged config turns web forwarding off (`forward_web: false`). */
+  forwardWeb?: boolean;
 }
 
 /** Summary of the active routing policy, injected by SessionStart hooks. */
@@ -63,6 +65,8 @@ export interface PolicySummary {
    * Per-repo lists (with project and local servers) are on {@link TrustedRepo.forwardableMcp}.
    */
   forwardableMcp?: string[];
+  /** Web forwarding (`hosts.claude-code.forward_web`, default true). Absent: true. */
+  forwardWeb?: boolean;
   /** One short paragraph for the host model (`additionalContext`). */
   summary: string;
 }
@@ -103,7 +107,8 @@ function isCache(v: unknown): v is HookCache {
         typeof r === "object" &&
         typeof r.root === "string" &&
         (r.policyHash === null || typeof r.policyHash === "string") &&
-        optionalStrings(r.forwardableMcp),
+        optionalStrings(r.forwardableMcp) &&
+        (r.forwardWeb === undefined || typeof r.forwardWeb === "boolean"),
     ) &&
     p !== undefined &&
     typeof p.profile === "string" &&
@@ -115,6 +120,7 @@ function isCache(v: unknown): v is HookCache {
     (p.claudeAutoApply === undefined || typeof p.claudeAutoApply === "boolean") &&
     (p.forwardMcp === undefined || typeof p.forwardMcp === "boolean") &&
     optionalStrings(p.forwardableMcp) &&
+    (p.forwardWeb === undefined || typeof p.forwardWeb === "boolean") &&
     typeof p.summary === "string"
   );
 }
@@ -152,6 +158,15 @@ export function writeHookCache(dispatchHome: string, cache: HookCache): void {
 export function forwardableMcpFor(cache: HookCache, cwd: string): string[] {
   if (cache.policy.forwardMcp !== true) return [];
   return trustedRepoFor(cache, cwd)?.forwardableMcp ?? cache.policy.forwardableMcp ?? [];
+}
+
+/**
+ * Whether an agent running in `cwd` may be given web access: the global switch (absent: on) and
+ * the trusted repo's own `forward_web: false`. The runner checks the merged setting again.
+ */
+export function forwardWebFor(cache: HookCache, cwd: string): boolean {
+  if (cache.policy.forwardWeb === false) return false;
+  return trustedRepoFor(cache, cwd)?.forwardWeb !== false;
 }
 
 /** The trusted repo containing `cwd` (the longest matching root), or null. */

@@ -43,6 +43,38 @@ describe("forward_mcp: global consent, repo and flags can only turn it off [SEC-
   });
 });
 
+describe("forward_web: on by default, repo and flags can only turn it off [SEC-flags]", () => {
+  const off = G({ hosts: { "claude-code": { forward_web: false } } });
+  const merge = (global: GlobalConfigFile, repo?: Overlay, flags?: Overlay) =>
+    mergeLayers({
+      defaults: defaultSettings(),
+      global,
+      ...(repo ? { repo } : {}),
+      ...(flags ? { flags } : {}),
+    });
+
+  it("defaults to true and follows the global switch", () => {
+    expect(merge(G()).settings.forward_web).toBe(true);
+    expect(merge(G()).provenance.forward_web).toBe("default");
+    expect(merge(off).settings.forward_web).toBe(false);
+    expect(merge(off).provenance.forward_web).toBe("global");
+  });
+
+  it("a repo or flag may switch it off, never back on", () => {
+    expect(merge(G(), { forward_web: false }).settings.forward_web).toBe(false);
+    expect(merge(G(), undefined, { forward_web: false }).settings.forward_web).toBe(false);
+    expect(merge(G(), { forward_web: true }).issues).toEqual([]);
+    for (const layer of ["repo", "flag"] as const) {
+      const res =
+        layer === "repo"
+          ? merge(off, { forward_web: true })
+          : merge(off, undefined, { forward_web: true });
+      expect(res.settings.forward_web).toBe(false);
+      expect(res.issues).toEqual([expect.objectContaining({ level: "error", key: "forward_web" })]);
+    }
+  });
+});
+
 describe("ordinary keys: flags > repo > global > defaults", () => {
   const cases: [string | undefined, string | undefined, string | undefined, string, string][] = [
     [undefined, undefined, undefined, "balance", "default"],

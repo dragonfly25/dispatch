@@ -105,11 +105,19 @@ function globalFile(ctx: AppContext): GlobalConfigFile | null {
 function trustedRepos(
   global: GlobalConfigFile | null,
   mcp: ((root: string) => string[]) | null,
+  webOffAt: string | null,
 ): TrustedRepo[] {
   return Object.entries(global?.trusted_repos ?? {}).flatMap(([id, entry]) => {
     const root = rootOf(id);
     if (root === null) return [];
-    return [{ root, policyHash: entry.hash, ...(mcp ? { forwardableMcp: mcp(root) } : {}) }];
+    return [
+      {
+        root,
+        policyHash: entry.hash,
+        ...(mcp ? { forwardableMcp: mcp(root) } : {}),
+        ...(root === webOffAt ? { forwardWeb: false } : {}),
+      },
+    ];
   });
 }
 
@@ -129,6 +137,12 @@ function mcpLister(ctx: AppContext, consent: boolean): ((root: string | null) =>
       return [];
     }
   };
+}
+
+/** The repo where the command runs when its merged config turns web forwarding off, else null. */
+function webOffHere(ctx: AppContext): string | null {
+  const here = ctx.config.trust.repoId ? rootOf(ctx.config.trust.repoId) : null;
+  return ctx.config.execution.forwardWeb === false ? here : null;
 }
 
 /** Rule actions that send a task to a provider. */
@@ -166,12 +180,13 @@ export function buildHookCache(ctx: AppContext): HookCache {
     claudeAutoApply: claude?.auto_apply ?? true,
     forwardMcp,
     forwardableMcp: mcp ? mcp(null) : [],
+    forwardWeb: claude?.forward_web !== false,
     summary: summarizePolicy(ctx.config.routing),
   };
   return {
     version: 1,
     writtenAt: ctx.clock.now().toISOString(),
-    trustedRepos: trustedRepos(global, mcp),
+    trustedRepos: trustedRepos(global, mcp, webOffHere(ctx)),
     policy,
   };
 }

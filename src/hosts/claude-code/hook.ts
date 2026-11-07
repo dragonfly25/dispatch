@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type { HookInput, HookResponse } from "../../core/contracts.js";
 import {
   forwardableMcpFor,
+  forwardWebFor,
   type HookCache,
   hookDispatchHome,
   readHookCache,
@@ -244,7 +245,10 @@ function customAgentResponse(
   if (consumePassthrough(t.home, key, nowMs)) return SILENT;
   const agent = findAgent(call.type, agentDirs(t.root, env));
   if (agent === null) return SILENT;
-  const verdict = eligibility(agent.def, { forwardableMcp: forwardableMcpFor(t.cache, t.root) });
+  const verdict = eligibility(agent.def, {
+    forwardableMcp: forwardableMcpFor(t.cache, t.root),
+    webSupported: forwardWebFor(t.cache, t.root),
+  });
   if (!verdict.eligible) return SILENT;
   const description = typeof call.fields.description === "string" ? call.fields.description : null;
   const handoff: Handoff = {
@@ -259,6 +263,7 @@ function customAgentResponse(
     autonomy: verdict.autonomy,
     mcpServers: verdict.mcpServers,
     web: verdict.web,
+    webFetch: verdict.webFetch,
     autoApply: t.cache.policy.claudeAutoApply !== false,
     passthroughKey: key,
   };

@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Web access for delegated custom agents: an intercepted agent whose `tools:` list `WebSearch` or
+  `WebFetch` is now delegated (it used to stay on Claude). Codex gets `-c web_search="cached"`
+  (WebSearch) or `"live"` (WebFetch), claude instances get the web tools pre-approved; the shell
+  sandbox network is unchanged and antigravity is never picked. Global switch
+  `hosts.claude-code.forward_web` (default true); repo/flag `forward_web: false` turns it off.
+  Handoff field `webFetch`, `executeTask` option `web`, hook cache field `forwardWeb`; doctor lists
+  such agents as "delegated (…, web)". Live spikes: `docs/spikes/web-access.md`.
 - Claude Code hard mode: the plugin's new `PreToolUse` hook on the `Agent` tool rewrites
   `general-purpose` sub-agent calls to the `dispatch:dispatch` sub-agent in trusted repos whose policy
   delegates. Config `hosts.claude-code.hard` (default true) and `hosts.claude-code.intercept`

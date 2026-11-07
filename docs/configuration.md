@@ -178,11 +178,13 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `hosts.claude-code.exclude` | list of string |  |  | global only | Sub-agent types the hard mode never redirects (default none). |
 | `hosts.claude-code.auto_apply` | boolean |  |  | global only | Apply the clean patch of a successful run started for an intercepted custom agent, so the caller receives modified files as with a native sub-agent (default true; false keeps review-and-apply-yourself). Global only. |
 | `hosts.claude-code.forward_mcp` | boolean |  |  | global only | Trust grant: forward the MCP servers an intercepted agent needs to the external agent that runs it (only servers whose env and header values are pure `${VAR}` references; codex targets only). Asked by `dispatch setup`; default false. A repo or flag can only turn it off (`forward_mcp: false`). |
+| `hosts.claude-code.forward_web` | boolean |  |  | global only | Give web access (codex web search, claude WebSearch/WebFetch) to the external agent that runs an intercepted agent whose `tools:` list WebSearch or WebFetch (default true; false keeps those agents on Claude). Never widens the shell sandbox network. A repo or flag can only turn it off (`forward_web: false`). |
 | `trusted_repos` | map of object |  |  | global only | Written by `dispatch trust`, keyed by realpath of the git common dir. Do not edit by hand. Not allowed in repo files or flags (they are rejected as unknown keys). |
 | `trusted_repos.<repo-id>.hash` | string, required |  |  | global only | sha256 over the relative path and bytes of every policy file. |
 | `trusted_repos.<repo-id>.files` | map of string, required |  |  | global only | Repo-relative path → sha256 of each trusted file. |
 | `trusted_repos.<repo-id>.trusted_at` | string, required |  |  | global only | ISO-8601 time `dispatch trust` recorded the entry. |
 | `forward_mcp` | boolean | `false` |  | repo and flags only (tighten) | `false` turns MCP forwarding off here (global `hosts.claude-code.forward_mcp` turns it on; `true` cannot loosen it). |
+| `forward_web` | boolean | `true` |  | repo and flags only (tighten) | `false` turns web forwarding off here: agents that use WebSearch/WebFetch stay on Claude (global `hosts.claude-code.forward_web`, default true; `true` cannot loosen it). |
 
 ### Example: global config
 

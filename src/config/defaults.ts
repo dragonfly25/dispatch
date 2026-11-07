@@ -43,5 +43,6 @@ export function defaultSettings(): Settings {
     quota: { cache_minutes: 5, readers: {} },
     retention_days: DEFAULT_RETENTION_DAYS,
     forward_mcp: false,
+    forward_web: true,
   };
 }

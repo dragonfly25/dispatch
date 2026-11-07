@@ -57,6 +57,8 @@ export const FORWARD_MCP_DETAIL = [
   "When Claude Code hands one of your agents to Dispatch, the external agent (codex) may start",
   "the MCP servers that agent uses, with the same tools it has in Claude Code. Only servers whose",
   `env and header values are \${VAR} references qualify; secret values are never copied.`,
+  "Agents that use WebSearch/WebFetch are delegated with web access (codex web search, claude web",
+  "tools; no extra shell network) without asking: hosts.claude-code.forward_web: false keeps them on Claude.",
 ].join("\n");
 
 /** The `setup` / `install` flags that carry answers. */

@@ -115,6 +115,25 @@ describe("hook cache: MCP forwarding fields [SEC-mcp]", () => {
   });
 });
 
+describe("hook cache: web forwarding switch [SEC-flags]", () => {
+  it("on by default; the global switch and a trusted repo's `forward_web: false` turn it off", async () => {
+    const k = kit();
+    await k.dispatch(["trust"]);
+    expect(k.cache()?.policy.forwardWeb).toBe(true);
+    expect(k.cache()?.trustedRepos[0]?.forwardWeb).toBeUndefined();
+    writeFileSync(join(k.dir, ".dispatch", "config.yaml"), `${POLICY}forward_web: false\n`);
+    await k.dispatch(["trust"]);
+    expect(k.cache()?.trustedRepos[0]?.forwardWeb).toBe(false);
+    expect(k.cache()?.policy.forwardWeb).toBe(true);
+    writeFileSync(
+      join(home?.dispatchHome ?? "", "config.yaml"),
+      "version: 1\nhosts:\n  claude-code:\n    forward_web: false\n",
+    );
+    await k.dispatch(["trust"]);
+    expect(k.cache()?.policy.forwardWeb).toBe(false);
+  });
+});
+
 describe("hook cache writer [UC9][UC2]", () => {
   it("`trust` writes the cache; the Claude SessionStart hook injects the policy", async () => {
     const k = kit();
