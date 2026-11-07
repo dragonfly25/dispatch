@@ -87,3 +87,53 @@ describe("dispatch CLI", () => {
     expect(io.stderr).toContain("unexpected error: raw");
   });
 });
+
+describe("entry gates [UC1][UC10]", () => {
+  const ctx = (env: Record<string, string> = {}) => ({ platform: "darwin", env });
+
+  it("exits 2 with a WSL hint on an unsupported platform, even with no args", async () => {
+    for (const args of [["--version"], []]) {
+      const { io, sink } = capture();
+      const code = await runCli(args, sink, buildProgram(sink), { platform: "win32", env: {} });
+      expect(code).toBe(2);
+      expect(io.stderr).toMatch(/WSL/);
+    }
+  });
+
+  it("exits 6 with the rules-file message inside the Codex sandbox", async () => {
+    const { io, sink } = capture();
+    const code = await runCli(
+      ["__paths"],
+      sink,
+      buildProgram(sink),
+      ctx({ CODEX_SANDBOX: "seatbelt" }),
+    );
+    expect(code).toBe(6);
+    expect(io.stderr).toMatch(/rules file did not match/);
+    expect(io.stdout).toBe("");
+  });
+
+  it("still allows help and version inside the Codex sandbox", async () => {
+    const { io, sink } = capture();
+    const code = await runCli(
+      ["--version"],
+      sink,
+      buildProgram(sink),
+      ctx({ CODEX_SANDBOX: "seatbelt" }),
+    );
+    expect(code).toBe(0);
+    expect(io.stdout.trim()).toBe(pkg.version);
+  });
+
+  it("hidden __paths prints node/cli/hook paths as JSON and is not listed in help", async () => {
+    const { io, sink } = capture();
+    expect(await runCli(["__paths"], sink, buildProgram(sink), ctx())).toBe(0);
+    const paths = JSON.parse(io.stdout);
+    expect(Object.keys(paths).sort()).toEqual(["cliPath", "hookPath", "nodePath"]);
+    expect(paths.nodePath).toBe(process.execPath);
+
+    const help = capture();
+    await runCli(["--help"], help.sink);
+    expect(help.io.stdout).not.toContain("__paths");
+  });
+});

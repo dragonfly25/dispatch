@@ -21,6 +21,7 @@ export default defineConfig({
         functions: 85,
         branches: 85,
         statements: 85,
+        "src/platform/**": { lines: 95, functions: 95, branches: 95, statements: 95 },
       },
     },
   },
