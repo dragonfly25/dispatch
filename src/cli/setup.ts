@@ -33,8 +33,8 @@ export interface SetupCommandDeps {
   ask: (question: string) => Promise<string>;
   /** True when a person can answer prompts (stdin is a TTY). */
   interactive: boolean;
-  /** Repo-level uninstall (WP21). Absent until that package lands. */
-  repoUninstall?: (io: SetupIo) => Promise<void>;
+  /** Repo-level uninstall (WP21): `uninstall` without `--global`. */
+  repoUninstall?: (io: SetupIo, opts: { yes: boolean; force: boolean }) => Promise<void>;
 }
 
 async function askTty(question: string): Promise<string> {
@@ -64,6 +64,57 @@ function requireHome(env: SetupCommandDeps["env"]): { home: string; dispatchHome
   return { home, dispatchHome: dispatchHome(env) };
 }
 
+/** Options of `dispatch setup`. */
+export interface SetupOptions {
+  refresh?: boolean;
+  yes?: boolean;
+  nonInteractive?: boolean;
+}
+
+/** The `dispatch setup` flow; `install` runs it too when the global config is missing. */
+export async function runSetup(
+  io: SetupIo,
+  deps: SetupCommandDeps,
+  opts: SetupOptions,
+): Promise<void> {
+  const { home, dispatchHome: dHome } = requireHome(deps.env);
+  const plan = await planSetup({
+    home,
+    dispatchHome: dHome,
+    install: deps.install(),
+    hosts: deps.hosts(),
+  });
+  io.out(plan.preview);
+  if (!opts.yes && (opts.nonInteractive || !deps.interactive)) {
+    throw new DispatchError(
+      "nothing was changed; re-run with --yes to apply this plan",
+      ExitCode.USAGE,
+      "setup.needs_confirmation",
+    );
+  }
+  const summary = await applySetup(plan, {
+    dispatchHome: dHome,
+    refresh: opts.refresh === true,
+    runner: deps.runner(home),
+    confirm: opts.yes
+      ? true
+      : async () => /^y(es)?$/i.test((await deps.ask("Apply these changes? [y/N] ")).trim()),
+  });
+  if (!summary.confirmed) {
+    io.out("Nothing was changed.\n");
+    return;
+  }
+  for (const w of summary.warnings) io.err(`warning: ${w}\n`);
+  io.out(
+    `Setup done: ${summary.applied.length} applied, ${summary.unchanged.length} unchanged, ${summary.removed.length} removed.\n`,
+  );
+  if (!opts.refresh && plan.stale.length > 0) {
+    io.out(
+      `${plan.stale.length} earlier edit(s) are no longer planned; run \`dispatch setup --refresh\` to remove them.\n`,
+    );
+  }
+}
+
 /** Registers `setup` and `uninstall` on `program`. */
 export function registerSetupCommands(program: Command, io: SetupIo, deps: SetupCommandDeps): void {
   program
@@ -72,71 +123,38 @@ export function registerSetupCommands(program: Command, io: SetupIo, deps: Setup
     .option("--refresh", "re-render host files and remove edits that are no longer planned")
     .option("-y, --yes", "apply without asking")
     .option("--non-interactive", "never prompt; without --yes only print the plan")
-    .action(async (opts: { refresh?: boolean; yes?: boolean; nonInteractive?: boolean }) => {
-      const { home, dispatchHome: dHome } = requireHome(deps.env);
-      const plan = await planSetup({
-        home,
-        dispatchHome: dHome,
-        install: deps.install(),
-        hosts: deps.hosts(),
-      });
-      io.out(plan.preview);
-      if (!opts.yes && (opts.nonInteractive || !deps.interactive)) {
-        throw new DispatchError(
-          "nothing was changed; re-run with --yes to apply this plan",
-          ExitCode.USAGE,
-          "setup.needs_confirmation",
-        );
-      }
-      const summary = await applySetup(plan, {
-        dispatchHome: dHome,
-        refresh: opts.refresh === true,
-        runner: deps.runner(home),
-        confirm: opts.yes
-          ? true
-          : async () => /^y(es)?$/i.test((await deps.ask("Apply these changes? [y/N] ")).trim()),
-      });
-      if (!summary.confirmed) {
-        io.out("Nothing was changed.\n");
-        return;
-      }
-      for (const w of summary.warnings) io.err(`warning: ${w}\n`);
-      io.out(
-        `Setup done: ${summary.applied.length} applied, ${summary.unchanged.length} unchanged, ${summary.removed.length} removed.\n`,
-      );
-      if (!opts.refresh && plan.stale.length > 0) {
-        io.out(
-          `${plan.stale.length} earlier edit(s) are no longer planned; run \`dispatch setup --refresh\` to remove them.\n`,
-        );
-      }
-    });
+    .action((opts: SetupOptions) => runSetup(io, deps, opts));
 
   program
     .command("uninstall")
     .description("remove Dispatch from this repo, or with --global from this user account")
+    .option("-y, --yes", "repo part: remove without asking")
+    .option("--force", "repo part: also remove files edited since install")
     .option("--global", "remove the host integrations, the launcher and ~/.dispatch")
     .addOption(new Option("--keep-home", "with --global: keep ~/.dispatch (config and state)"))
-    .action(async (opts: { global?: boolean; keepHome?: boolean }) => {
-      if (!opts.global) {
-        if (!deps.repoUninstall) {
-          throw new DispatchError(
-            "repo-level uninstall is not available yet; use `dispatch uninstall --global`",
-            ExitCode.USAGE,
-            "uninstall.repo_unavailable",
-          );
+    .action(
+      async (opts: { global?: boolean; keepHome?: boolean; yes?: boolean; force?: boolean }) => {
+        if (!opts.global) {
+          if (!deps.repoUninstall) {
+            throw new DispatchError(
+              "repo-level uninstall is not available yet; use `dispatch uninstall --global`",
+              ExitCode.USAGE,
+              "uninstall.repo_unavailable",
+            );
+          }
+          await deps.repoUninstall(io, { yes: opts.yes === true, force: opts.force === true });
+          return;
         }
-        await deps.repoUninstall(io);
-        return;
-      }
-      const { home, dispatchHome: dHome } = requireHome(deps.env);
-      const summary = await uninstallGlobal({
-        dispatchHome: dHome,
-        keepDispatchHome: opts.keepHome === true,
-        runner: deps.runner(home),
-      });
-      for (const w of summary.warnings) io.err(`warning: ${w}\n`);
-      io.out(
-        `Removed ${summary.reverted.length} Dispatch edit(s)${summary.homeRemoved ? ` and ${dHome}` : ""}.\n`,
-      );
-    });
+        const { home, dispatchHome: dHome } = requireHome(deps.env);
+        const summary = await uninstallGlobal({
+          dispatchHome: dHome,
+          keepDispatchHome: opts.keepHome === true,
+          runner: deps.runner(home),
+        });
+        for (const w of summary.warnings) io.err(`warning: ${w}\n`);
+        io.out(
+          `Removed ${summary.reverted.length} Dispatch edit(s)${summary.homeRemoved ? ` and ${dHome}` : ""}.\n`,
+        );
+      },
+    );
 }
