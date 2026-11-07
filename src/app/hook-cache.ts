@@ -118,15 +118,24 @@ export function policyDelegates(routing: RoutingConfig): boolean {
   return [...pins, ...(profile?.rules ?? [])].some((r) => DELEGATING.has(r.action.type));
 }
 
+/** `hosts.claude-code.intercept` as the cache list (`"auto"` and `"*"` become one-entry lists). */
+function interceptOf(v: string | readonly string[] | undefined): string[] {
+  if (v === undefined) return [...DEFAULT_CLAUDE_INTERCEPT];
+  return typeof v === "string" ? [v] : [...v];
+}
+
 /** The cache contents for the policy in effect in `ctx`. */
 export function buildHookCache(ctx: AppContext): HookCache {
   const global = globalFile(ctx);
+  const claude = global?.hosts?.["claude-code"];
   const policy: PolicySummary = {
     profile: ctx.config.routing.activeProfile,
     hardMode: global?.hosts?.codex?.hard ?? true,
     hardInterception: policyDelegates(ctx.config.routing),
     claudeHard: global?.hosts?.["claude-code"]?.hard ?? true,
-    claudeIntercept: global?.hosts?.["claude-code"]?.intercept ?? [...DEFAULT_CLAUDE_INTERCEPT],
+    claudeIntercept: interceptOf(claude?.intercept),
+    claudeExclude: [...(claude?.exclude ?? [])],
+    claudeAutoApply: claude?.auto_apply ?? true,
     summary: summarizePolicy(ctx.config.routing),
   };
   return {

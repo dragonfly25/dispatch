@@ -5,6 +5,7 @@
 import { join } from "node:path";
 import { Command } from "commander";
 import { type AppContext, loadAppContext } from "../../app/context.js";
+import { finishHandoffRun } from "../../app/handoff.js";
 import { runnerDeps } from "../../app/runner.js";
 import { dispatchHome } from "../../config/index.js";
 import { systemClock } from "../../core/clock.js";
@@ -167,6 +168,11 @@ export function registerRunCommands(program: Command, deps: CliDeps): void {
                   ...(deps.quotaReaders ? { quotaReaders: deps.quotaReaders } : {}),
                 });
                 return { ...runnerDeps(ctx, deps.runner), close: () => ctx.close() };
+              },
+              onFinished: (payload, result) => {
+                if (payload.handoff === undefined) return;
+                const now = (deps.clock ?? systemClock).now().getTime();
+                finishHandoffRun(dispatchHome(env), payload.handoff, result, now);
               },
             },
             runId,

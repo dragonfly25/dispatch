@@ -11,13 +11,15 @@ Dispatch adds four things around that sandbox:
 - it picks the child's flags, environment and working directory;
 - it keeps repo content from weakening the user's own settings;
 - it filters whatever comes back before the host sees it;
-- it never applies, commits or pushes anything.
+- it never commits or pushes anything, and applies a patch only for an intercepted Claude Code
+  custom agent, after re-checking it (T12).
 
 ## 1. Assets
 
 | Asset | Where it lives | What must hold |
 |---|---|---|
-| The user's repository | working tree, `.git/` (hooks, config, refs) | Changed only by the user or host. Dispatch returns a patch file and never applies it. |
+| The user's repository | working tree, `.git/` (hooks, config, refs) | Changed only by the user or host. Dispatch returns a patch file; it applies one only through `dispatch apply` for a handoff run (T12), to the working tree only. |
+| The user's agent files | `<repo>/.claude/agents/*.md`, `~/.claude/agents/*.md` | Read by the Claude hook; never written, moved or copied. |
 | Host and CLI configuration | `~/.claude`, `~/.codex` (config.toml, hooks.json, rules), `~/.gemini`, `~/.agents` | Dispatch writes only its own entries, at user scope, and setup records them. A run writes nothing there. |
 | Credentials | CLI OAuth files (`~/.claude/.credentials.json`, `~/.codex/auth.json`, `~/.gemini/oauth_creds.json`), API keys and tokens in the environment | Dispatch never reads, copies, logs or sends them (AC7). Children never inherit them from Dispatch's environment. |
 | Quota and money | subscription windows, API pools | Runs are bounded by concurrency limits, timeouts and the depth limit. The user's global config alone sets the ceilings. |
@@ -323,12 +325,46 @@ module.
   the Codex sandbox, as the user. Flags can only tighten what it does, but the user accepts this
   explicitly during `setup`.
 
+### T12. Handoff files and auto-apply are abused (A1, A2, A4)
+
+Claude hard mode for custom agents (after v0.1.0) passes an agent's instructions and task through
+`~/.dispatch/handoffs/<id>.json` and, when the run succeeds, applies its patch.
+
+- **Mitigation.**
+  - The hook writes the handoff atomically with mode 0600 under a random 128-bit id; the relay
+    prompt carries only the id, so no task text is ever shell-quoted.
+  - `run --handoff` accepts only a 32-hex id, refuses a symlink, a non-regular file, a symlinked
+    `handoffs` directory, a file of another user or readable by others, a file older than 1 h and
+    malformed contents, and deletes the file once read. `gc` removes stale handoffs.
+  - The agent's model, effort and autonomy are requests: routing, autonomy ceilings and every
+    tighten-only security key still apply. Agents that need tools Dispatch cannot give the child
+    (desktop browser, web tools, non-forwardable MCP servers, unknown tools) are never delegated.
+  - `dispatch apply <runId>` applies only a run recorded from a handoff (0600 record under
+    `~/.dispatch/handoff-runs/`, written by Dispatch itself) with `autoApply`, with
+    `hosts.claude-code.auto_apply` not false in the global config, status `completed` and outcome
+    `success`, a patch that applied when the run ended, `needsReview` false, no `rejectedPaths`, in
+    the same repository, once. It re-runs `git apply --check` against the current tree and then
+    `git apply` (working tree only: no index, no commit). Any refusal changes nothing.
+  - The patch is the filtered one (T3), so `.git*`, `.dispatch/`, host config dirs, `.env*` and
+    pinned paths can never be applied.
+  - Loop guard: a handed-back run records a hash of (agent type, prompt) in
+    `~/.dispatch/hook-passthrough.json` (0600, 30 min, at most 100 entries); the next identical call
+    runs natively once.
+- **Proof.** `test/unit/hosts/claude-code-agents.test.ts` and `test/unit/cli-handoff.test.ts`
+  `[SEC-handoff]` `[SEC-apply]` (each refusal leaves the tree snapshot unchanged).
+- **Residual risk.** **Auto-apply is a deviation** from "Dispatch never applies patches" (owner
+  decision): the external agent's edits land in the working tree without the host reviewing them
+  first, as a native sub-agent's would. They are unstaged and visible in `git diff`. A local
+  process running as the user could forge a handoff or a record; it could equally edit the files.
+
 ## 5. Accepted risks and disclosures
 
 - **The worktree is not an OS boundary** (T3). Isolation rests on each CLI's native sandbox.
   Dispatch fails closed when it cannot request that sandbox, but cannot prove it at runtime.
 - **agy user hooks and plugins cannot be disabled** in the child (T7).
 - **The Codex rules file is a trust grant** (T11).
+- **Auto-apply of intercepted Claude Code custom agents** (T12), on by default;
+  `hosts.claude-code.auto_apply: false` turns it off.
 - **Automated use of Claude subscriptions is a terms-of-service grey area.** Fanning out over a
   consumer Claude plan through `claude -p` may not match Anthropic's intended use; the README
   discloses it. Each instance's billing pool appears in `status`, and there are no technical

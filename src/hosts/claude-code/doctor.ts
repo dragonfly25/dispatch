@@ -4,7 +4,7 @@
  * to add, never added by Dispatch).
  */
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
 import { readHookCache } from "../../hook/cache.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
@@ -15,7 +15,8 @@ import type {
   DoctorContext,
   DoctorResult,
 } from "../_framework/index.js";
-import { CLAUDE_AGENT_MATCHER, interceptList } from "./hook.js";
+import { agentDirs, eligibility, listAgents } from "./agents.js";
+import { CLAUDE_AGENT_MATCHER, interceptable, interceptList } from "./hook.js";
 import { claudeConfigDir, MARKETPLACE, PLUGIN_ID } from "./integration.js";
 
 /** Injectable dependencies of the checks. */
@@ -23,6 +24,8 @@ export interface ClaudeDoctorDeps {
   /** Runs `claude plugin list --json`; defaults to a real command runner in HOME. */
   runner?: (home: string) => CommandRunner;
   fs?: ResolveFs;
+  /** Directory whose repo's agents `claude-code.hard-mode` lists; default `process.cwd()`. */
+  cwd?: () => string;
 }
 
 const SETUP_FIX = "dispatch setup";
@@ -30,7 +33,7 @@ const REFRESH_FIX = "dispatch setup --refresh";
 
 /** The permission rules the user adds so the `dispatch` sub-agent runs without prompts. */
 export function permissionRules(launcher: string): string[] {
-  return [`Bash(${launcher} run:*)`, `Bash(${launcher} wait:*)`];
+  return [`Bash(${launcher} run:*)`, `Bash(${launcher} wait:*)`, `Bash(${launcher} apply:*)`];
 }
 
 function binaryOf(ctx: DoctorContext, deps: ClaudeDoctorDeps): string | null {
@@ -226,10 +229,10 @@ function permissionCheck(deps: ClaudeDoctorDeps): DoctorCheck {
       return {
         status: "warn",
         message:
-          "without these rules Claude Code asks before every `dispatch run` and `dispatch wait` " +
+          "without these rules Claude Code asks before every `dispatch run`, `dispatch wait` and `dispatch apply` " +
           `of the sub-agent. Dispatch never edits your permissions; add to permissions.allow in ${settings}:\n` +
           rules.map((r) => `  ${r}`).join("\n"),
-        fix: `add ${rules.join(" and ")} to permissions.allow in ${settings}`,
+        fix: `add ${rules.join(", ")} to permissions.allow in ${settings}`,
       };
     },
   };
@@ -300,17 +303,57 @@ function hardModeCheck(deps: ClaudeDoctorDeps): DoctorCheck {
         };
       }
       const list = interceptList(cache);
-      const types = list.includes("*") ? "every sub-agent type" : list.join(", ");
+      const types =
+        list.includes("auto") || list.includes("*")
+          ? "general-purpose and every eligible custom agent"
+          : list.join(", ");
       const idle =
         cache.policy.hardInterception === true
           ? ""
           : "; the active policy delegates nothing, so nothing is redirected now";
+      const applying = cache.policy.claudeAutoApply === false ? "off" : "on";
       return {
         status: "ok",
-        message: `hard mode is on: Agent calls of ${types} are redirected to dispatch:dispatch in trusted repos${idle}`,
+        message:
+          `hard mode is on: Agent calls of ${types} are redirected to dispatch:dispatch in trusted repos${idle}; auto-apply ${applying}` +
+          agentReport(cache, ctx.env, (deps.cwd ?? (() => process.cwd()))()),
       };
     },
   };
+}
+
+/** The checkout root above `dir` (a directory holding `.git`), or null. */
+function checkoutRoot(dir: string): string | null {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, ".git"))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
+/**
+ * One line per project/user agent of the repo at `cwd`: whether hard mode delegates it, and why
+ * not. "" when there are no agents.
+ */
+export function agentReport(
+  cache: NonNullable<ReturnType<typeof readHookCache>>,
+  env: Readonly<Record<string, string | undefined>>,
+  cwd: string,
+): string {
+  const agents = listAgents(agentDirs(checkoutRoot(cwd), env));
+  if (agents.length === 0) return "";
+  const list = interceptList(cache);
+  const exclude = cache.policy.claudeExclude ?? [];
+  const lines = agents.map((a) => {
+    const where = `${a.name} (${a.source})`;
+    if (!interceptable(a.name, list, exclude)) {
+      return `${where}: stays on Claude (not in hosts.claude-code.intercept, or excluded)`;
+    }
+    const v = eligibility(a.def, { forwardableMcp: cache.policy.forwardableMcp });
+    return v.eligible
+      ? `${where}: delegated (${v.autonomy}${a.def.model ? `, model ${a.def.model}` : ""})`
+      : `${where}: stays on Claude (${v.reason})`;
+  });
+  return `\nyour sub-agents here:\n${lines.map((l) => `  ${l}`).join("\n")}`;
 }
 
 /** The Claude Code doctor checks. */

@@ -68,7 +68,7 @@ describe("[UC2] automatic delegation from Claude Code", () => {
     expect(context).toContain("profile: preserve");
     expect(context).toContain("delegated to codex");
     expect(context).toContain("dispatch:dispatch");
-    expect(context).toContain('of type "general-purpose" are redirected to Dispatch');
+    expect(context).toContain('of type "general-purpose" and of your own sub-agents');
 
     // 1b. Hard mode: a general-purpose Agent call is rewritten to the Dispatch sub-agent.
     const pre = w.exec(

@@ -13,7 +13,21 @@ All notable changes to this project are documented here. The format follows
   (default `["general-purpose"]`, `"*"` for every type). Doctor check `claude-code.hard-mode`.
   Existing installs: `dispatch setup --refresh`, then restart Claude Code sessions.
 
+- Claude Code hard mode for your own sub-agents (`.claude/agents/*.md`, project and user): eligible
+  agents are redirected through a one-time handoff file (`dispatch run --handoff <id>`), with the
+  agent's instructions, model (tier), effort and autonomy. Agents using the desktop browser, web
+  tools, non-forwardable MCP servers or other tools stay on Claude. Doctor `claude-code.hard-mode`
+  lists the agents of the current repo and why each stays or goes.
+- `dispatch apply <runId>`: applies the clean patch of a successful handoff run to the working tree
+  (auto-apply, `hosts.claude-code.auto_apply`, default true). The relay calls it; doctor prints the
+  new `Bash(... apply:*)` permission rule.
+- Config `hosts.claude-code.exclude` and `hosts.claude-code.auto_apply`; `dispatch gc` removes
+  stale handoffs, expired passthrough entries and old handoff-run records.
+
 ### Changed
+- `hosts.claude-code.intercept` defaults to `auto` (general-purpose plus eligible custom agents);
+  `"*"` now means every eligible type (built-ins without an agent file are no longer redirected).
+- The claude reverse model table classifies `*fable*` as `max`.
 - The SessionStart policy text (Claude Code and Codex) now says that task types the policy routes to a
   provider are delegated through Dispatch unless the user says otherwise.
 

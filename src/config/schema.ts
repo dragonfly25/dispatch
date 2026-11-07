@@ -323,11 +323,21 @@ export const GlobalConfigFileSchema = z
                 "Rewrite intercepted Claude Code sub-agent calls (Agent tool) to the `dispatch:dispatch` sub-agent in trusted repos whose policy delegates (default true); false keeps only the SessionStart context.",
               ),
             intercept: z
-              .array(z.string().min(1).max(100))
-              .max(50)
+              .union([z.enum(["auto", "*"]), z.array(z.string().min(1).max(100)).max(50)])
               .optional()
               .describe(
-                'Sub-agent types the hard mode redirects (default ["general-purpose"]; a call without a type counts as general-purpose). `"*"` means every type; `dispatch:dispatch` is never redirected.',
+                'Sub-agent types the hard mode redirects. `"auto"` (default): `general-purpose` (a call without a type counts as general-purpose) and every eligible custom agent of `.claude/agents/`. A list is an allow-list of types, still subject to eligibility; `"*"` means every eligible type. Built-in types without an agent file, plugin agents and `dispatch:dispatch` are never redirected.',
+              ),
+            exclude: z
+              .array(z.string().min(1).max(100))
+              .max(100)
+              .optional()
+              .describe("Sub-agent types the hard mode never redirects (default none)."),
+            auto_apply: z
+              .boolean()
+              .optional()
+              .describe(
+                "SECURITY. Apply the clean patch of a successful run started for an intercepted custom agent, so the caller receives modified files as with a native sub-agent (default true; false keeps review-and-apply-yourself). Global only.",
               ),
           })
           .strict()
