@@ -10,6 +10,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{HOOK_COMMAND_PRE_TOOL_USE}}",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

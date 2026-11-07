@@ -97,7 +97,7 @@ Security tags: all 15 `[SEC-*]` groups PASS. Total: 1,398 tests passed, 1 skippe
 | Risk | State at v0.1.0 | Notes |
 |---|---|---|
 | Quota channels change/disappear | Mitigated | Codex app-server is official; Claude passive `rate_limit_event` + `claude -p /usage` (after v0.1.0); agy `/usage`; estimator + `stale`; UC11/AC4 tested. |
-| No hard interception in Claude Code | Accepted (spec: soft) | PreToolUse on `Agent` exists in current Claude Code; candidate for v0.2. |
+| No hard interception in Claude Code | Resolved (after v0.1.0) | PreToolUse on `Agent` rewrites `general-purpose` sub-agents to `dispatch:dispatch` (`updatedInput`), verified live; see "After v0.1.0". |
 | Codex `SubagentStart` can't redirect | Resolved | UC3 via PreToolUse `deny_redirect` (multi-agent V2 encrypts spawn messages; proxy rewrite impossible). |
 | Antigravity streaming/hooks | Resolved technically; **ToS-restricted** | Experimental, off by default, read-only, explicit ToS acknowledgement; child user hooks cannot be disabled (disclosed by doctor). |
 | Billing/OAuth rule changes | Active | Claude automated use of subscriptions is a grey area; Google forbids wrapping on consumer plans; README discloses; `pool` shown in `status`. |
@@ -155,6 +155,18 @@ Taken during execution:
   fallback, UC11 behaviour (stale/estimate) when both fail; `doctor` reports the channel.
 - Per-model windows have no plan-table capacity (no published allowance): they are shown and count
   in routing as real readings only, never estimated.
+- **Claude Code hard mode** (UC2): the plugin gains a `PreToolUse` hook (matcher `Agent|Task`). In a
+  trusted repo whose policy delegates, with `hosts.claude-code.hard` on (default), it rewrites
+  intercepted sub-agent calls (`hosts.claude-code.intercept`, default `general-purpose`; `"*"` = all)
+  to `dispatch:dispatch` through `permissionDecision: "allow"` + `updatedInput`. Verified once on
+  Claude Code 2.1.301 (`claude -p --plugin-dir`, haiku): the parent's `Agent{general-purpose}` call
+  ran as the Dispatch relay. The SessionStart text now says delegable task types go through Dispatch
+  unless the user says otherwise (Codex wording aligned). Claude reads a directory-marketplace plugin
+  from its folder (verified), so `setup --refresh` reaches new sessions without a reinstall or a
+  version bump; running sessions need a restart. Doctor: `claude-code.hard-mode`.
+- **Deviation:** spec §5 ("Claude Code: Soft" at launch) is superseded for `general-purpose`
+  sub-agents, as approved by the owner. The frozen `SubagentStrategy` enum has no "rewrite" value, so
+  the Claude integration still reports `subagentStrategy: "none"`; an ADR could add one.
 
 ## Process notes
 

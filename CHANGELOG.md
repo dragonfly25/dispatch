@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Claude Code hard mode: the plugin's new `PreToolUse` hook on the `Agent` tool rewrites
+  `general-purpose` sub-agent calls to the `dispatch:dispatch` sub-agent in trusted repos whose policy
+  delegates. Config `hosts.claude-code.hard` (default true) and `hosts.claude-code.intercept`
+  (default `["general-purpose"]`, `"*"` for every type). Doctor check `claude-code.hard-mode`.
+  Existing installs: `dispatch setup --refresh`, then restart Claude Code sessions.
+
+### Changed
+- The SessionStart policy text (Claude Code and Codex) now says that task types the policy routes to a
+  provider are delegated through Dispatch unless the user says otherwise.
+
 ## [0.1.0] — 2026-11-07
 
 First public version. Implements the functional spec (`docs/spec.md`) with the deviations recorded in

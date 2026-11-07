@@ -68,6 +68,40 @@ describe("[UC2] automatic delegation from Claude Code", () => {
     expect(context).toContain("profile: preserve");
     expect(context).toContain("delegated to codex");
     expect(context).toContain("dispatch:dispatch");
+    expect(context).toContain('of type "general-purpose" are redirected to Dispatch');
+
+    // 1b. Hard mode: a general-purpose Agent call is rewritten to the Dispatch sub-agent.
+    const pre = w.exec(
+      "/usr/bin/env",
+      [
+        "-i",
+        "PATH=/usr/bin:/bin",
+        `HOME=${w.home.home}`,
+        "/bin/sh",
+        "-c",
+        hooks.hooks.PreToolUse[0].hooks[0].command as string,
+      ],
+      {
+        input: JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_name: "Agent",
+          tool_input: {
+            description: "auth tests",
+            prompt: "Write tests for src/auth.ts",
+            subagent_type: "general-purpose",
+          },
+          cwd: w.repo.dir,
+        }),
+      },
+    );
+    expect(pre.code, pre.stderr).toBe(0);
+    const rewrite = JSON.parse(pre.stdout).hookSpecificOutput;
+    expect(rewrite.permissionDecision).toBe("allow");
+    expect(rewrite.updatedInput).toMatchObject({
+      description: "auth tests",
+      subagent_type: "dispatch:dispatch",
+      prompt: expect.stringMatching(/redirected to Dispatch[\s\S]*Write tests for src\/auth\.ts$/),
+    });
 
     // 2. The sub-agent (rendered from assets/hosts) runs exactly this command shape.
     const agent = readFileSync(join(plugin, "agents", "dispatch.md"), "utf8");

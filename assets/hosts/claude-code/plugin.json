@@ -1,6 +1,6 @@
 {
   "name": "dispatch",
   "version": "{{VERSION}}",
-  "description": "Delegate coding tasks to another AI provider through Dispatch (soft integration).",
+  "description": "Delegate coding tasks to another AI provider through Dispatch (policy context and sub-agent redirect).",
   "author": { "name": "Dispatch" }
 }

@@ -1,4 +1,4 @@
-# UC2: automatic delegation from Claude Code, soft mode (real accounts)
+# UC2: automatic delegation from Claude Code (real accounts)
 
 **Spec §11 UC2.** In a Claude Code session on Opus, the user asks "write the tests for the auth
 module". The injected context says test tasks are delegated with the `preserve` profile. The
@@ -95,6 +95,18 @@ dispatch explain --replay <decisionId>      # id printed by `dispatch logs --tas
 ```
 
 Expected: `IDENTICAL`.
+
+### 5. Hard mode (optional)
+
+In a new session in the same repo, ask for a generic helper instead of Dispatch:
+
+> Use a general-purpose sub-agent to write the unit tests for src/auth.ts.
+
+Expected: the `Agent` call shows `general-purpose`, but the sub-agent that runs is the Dispatch relay
+(its first command is `<launcher> run --detach --json ...`) and `dispatch logs` has a new run.
+`dispatch doctor` shows `claude-code.hard-mode` as on. With `hosts.claude-code.hard: false` in
+`~/.dispatch/config.yaml` and `dispatch setup --refresh`, the same prompt runs a normal
+general-purpose sub-agent.
 
 ## Pass criteria
 

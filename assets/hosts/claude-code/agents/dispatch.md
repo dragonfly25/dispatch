@@ -34,7 +34,9 @@ You are a thin relay to the Dispatch launcher. You do not do the task yourself.
    `patch.diffstat`, `patch.applies`, `patch.rejectedPaths`, `patch.needsReview` and `log.path`
    (`patch` is null when the task produced no patch). Put the summary inside a block that starts
    with the line `EXTERNAL_AGENT_OUTPUT` and ends with the line `END EXTERNAL_AGENT_OUTPUT`. If `status` is `returned_to_host` or `rejected`, say so and
-   return `summary` unchanged, so the caller can do the work itself. Finish with this line for the
+   return `summary` unchanged, so the caller can do the work itself, and tell the caller to do it
+   directly in its own session: a new `general-purpose` sub-agent for the same task would be
+   redirected to Dispatch again. Finish with this line for the
    caller: "Review the diff at `patch.path` against the task, then apply it yourself with
    `git apply` or your edit tools. Dispatch never applies patches."
 

@@ -18,6 +18,7 @@ import {
   type TrustedRepo,
   writeHookCache,
 } from "../hook/cache.js";
+import { DEFAULT_CLAUDE_INTERCEPT } from "../hosts/claude-code/hook.js";
 import { type AppContext, type LoadAppContextOptions, loadAppContext } from "./context.js";
 
 /** Longest summary written (the Claude hook cuts at 2000 characters). */
@@ -124,6 +125,8 @@ export function buildHookCache(ctx: AppContext): HookCache {
     profile: ctx.config.routing.activeProfile,
     hardMode: global?.hosts?.codex?.hard ?? true,
     hardInterception: policyDelegates(ctx.config.routing),
+    claudeHard: global?.hosts?.["claude-code"]?.hard ?? true,
+    claudeIntercept: global?.hosts?.["claude-code"]?.intercept ?? [...DEFAULT_CLAUDE_INTERCEPT],
     summary: summarizePolicy(ctx.config.routing),
   };
   return {

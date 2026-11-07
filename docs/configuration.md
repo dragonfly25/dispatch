@@ -172,6 +172,9 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `hosts` | object |  |  | global only | Host integration settings (global file only). |
 | `hosts.codex` | object |  |  | global only | Codex host integration. |
 | `hosts.codex.hard` | boolean |  |  | global only | Redirect Codex native sub-agent spawns to Dispatch in trusted repos whose policy delegates (default true); false keeps only the SessionStart context. |
+| `hosts.claude-code` | object |  |  | global only | Claude Code host integration. |
+| `hosts.claude-code.hard` | boolean |  |  | global only | Rewrite intercepted Claude Code sub-agent calls (Agent tool) to the `dispatch:dispatch` sub-agent in trusted repos whose policy delegates (default true); false keeps only the SessionStart context. |
+| `hosts.claude-code.intercept` | list of string |  |  | global only | Sub-agent types the hard mode redirects (default ["general-purpose"]; a call without a type counts as general-purpose). `"*"` means every type; `dispatch:dispatch` is never redirected. |
 | `trusted_repos` | map of object |  |  | global only | Written by `dispatch trust`, keyed by realpath of the git common dir. Do not edit by hand. Not allowed in repo files or flags (they are rejected as unknown keys). |
 | `trusted_repos.<repo-id>.hash` | string, required |  |  | global only | sha256 over the relative path and bytes of every policy file. |
 | `trusted_repos.<repo-id>.files` | map of string, required |  |  | global only | Repo-relative path → sha256 of each trusted file. |

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { type PolicySummary, writeHookCache } from "../../../src/hook/cache.js";
 import {
   applySetup,
   type CommandRunner,
@@ -288,6 +289,87 @@ describe("claude-code.permission-rule [UC1]", () => {
   });
 });
 
+describe("claude-code.hard-mode [UC2]", () => {
+  const run = () => check("claude-code.hard-mode", { fs: FOUND }).run(dctx());
+  const hooksFile = () =>
+    join(h.dispatchHome, "hosts", "claude-code", "plugins", "dispatch", "hooks", "hooks.json");
+
+  async function installed() {
+    h = tempHome();
+    mkdirSync(join(h.home, ".claude"));
+    const integration = createClaudeCodeIntegration({
+      env: () => ({ HOME: h.home, PATH: "/bin" }),
+      fs: FOUND,
+    });
+    const plan = await planSetup({
+      home: h.home,
+      dispatchHome: h.dispatchHome,
+      install: {
+        nodePath: process.execPath,
+        cliPath: "/opt/d/cli.mjs",
+        hookPath: "/opt/d/hook.mjs",
+      },
+      hosts: [integration],
+    });
+    await applySetup(plan, {
+      dispatchHome: h.dispatchHome,
+      confirm: true,
+      runner: fakeClaudeRunner(h.home),
+    });
+  }
+
+  const cache = (policy: Partial<PolicySummary>) =>
+    writeHookCache(h.dispatchHome, {
+      version: 1,
+      writtenAt: "2026-11-07T00:00:00.000Z",
+      trustedRepos: [],
+      policy: { profile: "balance", hardMode: true, summary: "s", ...policy },
+    });
+
+  it("reports hard mode on with the intercept list, off, and an idle policy", async () => {
+    await installed();
+    cache({ hardInterception: true, claudeHard: true, claudeIntercept: ["general-purpose"] });
+    expect(await run()).toMatchObject({
+      status: "ok",
+      message: expect.stringContaining("hard mode is on: Agent calls of general-purpose"),
+    });
+    cache({ hardInterception: false, claudeHard: true, claudeIntercept: ["*"] });
+    expect((await run()).message).toMatch(/every sub-agent type.*delegates nothing/);
+    cache({ hardInterception: true, claudeHard: false });
+    expect(await run()).toMatchObject({
+      status: "ok",
+      message: expect.stringContaining("hard mode is off"),
+    });
+  });
+
+  it("warns with --refresh for an old cache, a missing cache or a hooks.json without the hook", async () => {
+    await installed();
+    expect(await run()).toMatchObject({ status: "warn", fix: "dispatch setup --refresh" });
+    cache({ hardInterception: true });
+    expect(await run()).toMatchObject({ status: "warn", fix: "dispatch setup --refresh" });
+    cache({ hardInterception: true, claudeHard: true });
+    const parsed = JSON.parse(readFileSync(hooksFile(), "utf8"));
+    delete parsed.hooks.PreToolUse;
+    writeFileSync(hooksFile(), JSON.stringify(parsed));
+    expect(await run()).toMatchObject({
+      status: "warn",
+      message: expect.stringContaining("no PreToolUse hook"),
+      fix: "dispatch setup --refresh",
+    });
+    writeFileSync(hooksFile(), "{nope");
+    expect(await run()).toMatchObject({ status: "warn" });
+  });
+
+  it("is ok when Claude Code is absent; warns when the plugin was never set up", async () => {
+    h = tempHome();
+    expect(await check("claude-code.hard-mode", { fs: NONE }).run(dctx())).toMatchObject({
+      status: "ok",
+    });
+    mkdirSync(join(h.home, ".claude"));
+    expect(await run()).toMatchObject({ status: "warn", fix: "dispatch setup" });
+  });
+});
+
 describe("registration", () => {
   it("builtinRegistry registers the claude-code and codex hosts and their checks", () => {
     const reg = builtinRegistry();
@@ -297,6 +379,7 @@ describe("registration", () => {
       "claude-code.plugin",
       "claude-code.files",
       "claude-code.permission-rule",
+      "claude-code.hard-mode",
       "codex.files",
       "codex.rules-launcher",
       "codex.hooks-trusted",

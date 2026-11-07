@@ -44,7 +44,7 @@ Other answer flags: `--host claude-code|codex|none`, `--autonomy read-only|workt
 | `~/.dispatch/bin/dispatch` | The launcher. It holds absolute paths to Node and Dispatch, so hooks work even when the host was started from a GUI with a minimal `PATH`. |
 | `~/.dispatch/config.yaml` | Your answers, commented. Edit it for thresholds, extra accounts and the like; see [configuration.md](configuration.md). |
 | `~/.dispatch/setup-manifest.json` | A record of every edit, so uninstall can undo it exactly. |
-| Claude Code | A user-scope plugin, installed through `claude plugin install dispatch@dispatch-local -s user` from a local marketplace under `~/.dispatch/hosts/claude-code/`. It contains the `dispatch` sub-agent and a `SessionStart` hook that tells the session how and when to delegate. Dispatch itself writes nothing under `~/.claude`. |
+| Claude Code | A user-scope plugin, installed through `claude plugin install dispatch@dispatch-local -s user` from a local marketplace under `~/.dispatch/hosts/claude-code/`. It contains the `dispatch` sub-agent, a `SessionStart` hook that tells the session how and when to delegate, and a `PreToolUse` hook on the `Agent` tool that redirects `general-purpose` sub-agents to Dispatch in trusted repos (hard mode, `hosts.claude-code.hard` / `hosts.claude-code.intercept`). Claude Code reads the plugin from that folder, so `dispatch setup --refresh` updates it for every new session without a reinstall. Dispatch itself writes nothing under `~/.claude`. |
 | Codex | A skill in `~/.agents/skills/dispatch/`, hook entries in `~/.codex/hooks.json` (marker-delimited, other entries untouched), and a rules file `~/.codex/rules/dispatch.rules`. |
 
 ### Trust grants
@@ -114,6 +114,7 @@ Run `dispatch doctor`; each line has a status and a `fix:`. The usual ones:
 | `<cli> was not found on PATH` | Install the CLI, or set `providers.<id>.binary` in `~/.dispatch/config.yaml`. |
 | `not logged in` / `login state is unknown` | `codex login`; for `claude` and `agy` run the CLI once interactively. `doctor --live` proves the login. |
 | `claude-code.permission-rule` warns | Add the printed `Bash(... run:*)` and `Bash(... wait:*)` rules to `permissions.allow`. |
+| `claude-code.hard-mode` warns (no PreToolUse hook, or the cache does not say) | The plugin predates hard mode: `dispatch setup --refresh`, then restart Claude Code sessions. |
 | `CODEX_SANDBOX` set (`host.codex-rule`) | The Codex rule did not match. Use the absolute launcher path and a single-quoted task, run `dispatch setup --refresh`, and approve the Dispatch hooks in Codex `/hooks`. |
 | `quota channel is broken` | A provider changed its format. Routing continues on estimates and `status` shows `stale`; update Dispatch, or set `quota.readers.<id>.enabled: false`. |
 

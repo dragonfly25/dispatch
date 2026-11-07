@@ -124,7 +124,17 @@ The session sees the Dispatch policy and hands the task to the `dispatch` sub-ag
 `dispatch run --detach` and `dispatch wait`. The router picks a provider other than Claude, the task
 runs in a worktree, and you get back a summary (marked as coming from an external agent) and the path
 of a patch. Claude reviews the diff and applies it with its own tools. You can also ask directly:
-"delegate this to Codex". To see what would happen without running anything:
+"delegate this to Codex".
+
+**Hard mode** (on by default): in a trusted repo whose policy delegates something, the plugin's
+`PreToolUse` hook rewrites `general-purpose` sub-agent calls to the `dispatch` sub-agent, so a task
+Claude would hand to a generic helper goes through Dispatch instead; your own agent types (Explore,
+Plan, custom ones) are untouched unless you list them in `hosts.claude-code.intercept` (`"*"` means
+all). Turn it off with `hosts.claude-code.hard: false` in `~/.dispatch/config.yaml`, then
+`dispatch setup --refresh`. Existing installs get the hook with `dispatch setup --refresh`; restart
+running Claude Code sessions to pick it up.
+
+To see what would happen without running anything:
 
 ```sh
 dispatch explain --task "write unit tests for the auth module" --task-type test --path src/auth
