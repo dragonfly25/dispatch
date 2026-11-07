@@ -32,7 +32,7 @@ describe("loadEffectiveConfig: defaults", () => {
     expect(r.activeProfile).toBe("balance");
     expect(r.activePreset).toBe("mirror");
     expect(Object.keys(r.profiles).sort()).toEqual(["balance", "off", "preserve", "specialize"]);
-    expect(Object.keys(r.presets).sort()).toEqual(["economy", "mirror"]);
+    expect(Object.keys(r.presets).sort()).toEqual(["custom", "economy", "mirror"]);
     expect(r.presets.economy?.effortShift).toBe(-1);
     expect(Object.keys(r.models).sort()).toEqual(["antigravity", "claude", "codex"]);
     expect(r.models.claude?.tiers.max?.relativeCost).toBe(10);

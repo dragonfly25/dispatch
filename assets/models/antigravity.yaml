@@ -1,5 +1,21 @@
-# Model table of the antigravity adapter (experimental, read-only).
-# TODO(WP9): placeholder values; verify model names, efforts and costs.
+# Model table of the "antigravity" adapter (agy; experimental, read-only, disabled by default).
+#
+# Data, not logic; override in ~/.dispatch/mappings or .dispatch/mappings
+# (a mapping file with a `models.antigravity:` block replaces this whole table).
+#
+# How to read it:
+#   tiers.<tier>.model         real model id passed to `agy --model`. Gemini models ship one id
+#                              per thinking level (flash-low/medium/high), so the tier picks the
+#                              level and the effort map below only feeds `agy --effort`
+#                              (that flag is still to be verified, see docs/spikes/agy.md)
+#   tiers.<tier>.relative_cost indicative cost inside this table, 1 = cheapest; used only by
+#                              the estimator and `status --compare`, never by routing
+#   reverse                    ordered model glob -> tier list; classifies the model the host
+#                              asked for (first match wins)
+#
+# Ids from `agy models` on agy 1.5.2. The same command lists claude-sonnet-4-6,
+# claude-opus-4-6-thinking and gpt-oss-120b-medium: they draw on a separate third-party quota
+# bucket, so they are only used through the reverse map (classification), not as tier targets.
 version: 1
 models:
   antigravity:
@@ -12,16 +28,22 @@ models:
         }
       balanced:
         {
-          model: gemini-3.8-flash,
+          model: gemini-3.8-flash-medium,
           effort: { low: low, medium: medium, high: high },
           relative_cost: 2,
         }
       max:
         {
-          model: gemini-3.8-pro,
+          model: gemini-3.8-flash-high,
           effort: { low: low, medium: medium, high: high },
-          relative_cost: 5,
+          relative_cost: 4,
         }
     reverse:
-      - { pattern: "*flash*", tier: fast }
+      - { pattern: "*flash-low*", tier: fast }
+      - { pattern: "*flash-medium*", tier: balanced }
+      - { pattern: "*flash-high*", tier: max }
+      - { pattern: "*opus*", tier: max }
       - { pattern: "*pro*", tier: max }
+      - { pattern: "*sonnet*", tier: balanced }
+      - { pattern: "gpt-oss-*", tier: balanced }
+      - { pattern: "*flash*", tier: fast }

@@ -1,13 +1,47 @@
-# Built-in profile "specialize": preferred provider per task type, with quota fallback.
-# TODO(WP9): complete the shipped profiles.
+# Built-in profile "specialize": quality per task type, with quota fallback.
+#
+# A table of task type -> preferred provider. Every rule is a `fallback`, so when the preferred
+# provider is below its quota threshold (or is the host itself) the next one is tried, and the
+# host is the implicit last step.
+#
+# Everything this profile does is written in this file; there is no hidden logic. Rules are
+# evaluated top to bottom, first match wins; see balance.yaml for the full list of match fields
+# and actions. Edit the order of the instances to change who is preferred.
 version: 1
 description: Task type -> preferred provider, falling back on quota.
 rules:
   - id: specialize-tests
+    description: Tests go to codex first.
     match: { task_type: [test] }
     action: { type: fallback, instances: [codex, claude] }
+
+  # Antigravity is read-only, so it only appears in rules that match read-only tasks
+  # (`autonomy: [read-only]`). It is disabled by default; while it is, this rule skips it.
+  - id: specialize-readonly-analysis
+    description: Read-only review and docs analysis may use antigravity first.
+    match: { task_type: [review, docs], autonomy: [read-only] }
+    action: { type: fallback, instances: [antigravity, claude, codex] }
+
   - id: specialize-review
+    description: Reviews that need more than read access go to claude first.
     match: { task_type: [review] }
     action: { type: fallback, instances: [claude, codex] }
+
+  - id: specialize-refactor
+    description: Refactors and new features go to claude first.
+    match: { task_type: [refactor, feature] }
+    action: { type: fallback, instances: [claude, codex] }
+
+  # Second opinion (UC7): run reviews on two providers and compare the results yourself.
+  # Uncomment and move it ABOVE specialize-review (a rule below a matching rule never runs).
+  # It costs twice the quota; fanout needs two enabled instances other than the host, e.g. codex
+  # plus a second Claude account such as `claude-alt` when the host is Claude Code.
+  #
+  # - id: specialize-review-second-opinion
+  #   match: { task_type: [review] }
+  #   action: { type: fanout, instances: [codex, claude-alt] }
+
+  # Catch-all: no `match`, so it takes every other task. Keep it last.
   - id: specialize-default
+    description: Other tasks go to the codex/claude instance with the most quota left.
     action: { type: fallback, instances: [codex, claude], strategy: most_remaining }

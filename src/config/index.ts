@@ -21,3 +21,4 @@ export {
   RepoConfigFileSchema,
 } from "./schema.js";
 export { checkTrust, findRepo, readPolicySet, type TrustStatus, trustRepo } from "./trust.js";
+export { type ValidateInput, type ValidationIssue, validate } from "./validate.js";
