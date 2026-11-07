@@ -168,6 +168,9 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `quota.cache_minutes` | number | `5` | at least 0 | global only | Minutes a real quota reading stays fresh (default 5). |
 | `quota.readers` | map of object | `{}` |  | global only | Quota readers by instance id; `enabled: false` turns a reader off. Routing works with every reader disabled (the estimator takes over). |
 | `quota.readers.<instance>.enabled` | boolean, required |  |  | global only | `false` turns this instance's quota reader off. |
+| `hosts` | object |  |  | global only | Host integration settings (global file only). |
+| `hosts.codex` | object |  |  | global only | Codex host integration. |
+| `hosts.codex.hard` | boolean |  |  | global only | Redirect Codex native sub-agent spawns to Dispatch in trusted repos whose policy delegates (default true); false keeps only the SessionStart context. |
 | `trusted_repos` | map of object |  |  | global only | Written by `dispatch trust`, keyed by realpath of the git common dir. Do not edit by hand. Not allowed in repo files or flags (they are rejected as unknown keys). |
 | `trusted_repos.<repo-id>.hash` | string, required |  |  | global only | sha256 over the relative path and bytes of every policy file. |
 | `trusted_repos.<repo-id>.files` | map of string, required |  |  | global only | Repo-relative path → sha256 of each trusted file. |

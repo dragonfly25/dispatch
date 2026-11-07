@@ -8,4 +8,5 @@ import type { HookHostTable } from "./run.js";
  */
 export const HOOK_HOSTS: HookHostTable = {
   "claude-code": async () => (await import("../hosts/claude-code/hook.js")).hookHandlers,
+  codex: async () => (await import("../hosts/codex/hook.js")).hookHandlers,
 };

@@ -63,8 +63,8 @@ describe("runHook [UC9][AC5]", () => {
     expect(await runHook(args, stdin, table)).toEqual({ exitCode: 0 });
   });
 
-  it("ships the claude-code host (WP22); codex lands with WP27", () => {
-    expect(Object.keys(HOOK_HOSTS)).toEqual(["claude-code"]);
+  it("ships the claude-code (WP22) and codex (WP27) hosts", () => {
+    expect(Object.keys(HOOK_HOSTS)).toEqual(["claude-code", "codex"]);
   });
 
   it("readLimited enforces the size limit and survives stream errors", async () => {

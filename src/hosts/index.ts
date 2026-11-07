@@ -5,6 +5,8 @@
 import { manifestCheck, registry } from "./_framework/index.js";
 import { claudeDoctorChecks } from "./claude-code/doctor.js";
 import { claudeCodeIntegration } from "./claude-code/integration.js";
+import { codexDoctorChecks } from "./codex/doctor.js";
+import { codexIntegration } from "./codex/integration.js";
 
 let done = false;
 
@@ -14,6 +16,8 @@ export function builtinRegistry(): typeof registry {
     registry.registerDoctorCheck(manifestCheck);
     registry.registerHost(claudeCodeIntegration);
     for (const check of claudeDoctorChecks()) registry.registerDoctorCheck(check);
+    registry.registerHost(codexIntegration);
+    for (const check of codexDoctorChecks()) registry.registerDoctorCheck(check);
     done = true;
   }
   return registry;

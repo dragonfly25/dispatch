@@ -289,6 +289,24 @@ export const GlobalConfigFileSchema = z
       .strict()
       .optional()
       .describe("Quota reading settings (global file only)."),
+    hosts: z
+      .object({
+        codex: z
+          .object({
+            hard: z
+              .boolean()
+              .optional()
+              .describe(
+                "Redirect Codex native sub-agent spawns to Dispatch in trusted repos whose policy delegates (default true); false keeps only the SessionStart context.",
+              ),
+          })
+          .strict()
+          .optional()
+          .describe("Codex host integration."),
+      })
+      .strict()
+      .optional()
+      .describe("Host integration settings (global file only)."),
     trusted_repos: z
       .record(Id, TrustedRepoSchema)
       .optional()

@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { globalConfigPath, parseYaml } from "../config/index.js";
-import { GlobalConfigFileSchema } from "../config/schema.js";
+import { type GlobalConfigFile, GlobalConfigFileSchema } from "../config/schema.js";
 import type { RoutingConfig, Rule, RuleAction, RuleMatch } from "../core/routing.js";
 import {
   type HookCache,
@@ -85,32 +85,51 @@ function rootOf(repoId: string): string | null {
   return basename(repoId) === ".git" ? dirname(repoId) : null;
 }
 
-/** The repositories recorded in the global config's `trusted_repos`; unreadable config = none. */
-function trustedRepos(ctx: AppContext): TrustedRepo[] {
+/** The global config file, or null when it is missing or unreadable. */
+function globalFile(ctx: AppContext): GlobalConfigFile | null {
   const path = globalConfigPath(ctx.env);
-  if (!existsSync(path)) return [];
+  if (!existsSync(path)) return null;
   try {
-    const global = parseYaml(readFileSync(path, "utf8"), path, GlobalConfigFileSchema);
-    return Object.entries(global.trusted_repos ?? {}).flatMap(([id, entry]) => {
-      const root = rootOf(id);
-      return root === null ? [] : [{ root, policyHash: entry.hash }];
-    });
+    return parseYaml(readFileSync(path, "utf8"), path, GlobalConfigFileSchema);
   } catch {
-    return [];
+    return null;
   }
+}
+
+/** The repositories recorded in the global config's `trusted_repos`. */
+function trustedRepos(global: GlobalConfigFile | null): TrustedRepo[] {
+  return Object.entries(global?.trusted_repos ?? {}).flatMap(([id, entry]) => {
+    const root = rootOf(id);
+    return root === null ? [] : [{ root, policyHash: entry.hash }];
+  });
+}
+
+/** Rule actions that send a task to a provider. */
+const DELEGATING = new Set<RuleAction["type"]>(["provider", "fallback", "fanout"]);
+
+/**
+ * True when some pin or rule of the active profile routes tasks to a provider, i.e. a native
+ * Codex sub-agent spawn has somewhere to go. A policy that keeps everything on the host is false.
+ */
+export function policyDelegates(routing: RoutingConfig): boolean {
+  const profile = routing.profiles[routing.activeProfile];
+  const pins = routing.pins.filter((r) => r.id !== "flag:provider");
+  return [...pins, ...(profile?.rules ?? [])].some((r) => DELEGATING.has(r.action.type));
 }
 
 /** The cache contents for the policy in effect in `ctx`. */
 export function buildHookCache(ctx: AppContext): HookCache {
+  const global = globalFile(ctx);
   const policy: PolicySummary = {
     profile: ctx.config.routing.activeProfile,
-    hardMode: false,
+    hardMode: global?.hosts?.codex?.hard ?? true,
+    hardInterception: policyDelegates(ctx.config.routing),
     summary: summarizePolicy(ctx.config.routing),
   };
   return {
     version: 1,
     writtenAt: ctx.clock.now().toISOString(),
-    trustedRepos: trustedRepos(ctx),
+    trustedRepos: trustedRepos(global),
     policy,
   };
 }
