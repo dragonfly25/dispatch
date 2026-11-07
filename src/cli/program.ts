@@ -5,6 +5,7 @@ import { DispatchError } from "../core/errors.js";
 import { CODEX_SANDBOX_MESSAGE, codexSandboxActive } from "../platform/host.js";
 import { currentInstallPaths } from "../platform/launcher.js";
 import { assertSupportedPlatform } from "../platform/platform.js";
+import { type RepoCommandDeps, registerRepoCommands } from "./repo-commands.js";
 import { defaultSetupDeps, registerSetupCommands, type SetupCommandDeps } from "./setup.js";
 
 /** Output sinks, injectable for tests. */
@@ -25,6 +26,7 @@ export const VERSION: string = pkg.version;
 export function buildProgram(
   io: CliIo = processIo,
   setupDeps: Partial<SetupCommandDeps> = {},
+  repoDeps: Partial<RepoCommandDeps> = {},
 ): Command {
   const program = new Command()
     .name("dispatch")
@@ -40,7 +42,11 @@ export function buildProgram(
         .action(() => io.out(`${JSON.stringify(currentInstallPaths())}\n`)),
       { hidden: true },
     );
-  registerSetupCommands(program, io, { ...defaultSetupDeps(), ...setupDeps });
+  const fullSetup: SetupCommandDeps = { ...defaultSetupDeps(), ...setupDeps };
+  // `install` and the repo part of `uninstall` (WP21) share the setup deps: install runs the
+  // real setup when the global config is missing.
+  const repo = registerRepoCommands(program, io, repoDeps, fullSetup);
+  registerSetupCommands(program, io, { repoUninstall: repo.uninstall, ...fullSetup });
   return program;
 }
 

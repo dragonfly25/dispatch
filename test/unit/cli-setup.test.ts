@@ -1,8 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Command } from "commander";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildProgram, runCli } from "../../src/cli/program.js";
-import { defaultSetupDeps, type SetupCommandDeps } from "../../src/cli/setup.js";
+import {
+  defaultSetupDeps,
+  registerSetupCommands,
+  type SetupCommandDeps,
+} from "../../src/cli/setup.js";
 import { fakeCodexHost } from "../support/fake-host.js";
 import { type TempHome, tempHome } from "../support/temp.js";
 
@@ -85,9 +90,19 @@ describe("dispatch setup / uninstall --global [UC1][UC14]", () => {
 
   it("repo-level uninstall is an extension point for WP21", async () => {
     h = tempHome();
-    const without = cli({});
-    expect(await without.run("uninstall")).toBe(2);
-    expect(without.io.stderr).toMatch(/not available yet/);
+    // Without the WP21 slot filled (registerSetupCommands used on its own) it says so.
+    const bare = new Command().exitOverride();
+    registerSetupCommands(
+      bare,
+      { out: () => {}, err: () => {} },
+      {
+        ...defaultSetupDeps(),
+        env: h.env,
+      },
+    );
+    await expect(bare.parseAsync(["uninstall"], { from: "user" })).rejects.toThrow(
+      /not available yet/,
+    );
     let called = false;
     const withRepo = cli({
       repoUninstall: async () => {
