@@ -12,6 +12,8 @@ export default defineConfig({
     environment: "node",
     // node:sqlite prints an ExperimentalWarning on first load; hide only that warning type.
     execArgv: ["--disable-warning=ExperimentalWarning"],
+    // Fails the run early when the fake CLI shims are missing or not executable (WP2).
+    globalSetup: ["test/support/global-setup.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
