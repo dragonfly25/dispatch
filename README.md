@@ -70,6 +70,9 @@ it never edits your `CLAUDE.md`, `AGENTS.md`, skills, existing sub-agents or any
 | Claude Code | A user-scope plugin, installed through `claude plugin install dispatch@dispatch-local -s user` from a local marketplace under `~/.dispatch/hosts/claude-code/`. It contains the `dispatch` sub-agent and a `SessionStart` hook that tells the session how and when to delegate. Dispatch itself writes nothing under `~/.claude`. |
 | Codex | A skill in `~/.agents/skills/dispatch/`, hook entries in `~/.codex/hooks.json` (marker-delimited, other entries untouched), and a rules file `~/.codex/rules/dispatch.rules`. |
 
+Setup does not create `~/.dispatch/config.yaml`: built-in defaults apply until you write one (plan,
+thresholds, extra accounts; see [docs/configuration.md](docs/configuration.md)).
+
 Setup asks you to accept two **trust grants**. Read them before saying yes:
 
 - **Codex rules file.** Codex runs shell commands in a sandbox with no network, so `dispatch run`
