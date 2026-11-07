@@ -1,0 +1,18 @@
+# Dispatch (https://github.com/dragonfly25/dispatch). Trust grant: lets ONLY these launcher
+# subcommands run outside the Codex sandbox (network access and writes under ~/.dispatch).
+prefix_rule(
+    pattern = ["{{LAUNCHER}}", ["run", "wait", "cancel", "status"]],
+    decision = "allow",
+    justification = "Dispatch launcher: delegates tasks to other providers; needs network and writes under ~/.dispatch",
+    match = [
+        ["{{LAUNCHER}}", "run", "--detach", "--json", "--task", "fix the bug"],
+        ["{{LAUNCHER}}", "wait", "run_abc", "--timeout", "{{WAIT_TIMEOUT}}"],
+        ["{{LAUNCHER}}", "status"],
+    ],
+    not_match = [
+        ["{{LAUNCHER}}", "install"],
+        ["{{LAUNCHER}}", "setup"],
+        ["dispatch", "run"],
+        ["/tmp/evil/dispatch", "run"],
+    ],
+)

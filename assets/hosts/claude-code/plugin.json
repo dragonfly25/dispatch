@@ -1,0 +1,6 @@
+{
+  "name": "dispatch",
+  "version": "{{VERSION}}",
+  "description": "Delegate coding tasks to another AI provider through Dispatch (soft integration).",
+  "author": { "name": "Dispatch" }
+}

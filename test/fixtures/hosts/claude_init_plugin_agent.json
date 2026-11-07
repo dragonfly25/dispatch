@@ -1,0 +1,40 @@
+{
+  "type": "system",
+  "subtype": "init",
+  "model": "claude-haiku-5-5",
+  "agents": [
+    "claude",
+    "claude-code-guide",
+    "dispatch:dispatch",
+    "Explore",
+    "general-purpose",
+    "Plan",
+    "statusline-setup",
+    "web-fetch"
+  ],
+  "plugins": [
+    {
+      "name": "dispatch",
+      "path": "<TMP>/hosts-proto-root/out/claude-marketplace/plugins/dispatch",
+      "source": "dispatch@dispatch-local",
+      "version": "0.0.0-proto"
+    },
+    {
+      "name": "cc-plugin-agents-md",
+      "path": "builtin",
+      "source": "cc-plugin-agents-md@builtin"
+    },
+    {
+      "name": "cc-plugin-telemetry",
+      "path": "builtin",
+      "source": "cc-plugin-telemetry@builtin"
+    },
+    {
+      "name": "cc-plugin-plugin-authoring",
+      "path": "builtin",
+      "source": "cc-plugin-plugin-authoring@builtin"
+    }
+  ],
+  "mcp_servers": [],
+  "apiKeySource": "none"
+}

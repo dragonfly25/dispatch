@@ -1,0 +1,31 @@
+{
+  "note": "Same fake launcher invoked twice by codex exec 0.167.0 (workspace-write). Call 1 matched the prefix rule (shell command: <launcher> status); call 2 was `launcher status && /usr/bin/true` (compound, unmatched piece).",
+  "calls": [
+    {
+      "argv": "status",
+      "write_home": "yes",
+      "network": "yes",
+      "env": {
+        "CODEX_SANDBOX": "<unset>",
+        "CODEX_SANDBOX_NETWORK_DISABLED": "1",
+        "CODEX_THREAD_ID": "<set>",
+        "CODEX_VERSION": "0.167.0",
+        "CODEX_CI": "1",
+        "DISPATCH_DEPTH": "<unset>"
+      }
+    },
+    {
+      "argv": "status",
+      "write_home": "no",
+      "network": "no",
+      "env": {
+        "CODEX_SANDBOX": "seatbelt",
+        "CODEX_SANDBOX_NETWORK_DISABLED": "1",
+        "CODEX_THREAD_ID": "<set>",
+        "CODEX_VERSION": "0.167.0",
+        "CODEX_CI": "1",
+        "DISPATCH_DEPTH": "<unset>"
+      }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "hook_event": "SessionStart",
+  "outcome": "success",
+  "exit_code": 0,
+  "stdout": "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Dispatch policy (fake): to delegate work to another provider call the dispatch agent/skill. Launcher: <LAUNCHER>\"}}\n"
+}

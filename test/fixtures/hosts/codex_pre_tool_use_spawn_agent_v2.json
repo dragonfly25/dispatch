@@ -1,0 +1,16 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "turn_id": "00000000-0000-4000-8000-000000000002",
+  "transcript_path": null,
+  "cwd": "<TMP>/hosts-proto",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-luna",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "collaborationspawn_agent",
+  "tool_input": {
+    "task_name": "add_helper",
+    "fork_turns": "all",
+    "message": "<ENCRYPTED>"
+  },
+  "tool_use_id": "call_FAKE"
+}
