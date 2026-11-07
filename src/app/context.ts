@@ -312,9 +312,30 @@ export interface DecisionInputOptions {
 
 /** Quota snapshot for the router; a broken store or reader degrades to "unknown", never throws. */
 async function snapshotOrUnknown(ctx: AppContext, host: string | null): Promise<QuotaSnapshot> {
-  const { instances } = ctx.config.execution;
+  // Only enabled instances are read: a disabled provider (e.g. Antigravity, off by default for
+  // ToS reasons) must never have its CLI spawned, not even for a quota-free read.
+  const all = ctx.config.execution.instances;
+  const instances = all.filter((i) => i.enabled);
   try {
-    return await ctx.quota.snapshot(instances, { hostInstanceId: host });
+    const snap = await ctx.quota.snapshot(instances, { hostInstanceId: host });
+    for (const inst of all) {
+      if (!inst.enabled && snap.instances[inst.id] === undefined) {
+        snap.instances[inst.id] = {
+          windows: [
+            {
+              kind: "unknown",
+              usedPct: null,
+              resetAt: null,
+              source: "disabled",
+              readAt: snap.takenAt,
+              reliability: "unknown",
+            },
+          ],
+          pool: inst.pool,
+        };
+      }
+    }
+    return snap;
   } catch {
     return {
       takenAt: ctx.clock.now().toISOString(),

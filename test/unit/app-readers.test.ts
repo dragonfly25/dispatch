@@ -141,3 +141,36 @@ describe("default quota readers", () => {
 
 // Keeps the real factory referenced so a rename there breaks this file's types.
 void defaultReaders;
+
+describe("[SEC-agy-ro] disabled instances are never read", () => {
+  it("buildDecisionInput does not invoke the reader of a disabled instance (agy is off by default)", async () => {
+    const { buildDecisionInput, buildTask } = await import("../../src/app/index.js");
+    const sb = sandbox();
+    const calls: string[] = [];
+    const registry = new QuotaReaderRegistry();
+    for (const adapter of ["claude", "codex", "antigravity"]) {
+      registry.register(adapter, {
+        id: `spy-${adapter}`,
+        version: "1",
+        channel: "test",
+        read: async (inst) => {
+          calls.push(inst.id);
+          return [];
+        },
+      });
+    }
+    const ctx = loadAppContext({
+      cwd: sb.root,
+      env: sb.env,
+      clock: new FakeClock(NOW),
+      quotaReaders: registry,
+    });
+    try {
+      const input = await buildDecisionInput(ctx, buildTask(ctx, { task: "x" }));
+      expect(calls).not.toContain("antigravity");
+      expect(input.quota.instances.antigravity?.windows[0]?.reliability).toBe("unknown");
+    } finally {
+      ctx.close();
+    }
+  });
+});
