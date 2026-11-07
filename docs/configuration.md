@@ -20,6 +20,33 @@ A broken **global** config stops the command (exit 2). A broken **repo**, profil
 skipped and reported as an error by `dispatch validate`; `run` then exits 2 instead of routing with a
 policy you did not intend.
 
+## Creating the global config: `dispatch setup`
+
+`dispatch setup` (and `dispatch install` the first time) writes a fully commented
+`~/.dispatch/config.yaml` when none exists, after four questions: the client you mainly use
+(`main_host`), the plan of each CLI it finds (`providers.<id>.plan`), the starting strategy
+(`profile`: balance, preserve or specialize) and the autonomy of delegated agents (`autonomy`,
+default `worktree`; `direct` asks for a typed confirmation). It never overwrites an existing
+config; `dispatch setup --reconfigure` changes the answers in place and keeps your comments and any
+key it does not know. The file is written atomically with mode 0600.
+
+Antigravity is only asked about, probed and written after an explicit opt-in that accepts the
+risk and Google's terms (`enabled: true` and `tos_acknowledged: true`).
+
+For scripts and CI, `--non-interactive --yes` takes every answer from flags or a YAML file and
+uses the defaults (profile `balance`, autonomy `worktree`, plans unknown, Antigravity off) for the
+rest. Without `--yes` it only prints what it would do:
+
+| Flag | Meaning |
+| --- | --- |
+| `--answers <file>` | YAML with `main_host`, `profile`, `autonomy`, `plans: { claude: max5x }`, `antigravity: { enable: true, accept_terms: true }`; flags win over the file |
+| `--host <id>` | `claude-code`, `codex` or `none` |
+| `--profile <name>` | `balance`, `preserve`, `specialize` (or any other profile that exists) |
+| `--autonomy <level>` | `read-only`, `worktree` or `direct` |
+| `--plan <provider>=<plan>` | Repeatable, e.g. `--plan claude=max5x --plan codex=plus`; `unknown` skips the provider |
+| `--enable-antigravity --accept-agy-terms` | Both are required to enable Antigravity |
+| `--reconfigure` | Change an existing config instead of keeping it |
+
 ## Precedence
 
 For ordinary keys the layers are applied in this order, the later one winning:
@@ -107,6 +134,7 @@ The same schema serves the global and the repo file. The **Where** column says w
 | `providers.<instance>.effort_shift` | integer | `0` |  | global, repo, flags | Effort shift when delegating here. |
 | `providers.<instance>.env_passthrough` | list of string | `[]` |  | global; repo and flags only tighten | Extra env vars passed to the child. Names matching host markers, API keys or tokens are dropped even when listed. A repo can only shrink the list. |
 | `providers.<instance>.tos_acknowledged` | boolean | `false` |  | global only | antigravity only: required to enable it with a consumer login. Without it a consumer-login `antigravity` stays disabled with a warning. |
+| `main_host` | string |  |  | global only | Informational: the client you mainly use as host (claude-code \| codex), recorded by `dispatch setup`; host-independent commands may use it as a default. |
 | `autonomy` | enum | `worktree` | `read-only` \| `worktree` \| `direct` | global; repo and flags only tighten | Autonomy ceiling for delegated tasks (read-only &lt; worktree &lt; direct). |
 | `allowed_providers` | list of string | every enabled instance |  | global; repo and flags only tighten | Instance ids that may be used; absent = every enabled instance. A repo or flag list can only remove ids (it is intersected with the global one); adding an id is rejected. |
 | `concurrency` | object |  |  | global; repo and flags only tighten | Max concurrent runs per instance and overall. |
@@ -150,6 +178,8 @@ The same schema serves the global and the repo file. The **Where** column says w
 ```yaml
 # ~/.dispatch/config.yaml  (or $DISPATCH_HOME/config.yaml)
 version: 1
+
+main_host: claude-code                   # informational: the client you mainly work in
 
 # Provider instances. claude, codex and antigravity exist without being listed; list one to
 # describe your account (plan) or to change a setting. Add instances for extra accounts.

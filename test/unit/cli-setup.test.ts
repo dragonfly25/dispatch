@@ -66,6 +66,9 @@ describe("dispatch setup / uninstall --global [UC1][UC14]", () => {
 
   it("asks interactively; anything but yes changes nothing", async () => {
     h = tempHome();
+    // A config already exists, so the wizard is not part of this test (see setup-wizard.test.ts).
+    mkdirSync(h.dispatchHome, { recursive: true });
+    writeFileSync(join(h.dispatchHome, "config.yaml"), "version: 1\n");
     const no = cli({ interactive: true, ask: async () => "n", hosts: () => [] });
     expect(await no.run("setup")).toBe(0);
     expect(no.io.stdout).toContain("Nothing was changed.");

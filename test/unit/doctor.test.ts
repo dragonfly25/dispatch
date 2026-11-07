@@ -248,7 +248,7 @@ describe("doctor: checks", () => {
     const { report } = await h.report();
     expect(lineOf(report, "config.global")).toMatchObject({
       status: "warn",
-      fix: "dispatch setup",
+      fix: expect.stringMatching(/^dispatch setup \(/),
     });
   });
 

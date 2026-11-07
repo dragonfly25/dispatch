@@ -393,6 +393,8 @@ export const EXAMPLES = {
   global: `# ~/.dispatch/config.yaml  (or $DISPATCH_HOME/config.yaml)
 version: 1
 
+main_host: claude-code                   # informational: the client you mainly work in
+
 # Provider instances. claude, codex and antigravity exist without being listed; list one to
 # describe your account (plan) or to change a setting. Add instances for extra accounts.
 providers:
@@ -544,6 +546,33 @@ upgrade.
 A broken **global** config stops the command (exit 2). A broken **repo**, profile or mapping file is
 skipped and reported as an error by \`dispatch validate\`; \`run\` then exits 2 instead of routing with a
 policy you did not intend.
+
+## Creating the global config: \`dispatch setup\`
+
+\`dispatch setup\` (and \`dispatch install\` the first time) writes a fully commented
+\`~/.dispatch/config.yaml\` when none exists, after four questions: the client you mainly use
+(\`main_host\`), the plan of each CLI it finds (\`providers.<id>.plan\`), the starting strategy
+(\`profile\`: balance, preserve or specialize) and the autonomy of delegated agents (\`autonomy\`,
+default \`worktree\`; \`direct\` asks for a typed confirmation). It never overwrites an existing
+config; \`dispatch setup --reconfigure\` changes the answers in place and keeps your comments and any
+key it does not know. The file is written atomically with mode 0600.
+
+Antigravity is only asked about, probed and written after an explicit opt-in that accepts the
+risk and Google's terms (\`enabled: true\` and \`tos_acknowledged: true\`).
+
+For scripts and CI, \`--non-interactive --yes\` takes every answer from flags or a YAML file and
+uses the defaults (profile \`balance\`, autonomy \`worktree\`, plans unknown, Antigravity off) for the
+rest. Without \`--yes\` it only prints what it would do:
+
+| Flag | Meaning |
+| --- | --- |
+| \`--answers <file>\` | YAML with \`main_host\`, \`profile\`, \`autonomy\`, \`plans: { claude: max5x }\`, \`antigravity: { enable: true, accept_terms: true }\`; flags win over the file |
+| \`--host <id>\` | \`claude-code\`, \`codex\` or \`none\` |
+| \`--profile <name>\` | \`balance\`, \`preserve\`, \`specialize\` (or any other profile that exists) |
+| \`--autonomy <level>\` | \`read-only\`, \`worktree\` or \`direct\` |
+| \`--plan <provider>=<plan>\` | Repeatable, e.g. \`--plan claude=max5x --plan codex=plus\`; \`unknown\` skips the provider |
+| \`--enable-antigravity --accept-agy-terms\` | Both are required to enable Antigravity |
+| \`--reconfigure\` | Change an existing config instead of keeping it |
 
 ## Precedence
 

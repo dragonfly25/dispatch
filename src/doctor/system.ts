@@ -113,9 +113,9 @@ export function configLines(
           "warn",
           "system",
           "config.global",
-          `${path} does not exist; built-in defaults apply`,
+          `${path} does not exist; built-in defaults apply (balance strategy, worktree autonomy, plans unknown)`,
           {
-            fix: "dispatch setup",
+            fix: "dispatch setup (asks four questions and writes it; for scripts: dispatch setup --non-interactive --yes [--plan claude=max5x ...])",
           },
         ),
   ];
