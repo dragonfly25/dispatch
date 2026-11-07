@@ -321,18 +321,6 @@ describe("executeTask", () => {
       { repoPath: host.repo.dir, signals: null },
     );
     expect(rej).toMatchObject({ status: "rejected", outcome: "rejected" });
-    const fan = await executeTask(
-      {
-        ...host.deps,
-        config: {
-          ...host.deps.config,
-          routing: routing({ type: "fanout", instances: ["claude", "codex"] }),
-        },
-      },
-      task(),
-      { repoPath: host.repo.dir, signals: null },
-    );
-    expect(fan.summary).toBe("fanout not implemented yet");
     expect(host.fakes.readLog({ kind: "run" })).toEqual([]);
   });
 

@@ -1,17 +1,19 @@
 /**
  * `dispatch run`: routes one task and, unless `--dry-run`, executes it synchronously and prints
- * the {@link RunResult} (UC2, UC10; the framework-subprocess case of spec §5). `--detach` belongs
- * to WP23 and is registered hidden until then.
+ * the {@link RunResult} (UC2, UC10; the framework-subprocess case of spec §5). With `--detach` it
+ * starts the run in a supervisor and prints `{ runId }` at once; `wait` collects it (UC3).
  */
-import { type Command, Option } from "commander";
+import type { Command } from "commander";
 import { buildTask, type TaskFlags } from "../../app/context.js";
 import { dryRun } from "../../app/dry-run.js";
 import { runnerDeps } from "../../app/runner.js";
-import { ExitCode, type Outcome, type RunResult, RunResultSchema } from "../../core/contracts.js";
+import { ExitCode, type RunResult, RunResultSchema } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import { executeTask } from "../../runner/orchestrate.js";
+import { exitCodeForResult } from "../../runner/result.js";
 import { ExitRequest } from "../exit.js";
 import { addTaskOptions } from "../options.js";
+import { detachRun } from "./runs.js";
 import { type CliDeps, printJson, reportIssues, withContext } from "./shared.js";
 
 /** Flags of `run`: the task flags plus the run-specific ones. */
@@ -20,33 +22,7 @@ export interface RunOptions extends TaskFlags {
   dryRun?: boolean;
   json?: boolean;
   detach?: boolean;
-}
-
-/** Exit code of a task that ended with `outcome` in an external agent. */
-const OUTCOME_EXIT: Readonly<Record<Outcome, ExitCode>> = {
-  success: ExitCode.OK,
-  failed: ExitCode.FAILED,
-  timeout: ExitCode.TIMEOUT_OR_STATE,
-  quota_exhausted: ExitCode.QUOTA,
-  rejected: ExitCode.REJECTED,
-};
-
-/**
- * The CLI exit code for a result. `rejected` (policy, recursion guard) is 3; `running` is 75;
- * `returned_to_host` is 0 whatever the reason (the host proceeds natively and the result says
- * why); a `completed` run maps its outcome: success 0, failed 4, quota 5, timeout 6.
- */
-export function exitCodeForResult(result: RunResult): ExitCode {
-  switch (result.status) {
-    case "rejected":
-      return ExitCode.REJECTED;
-    case "running":
-      return ExitCode.STILL_RUNNING;
-    case "returned_to_host":
-      return ExitCode.OK;
-    case "completed":
-      return result.outcome === null ? ExitCode.FAILED : OUTCOME_EXIT[result.outcome];
-  }
+  idempotencyKey?: string;
 }
 
 /** Indents every line of `text` by two spaces. */
@@ -89,6 +65,15 @@ export function renderRunResult(r: RunResult): string {
   } else if (r.summary !== "") {
     lines.push(`Reason: ${r.summary}`);
   }
+  for (const c of r.results ?? []) {
+    lines.push(
+      "",
+      ...renderRunResult(c)
+        .trimEnd()
+        .split("\n")
+        .map((l) => `  | ${l}`),
+    );
+  }
   lines.push(`Log: ${r.log.path}`);
   return `${lines.join("\n")}\n`;
 }
@@ -106,11 +91,15 @@ export function registerRun(program: Command, deps: CliDeps): void {
       )
       .option("--dry-run", "show the routing decision; run and record nothing")
       .option("--json", "machine-readable output (RunResult schema v1)")
-      .addOption(new Option("--detach", "run in the background (not available yet)").hideHelp()),
+      .option("--detach", "run in the background and print { runId }; collect it with `wait`")
+      .option(
+        "--idempotency-key <key>",
+        "with --detach: a repeated call with the same key returns the same run",
+      ),
   ).action(async (opts: RunOptions) => {
     const { io } = deps;
-    if (opts.detach) {
-      throw new DispatchError("--detach is not available yet", ExitCode.USAGE, "cli.usage");
+    if (opts.idempotencyKey !== undefined && !opts.detach) {
+      throw new DispatchError("--idempotency-key needs --detach", ExitCode.USAGE, "cli.usage");
     }
     const provider = opts.provider === "auto" ? undefined : opts.provider;
     await withContext(
@@ -142,6 +131,13 @@ export function registerRun(program: Command, deps: CliDeps): void {
             ExitCode.USAGE,
             "config.invalid",
           );
+        }
+        if (opts.detach) {
+          await detachRun(deps, ctx, task, {
+            ...(provider === undefined ? {} : { provider }),
+            ...(opts.idempotencyKey === undefined ? {} : { idempotencyKey: opts.idempotencyKey }),
+          });
+          return;
         }
         const result = await executeTask(runnerDeps(ctx, deps.runner), task, { repoPath: ctx.cwd });
         const checked = RunResultSchema.safeParse(result);
