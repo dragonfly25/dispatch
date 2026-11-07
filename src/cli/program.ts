@@ -6,6 +6,7 @@ import { CODEX_SANDBOX_MESSAGE, codexSandboxActive } from "../platform/host.js";
 import { currentInstallPaths } from "../platform/launcher.js";
 import { assertSupportedPlatform } from "../platform/platform.js";
 import { type CliDeps, registerReadCommands } from "./commands/index.js";
+import { ExitRequest } from "./exit.js";
 import { type CliIo, processIo } from "./io.js";
 import { type RepoCommandDeps, registerRepoCommands } from "./repo-commands.js";
 import { defaultSetupDeps, registerSetupCommands, type SetupCommandDeps } from "./setup.js";
@@ -63,7 +64,7 @@ const INFO_ONLY = new Set(["-h", "--help", "-v", "--version"]);
 /**
  * Runs the CLI with `args` (without node and script path) and returns the exit code.
  * Never calls `process.exit`. Usage errors map to {@link ExitCode.USAGE}. Gates first: unsupported
- * platform (USAGE) and the Codex sandbox (exit 6, except for help/version).
+ * platform (USAGE) and the Codex sandbox (REJECTED, except for help/version).
  */
 export async function runCli(
   args: readonly string[],
@@ -79,11 +80,12 @@ export async function runCli(
     }
     if (codexSandboxActive(ctx.env) && !INFO_ONLY.has(args[0] ?? "")) {
       io.err(`dispatch: ${CODEX_SANDBOX_MESSAGE}\n`);
-      return ExitCode.TIMEOUT_OR_STATE;
+      return ExitCode.REJECTED;
     }
     await program.parseAsync([...args], { from: "user" });
     return ExitCode.OK;
   } catch (err) {
+    if (err instanceof ExitRequest) return err.code;
     if (err instanceof CommanderError) {
       const ok = err.code === "commander.helpDisplayed" || err.code === "commander.version";
       return ok ? ExitCode.OK : ExitCode.USAGE;

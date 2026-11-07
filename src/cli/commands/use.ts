@@ -7,7 +7,7 @@ import { findRepo, globalConfigPath, repoPaths, trustRepo } from "../../config/i
 import { writeAtomic } from "../../config/trust.js";
 import { ExitCode } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
-import { type CliDeps, printJson, withContext } from "./shared.js";
+import { type CliDeps, printJson, refreshCache, withContext } from "./shared.js";
 
 /** What `use` did. */
 export interface UseResult {
@@ -66,6 +66,7 @@ export function registerUse(program: Command, deps: CliDeps): void {
     .action(async (name: string, opts: { json?: boolean }) => {
       await withContext(deps, (ctx) => {
         const r = useProfile(ctx, name);
+        refreshCache(deps);
         if (opts.json) printJson(deps.io, r);
         else {
           deps.io.out(

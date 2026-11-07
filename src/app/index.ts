@@ -2,3 +2,6 @@
 export * from "./adapters.js";
 export * from "./context.js";
 export * from "./dry-run.js";
+export * from "./force-provider.js";
+export * from "./hook-cache.js";
+export * from "./runner.js";

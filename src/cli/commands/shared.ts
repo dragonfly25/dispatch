@@ -1,8 +1,10 @@
 /** Helpers shared by the CLI commands. */
 import { type AppContext, type AppEnv, loadAppContext } from "../../app/context.js";
+import { refreshHookCacheSafely } from "../../app/hook-cache.js";
 import type { Issue } from "../../config/index.js";
 import type { Clock, Spawner } from "../../core/contracts.js";
 import type { QuotaReaderRegistry } from "../../quota/reader.js";
+import type { RunnerDeps } from "../../runner/orchestrate.js";
 import type { CliIo } from "../io.js";
 
 /** What the commands need from the process; injectable for tests. */
@@ -23,6 +25,8 @@ export interface CliDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Whether the process `pid` exists, for lease reaping in `gc` (tests inject a fake). */
   isAlive?: (pid: number) => boolean;
+  /** Replaces runner dependencies, e.g. a per-test probe cache (tests). */
+  runner?: Partial<RunnerDeps>;
 }
 
 /** Default {@link CliDeps.sleep}. */
@@ -39,12 +43,20 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
+/** Per-command options of {@link withContext}. */
+export interface ContextOptions {
+  /** `--provider <instance>`: see `LoadAppContextOptions.provider`. */
+  provider?: string | undefined;
+}
+
 /** Loads the app context, runs `fn` and always closes the context. */
 export async function withContext<T>(
   deps: CliDeps,
   fn: (ctx: AppContext) => Promise<T> | T,
+  options: ContextOptions = {},
 ): Promise<T> {
   const ctx = loadAppContext({
+    ...(options.provider === undefined ? {} : { provider: options.provider }),
     cwd: deps.cwd,
     env: deps.env,
     ...(deps.clock ? { clock: deps.clock } : {}),
@@ -63,6 +75,24 @@ export async function withContext<T>(
 /** Prints `value` as pretty JSON on stdout. */
 export function printJson(io: CliIo, value: unknown): void {
   io.out(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * Rewrites the hook cache for the policy now in effect (after `trust`, `use`, `install`, ...).
+ * Best effort: a failure is a warning on stderr, never a failed command.
+ */
+export function refreshCache(
+  deps: Pick<CliDeps, "io" | "cwd" | "env" | "clock" | "assetsDir">,
+): void {
+  refreshHookCacheSafely(
+    {
+      cwd: deps.cwd,
+      env: deps.env,
+      ...(deps.clock ? { clock: deps.clock } : {}),
+      ...(deps.assetsDir ? { assetsDir: deps.assetsDir } : {}),
+    },
+    (message) => deps.io.err(`warning: ${message}\n`),
+  );
 }
 
 /** Prints the loader's issues (untrusted repo policy, loosening attempts, ...) on stderr. */

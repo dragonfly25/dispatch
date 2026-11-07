@@ -100,7 +100,7 @@ describe("entry gates [UC1][UC10]", () => {
     }
   });
 
-  it("exits 6 with the rules-file message inside the Codex sandbox", async () => {
+  it("exits 3 (rejected) with the rules-file message inside the Codex sandbox", async () => {
     const { io, sink } = capture();
     const code = await runCli(
       ["__paths"],
@@ -108,7 +108,7 @@ describe("entry gates [UC1][UC10]", () => {
       buildProgram(sink),
       ctx({ CODEX_SANDBOX: "seatbelt" }),
     );
-    expect(code).toBe(6);
+    expect(code).toBe(3);
     expect(io.stderr).toMatch(/rules file did not match/);
     expect(io.stdout).toBe("");
   });
