@@ -33,7 +33,8 @@
     "format": "biome format --write .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "check:boundaries": "node scripts/check-boundaries.mjs"
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "docs:config": "tsup scripts/gen-config-reference.ts --no-config --format esm --platform node --target node22 --out-dir node_modules/.cache/dispatch-docs --silent && node node_modules/.cache/dispatch-docs/gen-config-reference.js"
   },
   "dependencies": {
     "commander": "^15.1.0",
