@@ -10,6 +10,8 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     environment: "node",
+    // node:sqlite prints an ExperimentalWarning on first load; hide only that warning type.
+    execArgv: ["--disable-warning=ExperimentalWarning"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],
@@ -22,6 +24,7 @@ export default defineConfig({
         branches: 85,
         statements: 85,
         "src/platform/**": { lines: 95, functions: 95, branches: 95, statements: 95 },
+        "src/state/redact.ts": { lines: 95, functions: 95, branches: 95, statements: 95 },
       },
     },
   },
