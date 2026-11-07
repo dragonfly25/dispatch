@@ -11,6 +11,8 @@ import {
   type RunRecord,
 } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import type { RunResultWithNetwork } from "../../runner/orchestrate.js";
+import { describeNetwork } from "../../sandbox/network.js";
 import { formatLocal, formatLocalTime, formatSpan } from "../time.js";
 import { type CliDeps, printJson, realSleep, withContext } from "./shared.js";
 
@@ -96,12 +98,13 @@ export function renderEvent(e: NormalizedEvent): string {
 
 function renderDetail(d: RunDetail): string {
   const { run } = d;
-  const r = run.result;
+  const r: RunResultWithNetwork | null = run.result;
   const lines = [
     `Run ${run.runId}: ${run.status}${r?.outcome ? ` (${r.outcome})` : ""}`,
     `  started ${formatLocal(run.createdAt)}, updated ${formatLocal(run.updatedAt)}`,
     `  instance ${run.instance ?? "-"}${r && run.status !== "running" ? `, duration ${formatSpan(r.durationMs)}` : ""}`,
   ];
+  if (r?.sandboxNetwork) lines.push(`  sandbox network ${describeNetwork(r.sandboxNetwork)}`);
   if (r?.patch) {
     lines.push(
       `  patch ${r.patch.path} (applies: ${yesNo(r.patch.applies)}${r.patch.needsReview ? ", needs review" : ""})`,

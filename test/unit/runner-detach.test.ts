@@ -25,6 +25,7 @@ import {
   TASK_FILE,
 } from "../../src/runner/detach.js";
 import { ProbeCache } from "../../src/runner/lifecycle.js";
+import type { RunResultWithNetwork } from "../../src/runner/orchestrate.js";
 import { cancelRun, SUPERVISOR_LOST, waitForRun } from "../../src/runner/wait.js";
 import { SqliteStateStore } from "../../src/state/store.js";
 import { bundleHelper } from "../helpers/bundle.js";
@@ -491,7 +492,15 @@ describe("supervisor of a handoff run [UC2][SEC-handoff]", () => {
           pid: null,
           result: null,
         });
+        // [SEC-network] the supervisor names the run after the handoff's agent.
+        writeFileSync(
+          join(s.home.dispatchHome, "config.yaml"),
+          "version: 1\nnetwork: delegated-agents\nnetwork_agents: [a]\n",
+        );
         await s.cli(["__supervise", runId, "--run-dir", runDir]);
+        const net = ((await s.store.getRun(runId))?.result as RunResultWithNetwork | null)
+          ?.sandboxNetwork;
+        expect(net).toMatchObject({ enabled: true, agent: "a" });
         const file = join(s.home.dispatchHome, "hook-passthrough.json");
         const keys = existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, "utf8"))) : [];
         const r = (await s.store.getRun(runId))?.result;

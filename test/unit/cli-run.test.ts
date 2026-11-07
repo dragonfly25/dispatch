@@ -112,6 +112,20 @@ describe("dispatch run", () => {
     expect(input.input.host.self).toBeNull();
   });
 
+  it("[SEC-network] with `network: all` the result carries the decision in --json and text", async () => {
+    const { run, home } = setup({ config: "network: all\n" });
+    const tmp = { TMPDIR: home.home };
+    const r = JSON.parse((await run([...TASK, "--json"], tmp)).out);
+    expect(r.sandboxNetwork).toEqual({
+      enabled: true,
+      scope: "all",
+      agent: null,
+      reason: "network: all",
+    });
+    const text = await run(TASK, tmp);
+    expect(text.out).toContain("Sandbox network: on (network: all)");
+  });
+
   it("[UC10] on a terminal: a progress spinner on stderr and a summary block; --json is untouched", async () => {
     const { run } = setup();
     const tty = await run(TASK, {}, true);

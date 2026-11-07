@@ -30,6 +30,7 @@ import {
   type Issue,
   mergeLayers,
   minAutonomy,
+  type NetworkScope,
   type Provenance,
   type Settings,
   type Source,
@@ -72,7 +73,10 @@ export interface ExecutionConfig {
   instances: ExecutionInstance[];
   concurrency: { perProvider: number; total: number };
   maxDepth: number;
-  network: "off" | "on";
+  /** Sandbox network scope after tighten-only merging (default off). */
+  network: NetworkScope;
+  /** Global `network_agents`: the agents `delegated-agents` is limited to; absent = every one. */
+  networkAgents?: string[];
   worktree: { bootstrap: "none" | "symlink-readonly"; symlinkPaths: string[]; keep: boolean };
   timeouts: { defaultTaskMs: number };
   quota: {
@@ -324,6 +328,7 @@ export function loadEffectiveConfig(opts: LoadOptions): EffectiveConfig {
     concurrency: { perProvider: s.concurrency.per_provider, total: s.concurrency.total },
     maxDepth: s.max_depth,
     network: s.network,
+    ...(s.network_agents === null ? {} : { networkAgents: s.network_agents }),
     worktree: {
       bootstrap: s.worktree.bootstrap,
       symlinkPaths: s.worktree.symlink_paths,

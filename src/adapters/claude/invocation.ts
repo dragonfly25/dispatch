@@ -2,7 +2,12 @@ import { isAbsolute, join, normalize } from "node:path";
 import { ExitCode, type Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import { refuseMcp } from "../../mcp/forward.js";
-import type { BuildInvocationWithWeb, WebAccess } from "../../web/index.js";
+import {
+  type BuildInvocationWithNetwork,
+  packageCacheEnv,
+  type SandboxNetwork,
+} from "../../sandbox/network.js";
+import type { WebAccess } from "../../web/index.js";
 
 /** `--max-turns` for every child; generous because the runner's timeout is the real bound. */
 export const CLAUDE_MAX_TURNS = 50;
@@ -61,9 +66,13 @@ export function deniedPaths(home: string, configDir: string | null): DeniedPaths
 /**
  * The `--settings` JSON verified by the WP1 spike (docs/spikes/claude-code.md): permission rules
  * use `//abs` paths, `sandbox.filesystem.denyRead` plain absolute paths, and `failIfUnavailable`
- * makes Claude exit at startup when the OS sandbox cannot start.
+ * makes Claude exit at startup when the OS sandbox cannot start. With `network`, the sandbox also
+ * gets {@link SANDBOX_NETWORK} and may write the package caches in `network.cacheDir`.
  */
-export function childSettings(denied: DeniedPaths): Record<string, unknown> {
+export function childSettings(
+  denied: DeniedPaths,
+  network?: SandboxNetwork,
+): Record<string, unknown> {
   const rule = (abs: string) => `Read(/${abs})`;
   const deny = [
     ...denied.dirs.flatMap((d) => [rule(d), rule(`${d}/**`)]),
@@ -78,10 +87,25 @@ export function childSettings(denied: DeniedPaths): Record<string, unknown> {
       failIfUnavailable: true,
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
-      filesystem: { denyRead: [...denied.dirs, ...denied.files] },
+      filesystem: {
+        denyRead: [...denied.dirs, ...denied.files],
+        ...(network ? { allowWrite: [network.cacheDir] } : {}),
+      },
+      ...(network ? { network: SANDBOX_NETWORK } : {}),
     },
   };
 }
+
+/**
+ * `sandbox.network` of a network-enabled child (live-verified on 2.1.301, docs/spikes/
+ * sandbox-network.md): Bash may listen on localhost, use Unix sockets (Docker) and reach any
+ * domain. A newer CLI that rejected the wildcard would deny the network: it fails closed.
+ */
+export const SANDBOX_NETWORK = {
+  allowLocalBinding: true,
+  allowAllUnixSockets: true,
+  allowedDomains: ["*"],
+} as const;
 
 /** Wraps the task prompt in the "task data" header shared by all adapters. */
 export function wrapPrompt(prompt: string): string {
@@ -110,8 +134,9 @@ export function webTools(web: WebAccess | undefined): string[] {
  * Builds the child command for one run. Pure: no filesystem or process access. Forwarded MCP
  * servers are refused: `--safe-mode` drops `--mcp-config` (verified live on 2.1.301). Web access
  * adds the web tools to `--tools` and pre-approves them with `--allowedTools` ({@link webTools}).
+ * `network` (worktree runs only) opens the Bash sandbox network ({@link childSettings}).
  */
-export function buildClaudeInvocation(args: BuildInvocationWithWeb): Invocation {
+export function buildClaudeInvocation(args: BuildInvocationWithNetwork): Invocation {
   refuseMcp("claude", args);
   const { autonomy, probe, instance, baseEnv, target } = args;
   if (autonomy === "direct") {
@@ -160,7 +185,10 @@ export function buildClaudeInvocation(args: BuildInvocationWithWeb): Invocation 
           "Agent",
         ];
   if (web.length > 0) mode.push("--allowedTools", web.join(","));
-  const settings = JSON.stringify(childSettings(deniedPaths(home, configDir)));
+  // Network only for worktree runs: a read-only child has no Bash tool.
+  const net = autonomy === "worktree" ? args.network : undefined;
+  if (net) Object.assign(env, packageCacheEnv(net));
+  const settings = JSON.stringify(childSettings(deniedPaths(home, configDir), net));
   const argv = [
     "-p",
     "--safe-mode",
@@ -181,6 +209,7 @@ export function buildClaudeInvocation(args: BuildInvocationWithWeb): Invocation 
   const guards: string[] = [...CLAUDE_SIDE_EFFECT_GUARDS];
   if (autonomy === "worktree") guards.push("claude-no-agent-tool");
   if (web.length > 0) guards.push("claude-web-tools-only");
+  if (net) guards.push("claude-network-opt-in");
   return {
     binary: probe.binaryPath,
     argv,

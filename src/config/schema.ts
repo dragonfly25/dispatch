@@ -156,7 +156,12 @@ const securityKeys = {
     .nonnegative()
     .optional()
     .describe("SECURITY. `run` refuses when DISPATCH_DEPTH >= max_depth (default 1)."),
-  network: z.enum(["off", "on"]).optional().describe("SECURITY. Network access for children."),
+  network: z
+    .enum(["off", "delegated-agents", "all", "on"])
+    .optional()
+    .describe(
+      "SECURITY. Shell sandbox network for delegated agents (listen on localhost, Docker socket, internet): `off` (default), `delegated-agents` (runs a host session delegates: intercepted custom agents and general-purpose), `all` (also runs started by hand). Worktree runs only. Only the global file can turn it on; a repo or flag can only lower it. `on` is a deprecated alias of `all`.",
+    ),
   worktree: z
     .object({
       bootstrap: z
@@ -262,6 +267,13 @@ export const GlobalConfigFileSchema = z
     ),
     ...securityKeys,
     ...ordinaryKeys,
+    network_agents: z
+      .array(z.string().min(1).max(100))
+      .max(100)
+      .optional()
+      .describe(
+        "SECURITY. With `network: delegated-agents`: only these agents get the sandbox network (custom agent names; `general-purpose` for runs a host session starts without a handoff). Absent: every delegated agent. Global only.",
+      ),
     retention_days: z
       .number()
       .positive()

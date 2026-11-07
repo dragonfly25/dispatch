@@ -152,7 +152,7 @@ module.
     the user can. The fake CLIs prove this: their out-of-tree writes succeed, and only the patch
     stays clean. Dispatch relies on the official sandboxes (deviation 11) and fails closed when it
     cannot request them, but it cannot verify them at runtime.
-  - Network access is not restricted (spec §9.5).
+  - The shell network is off in both sandboxes unless the user opts in (`network`, T15).
 
 ### T4. Secrets reach the child through the environment (A2, A4)
 
@@ -450,6 +450,53 @@ search queries or fetched URLs can carry repository content to third parties.
   and a query or fetched URL can disclose repository content to the search provider or a website.
   Turn `forward_web` off for sensitive repositories.
 
+### T15. A delegated agent with an open shell network exfiltrates data or acts on real services (A2, A4; after v0.1.0)
+
+Context: the `network` key (global config) can open the shell sandbox network of delegated agents
+so builder agents can run the app's server, its database (Docker) and tests that need them
+(owner-approved opt-in, off by default). With it, the child's shell can listen on localhost,
+reach local services and databases, the Docker socket and the whole internet, unsupervised.
+
+- **What opens.** Worktree runs only: codex gets `-c sandbox_workspace_write.network_access=true`
+  (never `danger-full-access` or `--dangerously-bypass-approvals-and-sandbox`); claude gets
+  `sandbox.network` (`allowLocalBinding`, `allowAllUnixSockets`, `allowedDomains: ["*"]`) in its
+  `--settings`. Read-only runs never get it (codex has no read-only network setting; read-only
+  claude children have no Bash). Package caches go to a per-attempt directory under TMPDIR
+  (`npm_config_cache`, `npm_config_store_dir`), deleted after the attempt.
+- **Risks.** Prompt injection from web pages, dependencies or third-party text can make the agent
+  send repository content or local data anywhere (exfiltration); mistakes or injected commands can
+  act on real services the machine can reach (APIs with ambient sessions, cloud CLIs whose
+  credentials the agent can read, staging/production endpoints); the agent can read and change
+  local databases and start, stop or inspect containers through the Docker socket (Docker access
+  is close to root on many setups).
+- **Mitigation.**
+  - **Off by default, global-only.** `network: off | delegated-agents | all` is a security key: only
+    `~/.dispatch/config.yaml` can raise it; a repo or flag value above the global one is ignored
+    and reported as an error, and a repo or flag can lower it (`network: off` closes it there).
+    `network_agents` (global only, rejected in repo config) narrows `delegated-agents` to named
+    agents (`general-purpose` = runs a host session starts without a handoff); `all` also opens
+    runs started by hand. `setup` never asks; it is turned on only by editing the global file.
+  - **Visible.** `doctor` shows `sandbox.network` as a warning (never a failure) with the scope and
+    the risk while it is on; every run whose config has it on records the decision in its result
+    (`sandboxNetwork`), the run log (`network` event) and `dispatch logs` / `run` output.
+  - **File boundaries unchanged.** Writes stay limited to the worktree and TMPDIR (codex) or the
+    worktree and the cache directory (claude); the claude credential `denyRead` list still applies
+    with the network open (verified live: `~/.codex/config.toml` stays unreadable). Only the claude
+    child has such a deny list (T6); the codex sandbox reads what the user can read, so with the
+    network open a steered codex agent could send out any readable file.
+  - **Same patch rules.** The patch filter (T3), the untrusted-output marker (T10) and the
+    auto-apply rules of T12 apply as before.
+- **Proof.** `test/unit/sandbox-network.test.ts` `[SEC-network]` (golden codex and claude argv
+  with and without network, read-only behaviour, scope decision, `[SEC-flags]` tighten-only and
+  global-only list, doctor text), `test/unit/runner-orchestrate.test.ts` "sandbox network"
+  (fake codex/claude argv and env, cache cleanup, run record), `test/unit/cli-run.test.ts`,
+  `test/unit/cli-logs.test.ts`, `test/unit/runner-detach.test.ts` (handoff agent in a detached
+  run). Live spikes: `docs/spikes/sandbox-network.md`.
+- **Residual risk.** With the network on, Dispatch cannot stop a steered agent from exfiltrating
+  what it can read or from acting on reachable services; keep it `off` (or a narrow
+  `network_agents` list) for repositories or machines with sensitive data or live credentials,
+  and turn it off per repo with `network: off`.
+
 ## 5. Accepted risks and disclosures
 
 - **MCP forwarding is a trust grant** (T13): the external agent can use the forwarded servers'
@@ -465,7 +512,8 @@ search queries or fetched URLs can carry repository content to third parties.
   consumer Claude plan through `claude -p` may not match Anthropic's intended use; the README
   discloses it. Each instance's billing pool appears in `status`, and there are no technical
   workarounds.
-- **Network is unrestricted** for children (spec §9.5).
+- **Opt-in shell network for delegated agents** (T15), off by default; `network:
+  delegated-agents | all` in the global config opens it (localhost, Docker, internet).
 - **Web access for delegated custom agents** (T14), on by default for agents that declare
   `WebSearch`/`WebFetch`; `hosts.claude-code.forward_web: false` turns it off.
 - **Redaction is best-effort** (T6), and patches are not redacted.

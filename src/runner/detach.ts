@@ -276,6 +276,7 @@ export async function superviseRun(
       ...(payload.sessionModel ? { sessionModel: payload.sessionModel } : {}),
       ...(payload.handoff?.mcpServers.length ? { mcpServers: payload.handoff.mcpServers } : {}),
       ...withWeb(payload.handoff),
+      ...(payload.handoff ? { agent: payload.handoff.agent } : {}),
     };
     let result = await executeTask(runner, payload.task, opts);
     if (cancelled && result.outcome !== "success") {

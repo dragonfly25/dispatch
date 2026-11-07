@@ -28,6 +28,7 @@ import { newRunId } from "../core/ids.js";
 import type { HostDetection } from "../platform/host.js";
 import { decide, ROUTER_VERSION } from "../router/index.js";
 import { repoRoot as gitRepoRoot } from "../sandbox/git.js";
+import { decideNetwork, type NetworkDecision, runAgent } from "../sandbox/network.js";
 import type { WorktreeCreateOptions, WorktreeHandle } from "../sandbox/worktree.js";
 import { recordDecisionWithShadow } from "../shadow/record.js";
 import { redact } from "../state/redact.js";
@@ -123,7 +124,15 @@ export interface ExecuteOptions {
    * can, the task returns to the host.
    */
   web?: WebAccess;
+  /**
+   * The custom agent of a Claude Code handoff (its name), for the `network` scope. Absent: the run
+   * belongs to `general-purpose` when a host session started it, else to nobody (by hand).
+   */
+  agent?: string;
 }
+
+/** A run result plus the sandbox network decision (structural superset of the frozen RunResult). */
+export type RunResultWithNetwork = RunResult & { sandboxNetwork?: NetworkDecision };
 
 /** Host id (from env detection) → adapter id of the instance it runs on. */
 const HOST_ADAPTER: Record<string, string> = {
@@ -192,8 +201,9 @@ export async function executeTask(
       })
     : () => {};
 
+  let network: NetworkDecision | null = null;
   const finish = async (parts: ResultParts): Promise<RunResult> => {
-    const result: RunResult = {
+    const result: RunResultWithNetwork = {
       schemaVersion: 1,
       runId,
       ...parts,
@@ -204,6 +214,8 @@ export async function executeTask(
     };
     if (parts.usage === undefined) delete result.usage;
     if (parts.results === undefined) delete result.results;
+    // Recorded only when the user opted in (scope not off): the default stays as before.
+    if (network !== null && network.scope !== "off") result.sandboxNetwork = network;
     log.write({ type: "run.end", status: result.status, outcome: result.outcome });
     await store.updateRun(runId, {
       status: result.status,
@@ -257,6 +269,13 @@ export async function executeTask(
       log.write({ type: "web.forward", access: web.web, excludedInstances: web.excluded });
     }
 
+    network = decideNetwork({
+      scope: exec.network,
+      agents: exec.networkAgents,
+      agent: runAgent(opts.agent, deps.host.host !== null),
+    });
+    if (network.scope !== "off") log.write({ type: "network", ...network });
+
     const input: DecisionInput = {
       task,
       host: {
@@ -304,6 +323,7 @@ export async function executeTask(
       leaseWaitMs: opts.leaseWaitMs ?? DEFAULT_LEASE_WAIT_MS,
       mcpServers: mcp.servers,
       ...(web.web === undefined ? {} : { web: web.web }),
+      ...(network.enabled ? { network: true } : {}),
     };
     if (decision.mode === "fanout") return await finish(await runFanout(rc, decision.targets));
     const reports: AttemptReport[] = [];

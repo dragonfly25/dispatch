@@ -38,6 +38,25 @@ describe("logs", () => {
     expect(rows[0]).toMatchObject({ runId: "run-live", status: "running", patchApplies: null });
   });
 
+  it("[SEC-network] shows the sandbox network decision of a run that has one", async () => {
+    const h = opsHarness();
+    const sandboxNetwork = {
+      enabled: true,
+      scope: "delegated-agents",
+      agent: "builder",
+      reason: "delegated agent builder (network: delegated-agents)",
+    };
+    await h.store.recordRun(runRecord("run-net", { result: { sandboxNetwork } as never }));
+    await h.store.recordRun(runRecord("run-plain"));
+    const r = await h.run(["logs", "--task", "run-net"]);
+    expect(r.out).toContain(
+      "  sandbox network on (delegated agent builder (network: delegated-agents))",
+    );
+    const json = JSON.parse((await h.run(["logs", "--task", "run-net", "--json"])).out);
+    expect(json.run.result.sandboxNetwork).toEqual(sandboxNetwork);
+    expect((await h.run(["logs", "--task", "run-plain"])).out).not.toContain("sandbox network");
+  });
+
   it("says so when nothing was recorded", async () => {
     const r = await opsHarness().run(["logs"]);
     expect(r.out).toBe("no recorded runs\n");

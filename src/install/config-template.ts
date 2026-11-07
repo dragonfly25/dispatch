@@ -93,7 +93,7 @@ export function renderRepoConfig(choices: TemplateChoices = {}): string {
       "#   allowed_providers  instance ids that may be used (absent = every enabled instance)",
       "#   concurrency        max concurrent runs per instance and in total",
       "#   max_depth          `run` refuses when DISPATCH_DEPTH >= max_depth (default 1)",
-      "#   network            network access for child agents: off | on (default off)",
+      "#   network            agent shell network: off | delegated-agents | all (here: only lower)",
       "#   worktree           bootstrap: none | symlink-readonly, symlink_paths, keep",
       "#   providers          per instance: enabled, binary, max_autonomy, concurrency, effort_shift",
       "# autonomy: worktree",
