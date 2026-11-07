@@ -358,12 +358,14 @@ describe("codex doctor checks", () => {
 
   it("installed and approved: all ok, heartbeat model reported", async () => {
     await installed();
+    // Anchor on the real setup time (setup stamps the wall clock), not on a fixed date.
+    const setupAt = Date.parse(readManifest(h.dispatchHome).updatedAt);
     writeHeartbeat(
       h.dispatchHome,
       { hook_event_name: "SessionStart", session_id: "s", cwd: "/", model: "gpt-6-luna" },
-      new Date(NOW.getTime() - 3_600_000),
+      new Date(setupAt + 1000),
     );
-    const r = await run({}, NOW);
+    const r = await run({}, new Date(setupAt + 3_600_000));
     expect(r["codex.files"]?.status).toBe("ok");
     expect(r["codex.rules-launcher"]).toMatchObject({ status: "ok" });
     expect(r["codex.hooks-trusted"]).toMatchObject({ status: "ok", message: /gpt-6-luna/ });
