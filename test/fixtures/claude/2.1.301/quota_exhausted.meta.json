@@ -1,0 +1,38 @@
+{
+  "cli": "claude",
+  "cliVersion": "2.1.301",
+  "scenario": "quota_exhausted",
+  "date": "2026-11-07",
+  "argv": [
+    "claude",
+    "-p",
+    "--safe-mode",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "haiku",
+    "--max-turns",
+    "8",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Grep,Glob,Edit,Write,Bash",
+    "--disallowedTools",
+    "Agent",
+    "--settings",
+    "<S>"
+  ],
+  "exitCode": 1,
+  "synthetic": true,
+  "files": [
+    "quota_exhausted.stdout.jsonl",
+    "quota_exhausted.stderr.txt"
+  ],
+  "source": [
+    "https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk (v0.3.319 sdk.d.ts: SDKRateLimitInfo.status 'allowed'|'allowed_warning'|'rejected'; SDKAssistantMessage.error 'rate_limit'; SDKResultSuccess.api_error_status)",
+    "https://code.claude.com/docs/en/errors.md (\"You've hit your session limit \u00b7 resets 3:45pm\")"
+  ],
+  "notes": "Synthetic: field names from SDK types, text from docs; exact ordering/exit code not observed live. Parser must accept any of: rate_limit_event.status=rejected, assistant.error=rate_limit, result.api_error_status=429, or /hit your .* limit/ text."
+}

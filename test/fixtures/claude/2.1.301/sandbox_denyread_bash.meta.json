@@ -1,0 +1,35 @@
+{
+  "cli": "claude",
+  "cliVersion": "2.1.301",
+  "scenario": "sandbox_denyread_bash",
+  "date": "2026-11-07",
+  "argv": [
+    "claude",
+    "-p",
+    "--safe-mode",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "haiku",
+    "--max-turns",
+    "8",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Grep,Glob,Edit,Write,Bash",
+    "--disallowedTools",
+    "Agent",
+    "--settings",
+    "{\"sandbox\":{\"enabled\":true,\"failIfUnavailable\":true,\"autoAllowBashIfSandboxed\":true,\"allowUnsandboxedCommands\":false,\"filesystem\":{\"denyRead\":[\"<TMP>/canary\"]}}}"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "sandbox_denyread_bash.stdout.jsonl",
+    "sandbox_denyread_bash.stderr.txt"
+  ],
+  "notes": "sandbox-only settings, Bash-only prompt: cat of denyRead path fails with 'Operation not permitted' (OS sandbox).",
+  "env": "env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin HOME USER LANG TMPDIR SHELL TERM=dumb DISPATCH_DEPTH=1"
+}

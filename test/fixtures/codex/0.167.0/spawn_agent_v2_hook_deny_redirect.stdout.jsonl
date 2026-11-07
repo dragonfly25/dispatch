@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc \"<TMP>/hookkit/fake-dispatch run --detach --json 'Write a haiku about git.'\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc \"<TMP>/hookkit/fake-dispatch run --detach --json 'Write a haiku about git.'\"","aggregated_output":"{\"id\":\"dsp_FAKE1\",\"status\":\"running\"}\n","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc '<TMP>/hookkit/fake-dispatch wait dsp_FAKE1 --timeout 100'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/bin/zsh -lc '<TMP>/hookkit/fake-dispatch wait dsp_FAKE1 --timeout 100'","aggregated_output":"{\"id\":\"dsp_FAKE1\",\"status\":\"success\",\"provider\":\"claude\",\"summary\":\"Commits drift like leaves / branches merge in quiet dusk / HEAD finds its way home\"}\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Commits drift like leaves  \nBranches merge in quiet dusk  \nHEAD finds its way home"}}
+{"type":"turn.completed","usage":{"input_tokens":61039,"cached_input_tokens":44928,"cache_write_input_tokens":0,"output_tokens":287,"reasoning_output_tokens":0}}

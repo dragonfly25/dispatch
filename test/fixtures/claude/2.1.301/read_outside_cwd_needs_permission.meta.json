@@ -1,0 +1,35 @@
+{
+  "cli": "claude",
+  "cliVersion": "2.1.301",
+  "scenario": "read_outside_cwd_needs_permission",
+  "date": "2026-11-07",
+  "argv": [
+    "claude",
+    "-p",
+    "--safe-mode",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "haiku",
+    "--max-turns",
+    "8",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Grep,Glob,Edit,Write,Bash",
+    "--disallowedTools",
+    "Agent",
+    "--settings",
+    "{\"sandbox\":{\"enabled\":true,\"failIfUnavailable\":true,\"autoAllowBashIfSandboxed\":true,\"allowUnsandboxedCommands\":false,\"filesystem\":{\"denyRead\":[\"<TMP>/canary\"]}}}"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "read_outside_cwd_needs_permission.stdout.jsonl",
+    "read_outside_cwd_needs_permission.stderr.txt"
+  ],
+  "notes": "sandbox-only settings: Read of a path outside cwd is auto-denied in -p ('requested permissions ... haven't granted'); model then refused to cat.",
+  "env": "env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin HOME USER LANG TMPDIR SHELL TERM=dumb DISPATCH_DEPTH=1"
+}

@@ -1,0 +1,15 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "turn_id": "00000000-0000-4000-8000-000000000002",
+  "transcript_path": "<HOME>/.codex/sessions/2026/11/07/rollout-<TS>-00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "<TMP>/cx-hook",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-luna",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "collaborationspawn_agent",
+  "tool_input": {
+    "task_name": "pong",
+    "message": "<ENCRYPTED_MESSAGE>"
+  },
+  "tool_use_id": "call_REDACTED0001"
+}

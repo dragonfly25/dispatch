@@ -1,0 +1,37 @@
+{
+  "cli": "codex",
+  "cliVersion": "0.167.0",
+  "scenario": "quota_exhausted",
+  "date": "2026-11-07",
+  "argv": [
+    "codex",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--strict-config",
+    "--disable",
+    "hooks",
+    "--disable",
+    "plugins",
+    "-C",
+    "<WT>",
+    "-m",
+    "gpt-6-luna",
+    "-s",
+    "workspace-write",
+    "-"
+  ],
+  "exitCode": 1,
+  "synthetic": true,
+  "files": [
+    "quota_exhausted.stdout.jsonl",
+    "quota_exhausted.stderr.txt"
+  ],
+  "source": [
+    "https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/protocol/src/error.rs (usage-limit messages, note U+2019 apostrophe)",
+    "https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/exec/src/event_processor_with_jsonl_output.rs (error + turn.failed emission)"
+  ],
+  "notes": "Synthetic. Plan-specific suffixes vary (Plus/Pro/Team/Free); match on the prefix 'You\u2019ve hit your usage limit'. Exit code is 1 like every other failure."
+}

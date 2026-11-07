@@ -1,0 +1,20 @@
+{
+  "cli": "agy",
+  "cliVersion": "1.5.2",
+  "scenario": "prompt_dash_is_literal",
+  "date": "2026-11-07",
+  "argv": [
+    "agy",
+    "--output-format",
+    "json",
+    "-p",
+    "-"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "prompt_dash_is_literal.json",
+    "prompt_dash_is_literal.stderr.txt"
+  ],
+  "notes": "stdin was '/usage' but '-p -' used the literal '-' as the prompt and ran a model turn (stdin ignored). '-p' with no value is a usage error (exit 2). Prompt must be passed as -p=<prompt> or via --input-format stream-json."
+}

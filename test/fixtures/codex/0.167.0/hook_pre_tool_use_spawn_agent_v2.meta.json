@@ -1,0 +1,14 @@
+{
+  "cli": "codex",
+  "cliVersion": "0.167.0",
+  "scenario": "hook_pre_tool_use_spawn_agent_v2",
+  "date": "2026-11-07",
+  "kind": "hook-input",
+  "argv": [],
+  "exitCode": null,
+  "synthetic": false,
+  "files": [
+    "hook_pre_tool_use_spawn_agent_v2.json"
+  ],
+  "notes": "PreToolUse stdin for multi-agent V2 spawn: tool_name 'collaborationspawn_agent', tool_input.message is an opaque encrypted blob."
+}

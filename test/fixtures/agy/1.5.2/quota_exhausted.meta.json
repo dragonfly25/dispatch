@@ -1,0 +1,27 @@
+{
+  "cli": "agy",
+  "cliVersion": "1.5.2",
+  "scenario": "quota_exhausted",
+  "date": "2026-11-07",
+  "argv": [
+    "agy",
+    "-p=<prompt>",
+    "--output-format",
+    "stream-json",
+    "--sandbox",
+    "--disable-slash-commands",
+    "--model",
+    "gemini-3.8-flash-low"
+  ],
+  "exitCode": 3,
+  "synthetic": true,
+  "files": [
+    "quota_exhausted.stdout.jsonl",
+    "quota_exhausted.stderr.txt"
+  ],
+  "source": [
+    "agy 1.5.2 binary strings: format 'AGY_ERROR: {\"short_error\":%q}' and message 'You have exhausted your quota on this model.'",
+    "agy 1.5.2 embedded changelog: model/agent errors in -p now 'exit with code 3 and print the AGY_ERROR line'"
+  ],
+  "notes": "Synthetic: exact stdout before the error and whether a result event precedes it are unverified. Treat exit 3 + AGY_ERROR short_error matching /exhausted your quota|RESOURCE_EXHAUSTED/i as quota_exhausted; cross-check with /usage remaining_fraction==0."
+}

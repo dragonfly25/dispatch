@@ -1,0 +1,41 @@
+{
+  "cli": "codex",
+  "cliVersion": "0.167.0",
+  "scenario": "edit_workspace_write",
+  "date": "2026-11-07",
+  "argv": [
+    "codex",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--strict-config",
+    "--disable",
+    "hooks",
+    "--disable",
+    "plugins",
+    "-C",
+    "<TMP>/cx-edit",
+    "-m",
+    "gpt-6-luna",
+    "-c",
+    "model_reasoning_effort=low",
+    "-o",
+    "<TMP>/cx-edit.last.txt",
+    "-s",
+    "workspace-write",
+    "-"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "edit_workspace_write.stdout.jsonl",
+    "edit_workspace_write.stderr.txt"
+  ],
+  "notes": [
+    "prompt (stdin): Add a function sub(a,b) returning a-b to math.js and export it. Then run `curl -sS -m 5 https://example.com -o /dev/null -w \"%{http_code}\"` and report its output or error verbatim. Keep it short.",
+    "edit applied; curl failed with 'Could not resolve host' => no network in workspace-write"
+  ],
+  "gitDiff": "diff --git a/math.js b/math.js\nindex 4ed55b5..4b52f4f 100644\n--- a/math.js\n+++ b/math.js\n@@ -2,4 +2,8 @@ function add(a, b) {\n   return a + b;\n }\n \n-module.exports = { add };\n+function sub(a, b) {\n+  return a - b;\n+}\n+\n+module.exports = { add, sub };\n"
+}
