@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "running",
+        "returned_to_host",
+        "rejected"
+      ]
+    },
+    "externalAgent": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "minLength": 1
+            },
+            "instance": {
+              "type": "string",
+              "minLength": 1
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "marker": {
+              "type": "string",
+              "const": "EXTERNAL_AGENT_OUTPUT"
+            }
+          },
+          "required": [
+            "provider",
+            "instance",
+            "model",
+            "marker"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "outcome": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "success",
+            "failed",
+            "timeout",
+            "quota_exhausted",
+            "rejected"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "patch": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "diffstat": {
+              "type": "string"
+            },
+            "applies": {
+              "type": "boolean"
+            },
+            "rejectedPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "needsReview": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "diffstat",
+            "applies",
+            "rejectedPaths",
+            "needsReview"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "log": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "delegate",
+              "host",
+              "reject"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "single",
+              "fallback",
+              "fanout"
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "instance": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tier": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "effort": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "instance",
+                "tier",
+                "model",
+                "effort"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "chain": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "layer": {
+                  "type": "string",
+                  "enum": [
+                    "pin",
+                    "mapping",
+                    "profile",
+                    "preset",
+                    "default",
+                    "filter"
+                  ]
+                },
+                "ruleId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "matched": {
+                  "type": "boolean"
+                },
+                "effect": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "layer",
+                "ruleId",
+                "matched",
+                "effect"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "inputHash": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "mode",
+          "targets",
+          "chain",
+          "inputHash",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cachedTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "costUsd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "raw": {}
+      },
+      "additionalProperties": false
+    },
+    "durationMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "$ref": "#"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "runId",
+    "status",
+    "externalAgent",
+    "outcome",
+    "summary",
+    "patch",
+    "log",
+    "decisions",
+    "durationMs"
+  ],
+  "additionalProperties": false
+}
