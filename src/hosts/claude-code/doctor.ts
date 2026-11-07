@@ -6,7 +6,8 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
-import { readHookCache } from "../../hook/cache.js";
+import { forwardableMcpFor, readHookCache } from "../../hook/cache.js";
+import { listMcpServers } from "../../mcp/resolve.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { createCommandRunner } from "../../runner/command.js";
 import type {
@@ -348,15 +349,57 @@ export function agentReport(
     if (!interceptable(a.name, list, exclude)) {
       return `${where}: stays on Claude (not in hosts.claude-code.intercept, or excluded)`;
     }
-    const v = eligibility(a.def, { forwardableMcp: cache.policy.forwardableMcp });
+    const v = eligibility(a.def, { forwardableMcp: forwardableMcpFor(cache, cwd) });
+    const mcp =
+      v.eligible && v.mcpServers.length > 0 ? `, MCP forwarded: ${v.mcpServers.join(", ")}` : "";
     return v.eligible
-      ? `${where}: delegated (${v.autonomy}${a.def.model ? `, model ${a.def.model}` : ""})`
+      ? `${where}: delegated (${v.autonomy}${a.def.model ? `, model ${a.def.model}` : ""}${mcp})`
       : `${where}: stays on Claude (${v.reason})`;
   });
   return `\nyour sub-agents here:\n${lines.map((l) => `  ${l}`).join("\n")}`;
 }
 
+/**
+ * `claude-code.mcp-forwarding`: the consent (`hosts.claude-code.forward_mcp`, as the hook cache
+ * says) and, for the current repo, which MCP servers are forwardable and why the others are not.
+ * Read only: the user's MCP config is parsed, never modified, and no value is printed.
+ */
+function mcpForwardingCheck(deps: ClaudeDoctorDeps): DoctorCheck {
+  return {
+    id: "claude-code.mcp-forwarding",
+    run(ctx) {
+      if (absent(ctx, deps)) return NOT_FOUND;
+      const cwd = (deps.cwd ?? (() => process.cwd()))();
+      const root = checkoutRoot(cwd) ?? cwd;
+      const servers = listMcpServers(root, ctx.env);
+      const ok = servers.filter((s) => s.forwardable).map((s) => s.name);
+      const no = servers.filter((s) => !s.forwardable).map((s) => `${s.name} (${s.reason})`);
+      const listing =
+        servers.length === 0
+          ? `no MCP servers are configured for ${root}`
+          : `in ${root}: forwardable: ${ok.join(", ") || "none"}; not forwardable: ${no.join(", ") || "none"}`;
+      const consent = readHookCache(ctx.dispatchHome)?.policy.forwardMcp === true;
+      if (!consent) {
+        return {
+          status: "ok",
+          message: `MCP forwarding is off (hosts.claude-code.forward_mcp): agents that use MCP tools stay on Claude; ${listing}`,
+        };
+      }
+      return {
+        status: "ok",
+        message: `MCP forwarding is on (codex targets only; secrets pass by variable name); ${listing}`,
+      };
+    },
+  };
+}
+
 /** The Claude Code doctor checks. */
 export function claudeDoctorChecks(deps: ClaudeDoctorDeps = {}): DoctorCheck[] {
-  return [pluginCheck(deps), filesCheck(deps), permissionCheck(deps), hardModeCheck(deps)];
+  return [
+    pluginCheck(deps),
+    filesCheck(deps),
+    permissionCheck(deps),
+    hardModeCheck(deps),
+    mcpForwardingCheck(deps),
+  ];
 }

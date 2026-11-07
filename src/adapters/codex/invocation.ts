@@ -1,6 +1,8 @@
 import { join } from "node:path";
-import type { BuildInvocationArgs, Invocation } from "../../core/contracts.js";
+import type { Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import type { BuildInvocationWithMcp } from "../../mcp/forward.js";
+import type { McpServer } from "../../mcp/resolve.js";
 
 /** Name of the file `codex exec -o` writes the final agent message to, inside `runDir`. */
 export const CODEX_OUTPUT_FILE = "last.txt";
@@ -74,13 +76,64 @@ function requireToken(kind: string, value: string): string {
   return value;
 }
 
+/** The `-c` key prefix of one forwarded server (names are validated by the resolver too). */
+function serverKey(s: McpServer): string {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(s.name)) {
+    throw new DispatchError(
+      `codex: invalid MCP server name ${JSON.stringify(s.name)}`,
+      undefined,
+      "adapter.codex.invalid_target",
+    );
+  }
+  return `mcp_servers.${s.name}`;
+}
+
+const tomlArray = (xs: readonly string[]): string => `[${xs.map(tomlString).join(",")}]`;
+
+/**
+ * `-c` overrides that load exactly the forwarded servers (live-verified on 0.167: they apply with
+ * `--ignore-user-config --strict-config --disable plugins`). Secrets travel by variable NAME only:
+ * `env_vars` for stdio, `env_http_headers` for HTTP. Every tool is pre-approved, since `codex exec`
+ * refuses an MCP call that needs approval. Referenced variables are excluded from the agent's
+ * shell environment, so only the server process sees them.
+ */
+export function mcpOverrides(servers: readonly McpServer[]): string[] {
+  const out: string[] = [];
+  const c = (kv: string) => out.push("-c", kv);
+  for (const s of servers) {
+    const key = serverKey(s);
+    if (s.transport === "stdio") {
+      c(`${key}.command=${tomlString(s.command ?? "")}`);
+      c(`${key}.args=${tomlArray(s.args ?? [])}`);
+      if (s.envRefs.length > 0) c(`${key}.env_vars=${tomlArray(s.envRefs)}`);
+    } else if (s.transport === "http") {
+      c(`${key}.url=${tomlString(s.url ?? "")}`);
+      const headers = Object.entries(s.headers).map(
+        ([h, v]) => `${tomlString(h)}=${tomlString(v)}`,
+      );
+      if (headers.length > 0) c(`${key}.env_http_headers={${headers.join(",")}}`);
+    } else {
+      throw new DispatchError(
+        `codex: MCP transport ${s.transport} cannot be forwarded`,
+        undefined,
+        "adapter.mcp_unsupported",
+      );
+    }
+    c(`${key}.default_tools_approval_mode="approve"`);
+  }
+  const vars = [...new Set(servers.flatMap((s) => [...s.envRefs, ...s.headerRefs]))];
+  if (vars.length > 0) c(`shell_environment_policy.exclude=${tomlArray(vars)}`);
+  return out;
+}
+
 /**
  * Builds the `codex exec` child command (pure). Prompt goes on stdin (trailing `-`).
  * `worktree` and `repoRoot` must be canonical (realpath) paths, since codex keys project trust
- * on them. Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
+ * on them. `mcpServers` (optional) adds only those MCP servers ({@link mcpOverrides}); the user's
+ * own MCP config stays ignored. Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
  * required isolation feature is unknown to the installed CLI (fail closed).
  */
-export function buildCodexInvocation(args: BuildInvocationArgs): Invocation {
+export function buildCodexInvocation(args: BuildInvocationWithMcp): Invocation {
   const { probe, autonomy, worktree, repoRoot, runDir, target, instance } = args;
   if (autonomy === "direct") {
     throw new DispatchError(
@@ -118,6 +171,7 @@ export function buildCodexInvocation(args: BuildInvocationArgs): Invocation {
     "agents.enabled=false",
     "-c",
     untrustedProjectsOverride([worktree, repoRoot]),
+    ...mcpOverrides(args.mcpServers ?? []),
     "-C",
     worktree,
     "-m",
@@ -142,6 +196,9 @@ export function buildCodexInvocation(args: BuildInvocationArgs): Invocation {
     stdin: wrapPrompt(args.task.prompt),
     outputFile,
     redactArgvIndexes: [],
-    sideEffectGuards: [...CODEX_SIDE_EFFECT_GUARDS],
+    sideEffectGuards: [
+      ...CODEX_SIDE_EFFECT_GUARDS,
+      ...(args.mcpServers?.length ? ["codex-mcp-forwarded-only"] : []),
+    ],
   };
 }

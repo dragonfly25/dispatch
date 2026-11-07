@@ -12,6 +12,7 @@ import { writeAtomic } from "../config/trust.js";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import {
+  FORWARD_MCP_GRANT,
   MAIN_HOSTS,
   type MainHost,
   PROVIDER_IDS,
@@ -211,6 +212,12 @@ export function renderGlobalConfig(a: ResolvedAnswers): string {
       "autonomy: worktree",
     ),
     providersSection(a),
+    `${comment([
+      "Host integrations. hosts.claude-code.forward_mcp is a TRUST GRANT (SECURITY):",
+      `"${FORWARD_MCP_GRANT}".`,
+      `Only servers whose env/header values are \${VAR} references are forwarded, by variable name;`,
+      "a repo or flag can only turn it off. Also: hard (default true), intercept, and hosts.codex.hard.",
+    ])}\nhosts:\n  claude-code:\n    forward_mcp: ${a.forwardMcp}`,
     ...OTHER_OPTIONS.map((o) => `${comment(o.explain)}\n${comment(o.example)}`),
   ];
   const text = `${sections.join("\n\n")}\n`;
@@ -237,6 +244,10 @@ export function currentAnswers(text: string): SetupAnswers {
   if (doc.autonomy === "read-only" || doc.autonomy === "worktree" || doc.autonomy === "direct") {
     out.autonomy = doc.autonomy;
   }
+  const forward = (doc.hosts as { "claude-code"?: { forward_mcp?: unknown } } | null | undefined)?.[
+    "claude-code"
+  ]?.forward_mcp;
+  if (typeof forward === "boolean") out.forwardMcp = forward;
   const providers = doc.providers;
   if (providers && typeof providers === "object") {
     type P = { plan?: unknown; enabled?: unknown; tos_acknowledged?: unknown } | null;
@@ -280,6 +291,12 @@ export function updateGlobalConfig(text: string, a: SetupAnswers, source: string
   if (a.enableAntigravity === true) {
     set(["providers", "antigravity", "enabled"], true);
     set(["providers", "antigravity", "tos_acknowledged"], a.acceptAgyTerms === true);
+  }
+  if (a.forwardMcp !== undefined) {
+    for (const path of [["hosts"], ["hosts", "claude-code"]]) {
+      if (isScalar(doc.getIn(path, true))) doc.setIn(path, doc.createNode({}));
+    }
+    doc.setIn(["hosts", "claude-code", "forward_mcp"], a.forwardMcp);
   }
   return doc.toString({ lineWidth: 0 });
 }

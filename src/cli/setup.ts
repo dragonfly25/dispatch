@@ -27,6 +27,7 @@ import { createCommandRunner } from "../runner/command.js";
 import {
   type AnswerFlags,
   assertAgyConsent,
+  FORWARD_MCP_GRANT,
   hasAnswerFlags,
   presetAnswers,
   withDefaults,
@@ -162,6 +163,8 @@ async function planGlobalConfig(
         existing === null ? null : currentAnswers(existing),
       )
     : preset;
+  const grants = (forward: boolean | undefined) =>
+    forward ? { grants: [`${FORWARD_MCP_GRANT} (hosts.claude-code.forward_mcp: true)`] } : {};
   if (existing === null) {
     const resolved = withDefaults(answers);
     return {
@@ -169,6 +172,7 @@ async function planGlobalConfig(
       text: renderGlobalConfig(resolved),
       mode: "create",
       lines: describeAnswers(resolved),
+      ...grants(resolved.forwardMcp),
     };
   }
   assertAgyConsent(answers);
@@ -177,6 +181,7 @@ async function planGlobalConfig(
     text: updateGlobalConfig(existing, answers, path),
     mode: "update",
     lines: describeAnswers(answers),
+    ...grants(answers.forwardMcp),
   };
 }
 
@@ -279,7 +284,12 @@ export function addAnswerOptions(cmd: Command): Command {
     )
     .option("--autonomy <level>", "ceiling for delegated agents: read-only | worktree | direct")
     .option("--enable-antigravity", "enable the experimental Antigravity provider")
-    .option("--accept-agy-terms", "accept the risk and Google's terms for Antigravity");
+    .option("--accept-agy-terms", "accept the risk and Google's terms for Antigravity")
+    .option(
+      "--forward-mcp",
+      "trust grant: forward the MCP servers an agent needs to the external agent that runs it",
+    )
+    .option("--no-forward-mcp", "do not forward MCP servers (agents that use MCP stay on Claude)");
 }
 
 /** Registers `setup` and `uninstall` on `program`. */

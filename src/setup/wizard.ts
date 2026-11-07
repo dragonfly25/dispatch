@@ -7,6 +7,8 @@
 import {
   AGY_WARNING,
   AUTONOMIES,
+  FORWARD_MCP_DETAIL,
+  FORWARD_MCP_GRANT,
   MAIN_HOSTS,
   type MainHost,
   planChoices,
@@ -156,6 +158,21 @@ export async function runWizard(
       out.autonomy = "worktree";
     }
   }
+
+  // Trust grant: MCP forwarding (default yes, as the owner approved; consent is asked once).
+  if (preset.forwardMcp !== undefined) out.forwardMcp = preset.forwardMcp;
+  else {
+    p.note(`Trust grant · ${FORWARD_MCP_GRANT}`, FORWARD_MCP_DETAIL);
+    const choice = await p.select(
+      `${FORWARD_MCP_GRANT}?`,
+      [
+        { value: "yes", label: `yes, with \${VAR} secrets passed by name only` },
+        { value: "no", label: "no, agents that use MCP tools stay on Claude" },
+      ],
+      cur.forwardMcp === false ? "no" : "yes",
+    );
+    out.forwardMcp = choice === "yes";
+  }
   return out;
 }
 
@@ -222,6 +239,9 @@ export function describeAnswers(a: SetupAnswers): string[] {
   lines.push(`plans: ${plans.length > 0 ? plans.join(", ") : "none declared (unknown)"}`);
   if (a.enableAntigravity !== undefined) {
     lines.push(`antigravity: ${a.enableAntigravity ? "enabled (terms accepted)" : "disabled"}`);
+  }
+  if (a.forwardMcp !== undefined) {
+    lines.push(`trust grant · ${FORWARD_MCP_GRANT}: ${a.forwardMcp ? "yes" : "no"}`);
   }
   return lines;
 }

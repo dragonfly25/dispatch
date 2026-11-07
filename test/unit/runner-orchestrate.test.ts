@@ -549,3 +549,82 @@ describe("reportedPatch [SEC-patch]", () => {
     expect(reportedPatch(result(false, ["link"]))?.diffstat).toBe(" a | 1 +\n");
   });
 });
+
+describe("MCP forwarding [SEC-mcp] [SEC-env]", () => {
+  const CANARY = "ghp_CANARYmcpforward0123456789abcdefgh";
+  const ref = (name: string) => `\${${name}}`;
+  const claudeJson = (servers: Record<string, unknown>) =>
+    writeFileSync(join(home?.home ?? "", ".claude.json"), JSON.stringify({ mcpServers: servers }));
+  const forward = (deps: RunnerDeps, names: string[]) =>
+    executeTask(deps, task(), {
+      repoPath: repo?.dir ?? "",
+      signals: null,
+      leaseWaitMs: 0,
+      mcpServers: names,
+    });
+  /** Every byte Dispatch persisted: the SQLite files and the run log. */
+  const persisted = (r: RunResult): string => {
+    const db = join(home?.dispatchHome ?? "", "state", "dispatch.db");
+    const parts = [db, `${db}-wal`].filter(existsSync).map((p) => readFileSync(p, "latin1"));
+    return parts.join("") + readFileSync(r.log.path, "utf8");
+  };
+
+  it("forwards a pure-reference server to codex by name only; the value never reaches argv, logs or state", async () => {
+    const { deps, fakes } = setup({
+      action: FALLBACK,
+      exec: { forwardMcp: true },
+      env: { GH_TOKEN: CANARY },
+      scenarios: { codex: [{ scenario: "leak_secret", secret: CANARY }] },
+    });
+    claudeJson({ gh: { command: "gh-mcp", env: { GH_TOKEN: ref("GH_TOKEN") } } });
+    const r = await forward(deps, ["gh"]);
+    valid(r);
+    expect(r.externalAgent?.instance).toBe("codex");
+    // claude cannot host MCP servers: the router never picked it.
+    expect(fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
+    expect(r.decisions[0]?.chain.find((c) => c.ruleId === "claude")?.effect).toMatch(/disabled/);
+    const [call] = fakes.readLog({ cli: "codex", kind: "run" });
+    expect(call?.args).toContain('mcp_servers.gh.env_vars=["GH_TOKEN"]');
+    expect(call?.args).toContain("--ignore-user-config");
+    expect(call?.args.join(" ")).not.toContain(CANARY);
+    expect(call?.stdin ?? "").not.toContain(CANARY);
+    // Passed by name to the codex process, which hands it to the server only.
+    expect(call?.env.GH_TOKEN).toBe(CANARY);
+    expect(r.summary).not.toContain(CANARY);
+    expect(persisted(r)).not.toContain(CANARY);
+    expect(readFileSync(r.log.path, "utf8")).toContain('"type":"mcp.forward"');
+  });
+
+  it("returns the task to the host when consent is off; nothing is spawned", async () => {
+    const { deps, fakes } = setup({ env: { GH_TOKEN: CANARY } });
+    claudeJson({ gh: { command: "gh-mcp", env: { GH_TOKEN: ref("GH_TOKEN") } } });
+    const r = await forward(deps, ["gh"]);
+    expect(r.status).toBe("returned_to_host");
+    expect(r.summary).toMatch(/MCP forwarding is off/);
+    expect(fakes.readLog({ kind: "run" })).toEqual([]);
+  });
+
+  it("re-resolves at run time: a server that became a literal secret goes back to the host", async () => {
+    const { deps, fakes } = setup({ exec: { forwardMcp: true } });
+    // The hook saw a forwardable `gh`; by run time the user pasted a token into the config.
+    claudeJson({ gh: { command: "gh-mcp", env: { GH_TOKEN: CANARY } } });
+    const r = await forward(deps, ["gh"]);
+    expect(r.status).toBe("returned_to_host");
+    expect(r.summary).toBe("MCP server(s) cannot be forwarded (gh: literal secret in env/headers)");
+    expect(fakes.readLog({ kind: "run" })).toEqual([]);
+    expect(persisted(r)).not.toContain(CANARY);
+  });
+
+  it("returns to host when no enabled provider can host the servers", async () => {
+    const { deps, fakes } = setup({
+      exec: { forwardMcp: true },
+      routing: { instances: makeConfig().instances.filter((i) => i.id === "claude") },
+      action: { type: "provider", instance: "claude" },
+    });
+    claudeJson({ echo: { command: "node" } });
+    const r = await forward(deps, ["echo"]);
+    expect(r.status).toBe("returned_to_host");
+    expect(r.summary).toMatch(/no enabled provider can host MCP server\(s\) echo/);
+    expect(fakes.readLog({ kind: "run" })).toEqual([]);
+  });
+});

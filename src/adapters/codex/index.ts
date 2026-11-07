@@ -17,6 +17,7 @@ export {
   buildCodexInvocation,
   CODEX_OUTPUT_FILE,
   CODEX_SIDE_EFFECT_GUARDS,
+  mcpOverrides,
   tomlString,
   untrustedProjectsOverride,
   wrapPrompt,
@@ -38,7 +39,9 @@ export const CODEX_CAPABILITIES: AdapterCapabilities = {
   isolation: {
     userHooks: "disabled", // --disable hooks
     userPlugins: "disabled", // --disable plugins
-    userMcp: "disabled", // --ignore-user-config (MCP servers live in ~/.codex/config.toml)
+    // --ignore-user-config (MCP servers live in ~/.codex/config.toml); with forwarding on, only the
+    // servers the delegated agent needs are added through -c (src/mcp/forward.ts).
+    userMcp: "disabled",
     projectConfig: "disabled", // untrusted project override disables <repo>/.codex/
   },
   sandbox: "os",

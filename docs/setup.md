@@ -35,7 +35,9 @@ dispatch setup --non-interactive --yes --plan claude=max5x --plan codex=plus --p
 ```
 
 Other answer flags: `--host claude-code|codex|none`, `--autonomy read-only|worktree|direct`,
-`--enable-antigravity --accept-agy-terms`. Without `--yes`, `--non-interactive` only prints the plan.
+`--enable-antigravity --accept-agy-terms`, `--forward-mcp` / `--no-forward-mcp` (answers file:
+`forward_mcp: true|false`; without an answer a non-interactive setup records `false`). Without
+`--yes`, `--non-interactive` only prints the plan.
 
 ### What setup writes
 
@@ -49,7 +51,7 @@ Other answer flags: `--host claude-code|codex|none`, `--autonomy read-only|workt
 
 ### Trust grants
 
-Setup asks you to accept two trust grants. Read them before saying yes.
+Setup asks you to accept these trust grants. Read them before saying yes.
 
 - **Codex rules file.** Codex runs shell commands in a sandbox with no network, so `dispatch run`
   could not work from inside it. The rules file allows exactly one thing outside the sandbox: the
@@ -58,6 +60,15 @@ Setup asks you to accept two trust grants. Read them before saying yes.
 - **Codex hook approval.** Codex only runs hooks you have approved. After setup, start Codex, open
   `/hooks`, and approve the Dispatch hooks. There is no CLI for this. Until you do, the Codex side
   stays inert (the skill still works when asked).
+- **MCP forwarding** (`hosts.claude-code.forward_mcp`, default yes in the wizard). When Claude Code
+  hands one of your agents to Dispatch and that agent uses MCP tools, the codex agent that runs it
+  may start exactly those MCP servers, with the same tools, unsupervised. Only servers whose `env`
+  and header values are `${VAR}` references qualify (and `.mcp.json` servers only once you approved
+  them in Claude Code); the values pass by variable name from Dispatch's environment, never copied.
+  Claude targets cannot receive MCP servers. `dispatch setup --refresh` keeps your answer;
+  `dispatch setup --reconfigure` changes it; a repo can turn it off with `forward_mcp: false`.
+  `dispatch doctor` (`claude-code.mcp-forwarding`) lists, for the current repo, which servers
+  qualify and why the others do not. Threat model: [security.md](security.md) T13.
 
 ### Claude permission rule
 

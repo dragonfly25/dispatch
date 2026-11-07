@@ -358,18 +358,33 @@ const typeCell = (r: Row): string => (r.required ? `${r.type}, required` : r.typ
 
 function configTable(defaults: Map<string, string>): { text: string; paths: Set<string> } {
   const global = collect(GlobalConfigFileSchema, ["pins"]);
-  const repoPaths = new Set(collect(RepoConfigFileSchema, ["pins"]).map((r) => r.path));
-  const lines = global.map((r) => [
-    keyCell(r),
-    typeCell(r),
-    defaults.get(r.path) ?? "",
-    r.allowed,
-    whereOf(r, repoPaths.has(r.path)),
-    describe(r),
-  ]);
+  const repoRows = collect(RepoConfigFileSchema, ["pins"]);
+  const repoPaths = new Set(repoRows.map((r) => r.path));
+  const globalPaths = new Set(global.map((r) => r.path));
+  // Keys only a repo or a flag may set (e.g. `forward_mcp: false`, whose global twin lives under
+  // `hosts.`) are listed after the global keys.
+  const repoOnly = repoRows.filter((r) => !globalPaths.has(r.path));
+  const lines = [
+    ...global.map((r) => [
+      keyCell(r),
+      typeCell(r),
+      defaults.get(r.path) ?? "",
+      r.allowed,
+      whereOf(r, repoPaths.has(r.path)),
+      describe(r),
+    ]),
+    ...repoOnly.map((r) => [
+      keyCell(r),
+      typeCell(r),
+      defaults.get(r.path) ?? "",
+      r.allowed,
+      "repo and flags only (tighten)",
+      describe(r),
+    ]),
+  ];
   return {
     text: table(["Key", "Type", "Default", "Allowed values", "Where", "Description"], lines),
-    paths: new Set(global.map((r) => r.path)),
+    paths: new Set([...globalPaths, ...repoOnly.map((r) => r.path)]),
   };
 }
 

@@ -326,7 +326,10 @@ export function registerRun(program: Command, deps: CliDeps): void {
           }
           let result: RunResult;
           try {
-            result = await executeTask(rd, task, { repoPath: ctx.cwd });
+            result = await executeTask(rd, task, {
+              repoPath: ctx.cwd,
+              ...(from?.h.mcpServers.length ? { mcpServers: from.h.mcpServers } : {}),
+            });
           } finally {
             spin?.stop();
           }

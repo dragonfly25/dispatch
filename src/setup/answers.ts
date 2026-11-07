@@ -33,6 +33,8 @@ export interface SetupAnswers {
   /** Antigravity is experimental and off unless both are true. */
   enableAntigravity?: boolean;
   acceptAgyTerms?: boolean;
+  /** Trust grant {@link FORWARD_MCP_GRANT} (`hosts.claude-code.forward_mcp`). */
+  forwardMcp?: boolean;
 }
 
 /** Answers with every default applied. */
@@ -42,7 +44,20 @@ export interface ResolvedAnswers {
   autonomy: Autonomy;
   plans: Record<string, string>;
   enableAntigravity: boolean;
+  /** Without an answer (non-interactive), consent is not assumed: false. */
+  forwardMcp: boolean;
 }
+
+/** The MCP forwarding trust grant, as setup shows it. */
+export const FORWARD_MCP_GRANT =
+  "Forward the MCP servers an agent needs to the external agent that runs it";
+
+/** What the grant means, shown before the question. */
+export const FORWARD_MCP_DETAIL = [
+  "When Claude Code hands one of your agents to Dispatch, the external agent (codex) may start",
+  "the MCP servers that agent uses, with the same tools it has in Claude Code. Only servers whose",
+  `env and header values are \${VAR} references qualify; secret values are never copied.`,
+].join("\n");
 
 /** The `setup` / `install` flags that carry answers. */
 export interface AnswerFlags {
@@ -53,6 +68,8 @@ export interface AnswerFlags {
   plan?: string[];
   enableAntigravity?: boolean;
   acceptAgyTerms?: boolean;
+  /** `--forward-mcp` / `--no-forward-mcp`. */
+  forwardMcp?: boolean;
 }
 
 /** True when any answer flag was passed. */
@@ -64,7 +81,8 @@ export function hasAnswerFlags(f: AnswerFlags): boolean {
       f.autonomy ||
       f.plan?.length ||
       f.enableAntigravity ||
-      f.acceptAgyTerms,
+      f.acceptAgyTerms ||
+      f.forwardMcp !== undefined,
   );
 }
 
@@ -114,6 +132,7 @@ const AnswersFileSchema = z
       .object({ enable: z.boolean().optional(), accept_terms: z.boolean().optional() })
       .strict()
       .optional(),
+    forward_mcp: z.boolean().optional(),
   })
   .strict();
 type AnswersFile = z.infer<typeof AnswersFileSchema>;
@@ -173,6 +192,8 @@ export function presetAnswers(
   const accept = flags.acceptAgyTerms ?? file.antigravity?.accept_terms;
   if (enable !== undefined) out.enableAntigravity = enable;
   if (accept !== undefined) out.acceptAgyTerms = accept;
+  const forward = flags.forwardMcp ?? file.forward_mcp;
+  if (forward !== undefined) out.forwardMcp = forward;
   return out;
 }
 
@@ -202,5 +223,6 @@ export function withDefaults(a: SetupAnswers): ResolvedAnswers {
     autonomy: a.autonomy ?? "worktree",
     plans: a.plans,
     enableAntigravity: a.enableAntigravity === true,
+    forwardMcp: a.forwardMcp === true,
   };
 }

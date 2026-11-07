@@ -42,5 +42,6 @@ export function defaultSettings(): Settings {
     timeouts: { default_task_ms: 10 * 60 * 1000 },
     quota: { cache_minutes: 5, readers: {} },
     retention_days: DEFAULT_RETENTION_DAYS,
+    forward_mcp: false,
   };
 }

@@ -373,6 +373,80 @@ describe("claude-code.hard-mode [UC2]", () => {
   });
 });
 
+describe("claude-code.mcp-forwarding [SEC-mcp]", () => {
+  const SECRET = "canary-doctor-7f3a";
+  function repo(): string {
+    h = tempHome();
+    mkdirSync(join(h.home, ".claude"));
+    const root = join(h.home, "repo");
+    mkdirSync(join(root, ".git"), { recursive: true });
+    mkdirSync(join(root, "src"));
+    writeFileSync(
+      join(h.home, ".claude.json"),
+      JSON.stringify({
+        mcpServers: {
+          gh: { command: "gh-mcp", env: { GH_TOKEN: `\${GH_TOKEN}` } },
+          leaky: { command: "x", env: { API_KEY: SECRET } },
+        },
+        projects: { [root]: { enabledMcpjsonServers: [] } },
+      }),
+    );
+    writeFileSync(
+      join(root, ".mcp.json"),
+      JSON.stringify({ mcpServers: { local: { command: "l" } } }),
+    );
+    return root;
+  }
+  const policy = (forwardMcp?: boolean) =>
+    writeHookCache(h.dispatchHome, {
+      version: 1,
+      writtenAt: "2026-11-07T00:00:00.000Z",
+      trustedRepos: [],
+      policy: {
+        profile: "balance",
+        hardMode: true,
+        summary: "s",
+        ...(forwardMcp === undefined ? {} : { forwardMcp }),
+      },
+    });
+
+  it("lists forwardable vs not-forwardable servers of the current repo, never a value", async () => {
+    const root = repo();
+    policy(true);
+    const r = await check("claude-code.mcp-forwarding", {
+      fs: FOUND,
+      cwd: () => join(root, "src"),
+    }).run(dctx());
+    expect(r.status).toBe("ok");
+    expect(r.message).toContain("MCP forwarding is on");
+    expect(r.message).toContain("forwardable: gh;");
+    expect(r.message).toContain("leaky (literal secret in env/headers)");
+    expect(r.message).toContain("local (project .mcp.json server not approved in Claude Code)");
+    expect(r.message).not.toContain(SECRET);
+  });
+
+  it("says forwarding is off without consent, and handles a repo without servers", async () => {
+    const root = repo();
+    policy(false);
+    const off = await check("claude-code.mcp-forwarding", { fs: FOUND, cwd: () => root }).run(
+      dctx(),
+    );
+    expect(off.message).toContain("MCP forwarding is off");
+    rmSync(join(h.home, ".claude.json"));
+    rmSync(join(root, ".mcp.json"));
+    const none = await check("claude-code.mcp-forwarding", { fs: FOUND, cwd: () => root }).run(
+      dctx(),
+    );
+    expect(none.message).toContain("no MCP servers are configured");
+    expect(
+      (await check("claude-code.mcp-forwarding", { fs: NONE, cwd: () => root }).run(dctx({})))
+        .message,
+    ).toBe(
+      `MCP forwarding is off (hosts.claude-code.forward_mcp): agents that use MCP tools stay on Claude; no MCP servers are configured for ${root}`,
+    );
+  });
+});
+
 describe("registration", () => {
   it("builtinRegistry registers the claude-code and codex hosts and their checks", () => {
     const reg = builtinRegistry();
@@ -383,6 +457,7 @@ describe("registration", () => {
       "claude-code.files",
       "claude-code.permission-rule",
       "claude-code.hard-mode",
+      "claude-code.mcp-forwarding",
       "codex.files",
       "codex.rules-launcher",
       "codex.hooks-trusted",

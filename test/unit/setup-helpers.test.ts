@@ -86,8 +86,10 @@ describe("global config helpers", () => {
           autonomy: "direct",
           plans,
           enableAntigravity,
+          forwardMcp: enableAntigravity,
         });
         expect(text).toContain("autonomy: direct");
+        expect(text).toContain(`forward_mcp: ${enableAntigravity}`);
       }
     }
   });

@@ -12,7 +12,12 @@ All notable changes to this project are documented here. The format follows
   delegates. Config `hosts.claude-code.hard` (default true) and `hosts.claude-code.intercept`
   (default `["general-purpose"]`, `"*"` for every type). Doctor check `claude-code.hard-mode`.
   Existing installs: `dispatch setup --refresh`, then restart Claude Code sessions.
-
+- MCP forwarding: an intercepted agent that uses MCP tools can have exactly those servers forwarded
+  to the codex child that runs it, after a one-time trust grant in `dispatch setup`
+  (`hosts.claude-code.forward_mcp`, flags `--forward-mcp` / `--no-forward-mcp`). Only servers whose
+  env and header values are `${VAR}` references qualify; secrets pass by variable name, never by
+  value. Repo/flag key `forward_mcp: false` turns it off. `executeTask` option `mcpServers`, hook
+  cache fields `forwardMcp` / `forwardableMcp`, doctor check `claude-code.mcp-forwarding`.
 - Claude Code hard mode for your own sub-agents (`.claude/agents/*.md`, project and user): eligible
   agents are redirected through a one-time handoff file (`dispatch run --handoff <id>`), with the
   agent's instructions, model (tier), effort and autonomy. Agents using the desktop browser, web
@@ -28,6 +33,9 @@ All notable changes to this project are documented here. The format follows
 - `hosts.claude-code.intercept` defaults to `auto` (general-purpose plus eligible custom agents);
   `"*"` now means every eligible type (built-ins without an agent file are no longer redirected).
 - The claude reverse model table classifies `*fable*` as `max`.
+- Children may now start the MCP servers the delegated agent needs (codex only, with consent);
+  every other MCP server stays disabled. Claude targets never receive MCP servers (`--safe-mode`
+  ignores `--mcp-config`).
 - The SessionStart policy text (Claude Code and Codex) now says that task types the policy routes to a
   provider are delegated through Dispatch unless the user says otherwise.
 

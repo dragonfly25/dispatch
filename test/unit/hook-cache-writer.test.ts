@@ -70,6 +70,51 @@ function kit() {
   return { dir, env, dispatch, cache, hook };
 }
 
+describe("hook cache: MCP forwarding fields [SEC-mcp]", () => {
+  const ref = (name: string) => `\${${name}}`;
+  function withServers(consent: boolean) {
+    const k = kit();
+    writeFileSync(
+      join(home?.dispatchHome ?? "", "config.yaml"),
+      `version: 1\nhosts:\n  claude-code:\n    forward_mcp: ${consent}\n`,
+    );
+    writeFileSync(
+      join(home?.home ?? "", ".claude.json"),
+      JSON.stringify({
+        mcpServers: {
+          gh: { command: "gh-mcp", env: { GH_TOKEN: ref("GH_TOKEN") } },
+          leaky: { command: "x", env: { API_KEY: "literal-canary" } },
+        },
+        projects: { [k.dir]: { mcpServers: { proj: { command: "p" } } } },
+      }),
+    );
+    return k;
+  }
+
+  it("with consent: the user-scope list on the policy, the full list per trusted repo", async () => {
+    const k = withServers(true);
+    expect((await k.dispatch(["trust"])).code).toBe(0);
+    const cache = k.cache();
+    expect(cache?.policy).toMatchObject({ forwardMcp: true, forwardableMcp: ["gh"] });
+    expect(cache?.trustedRepos[0]?.forwardableMcp).toEqual(["gh", "proj"]);
+    expect(JSON.stringify(cache)).not.toContain("literal-canary");
+  });
+
+  it("without consent, or when the repo turns it off, nothing is forwardable", async () => {
+    const off = withServers(false);
+    await off.dispatch(["trust"]);
+    expect(off.cache()?.policy).toMatchObject({ forwardMcp: false, forwardableMcp: [] });
+    expect(off.cache()?.trustedRepos[0]?.forwardableMcp).toBeUndefined();
+    home?.cleanup();
+    repo?.cleanup();
+    const repoOff = withServers(true);
+    writeFileSync(join(repoOff.dir, ".dispatch", "config.yaml"), `${POLICY}forward_mcp: false\n`);
+    await repoOff.dispatch(["trust"]);
+    expect(repoOff.cache()?.trustedRepos[0]?.forwardableMcp).toEqual([]);
+    expect(repoOff.cache()?.policy.forwardableMcp).toEqual(["gh"]);
+  });
+});
+
 describe("hook cache writer [UC9][UC2]", () => {
   it("`trust` writes the cache; the Claude SessionStart hook injects the policy", async () => {
     const k = kit();

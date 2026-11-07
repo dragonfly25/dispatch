@@ -19,6 +19,7 @@ import {
   writeHookCache,
 } from "../hook/cache.js";
 import { DEFAULT_CLAUDE_INTERCEPT } from "../hosts/claude-code/hook.js";
+import { forwardableNames, memoRead } from "../mcp/resolve.js";
 import { type AppContext, type LoadAppContextOptions, loadAppContext } from "./context.js";
 
 /** Longest summary written (the Claude hook cuts at 2000 characters). */
@@ -97,12 +98,37 @@ function globalFile(ctx: AppContext): GlobalConfigFile | null {
   }
 }
 
-/** The repositories recorded in the global config's `trusted_repos`. */
-function trustedRepos(global: GlobalConfigFile | null): TrustedRepo[] {
+/**
+ * The repositories recorded in the global config's `trusted_repos`. With MCP forwarding on, each
+ * carries its forwardable servers (`mcp` lists them; null when forwarding is off).
+ */
+function trustedRepos(
+  global: GlobalConfigFile | null,
+  mcp: ((root: string) => string[]) | null,
+): TrustedRepo[] {
   return Object.entries(global?.trusted_repos ?? {}).flatMap(([id, entry]) => {
     const root = rootOf(id);
-    return root === null ? [] : [{ root, policyHash: entry.hash }];
+    if (root === null) return [];
+    return [{ root, policyHash: entry.hash, ...(mcp ? { forwardableMcp: mcp(root) } : {}) }];
   });
+}
+
+/**
+ * Forwardable MCP server lister for the cache, or null without consent. The repo where the command
+ * runs uses its merged setting, so a trusted repo's `forward_mcp: false` empties its list.
+ */
+function mcpLister(ctx: AppContext, consent: boolean): ((root: string | null) => string[]) | null {
+  if (!consent) return null;
+  const read = memoRead();
+  const here = ctx.config.trust.repoId ? rootOf(ctx.config.trust.repoId) : null;
+  return (root) => {
+    if (root !== null && root === here && ctx.config.execution.forwardMcp !== true) return [];
+    try {
+      return forwardableNames(root, ctx.env, { read });
+    } catch {
+      return [];
+    }
+  };
 }
 
 /** Rule actions that send a task to a provider. */
@@ -128,6 +154,8 @@ function interceptOf(v: string | readonly string[] | undefined): string[] {
 export function buildHookCache(ctx: AppContext): HookCache {
   const global = globalFile(ctx);
   const claude = global?.hosts?.["claude-code"];
+  const forwardMcp = claude?.forward_mcp === true;
+  const mcp = mcpLister(ctx, forwardMcp);
   const policy: PolicySummary = {
     profile: ctx.config.routing.activeProfile,
     hardMode: global?.hosts?.codex?.hard ?? true,
@@ -136,12 +164,14 @@ export function buildHookCache(ctx: AppContext): HookCache {
     claudeIntercept: interceptOf(claude?.intercept),
     claudeExclude: [...(claude?.exclude ?? [])],
     claudeAutoApply: claude?.auto_apply ?? true,
+    forwardMcp,
+    forwardableMcp: mcp ? mcp(null) : [],
     summary: summarizePolicy(ctx.config.routing),
   };
   return {
     version: 1,
     writtenAt: ctx.clock.now().toISOString(),
-    trustedRepos: trustedRepos(global),
+    trustedRepos: trustedRepos(global, mcp),
     policy,
   };
 }

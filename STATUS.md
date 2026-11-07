@@ -171,8 +171,8 @@ Taken during execution:
   `general-purpose` plus every eligible agent of `<repo>/.claude/agents/` and `~/.claude/agents/`
   (`CLAUDE_CONFIG_DIR` respected; matched by file name, then frontmatter `name:`). Eligible: only
   file tools (read tools → read-only, edit tools or Bash or no `tools:` → worktree), MCP tools only
-  for servers in the hook cache's `policy.forwardableMcp` (written by the MCP forwarding work; absent
-  = none), never `Claude_Browser`, instructions ≤ 32 KB. The hook writes a 0600 handoff
+  for servers `forwardableMcpFor(cache, root)` returns (empty without the MCP forwarding
+  consent), never `Claude_Browser`, instructions ≤ 32 KB. The hook writes a 0600 handoff
   (`~/.dispatch/handoffs/<id>.json`) and points the relay at `run --handoff <id>`; the agent's
   `model:` goes through the claude reverse table (`*fable*` → max added), `effort:` xhigh/max → high.
   New `hosts.claude-code.exclude`, `auto_apply`; doctor `claude-code.hard-mode` lists every agent of
@@ -189,6 +189,27 @@ Taken during execution:
   can search the web (`-c web_search="live"`, what the top-level `--search` flag sets), but the
   frozen `Task`/`BuildInvocationArgs` contracts carry no web request and `network: off` is the
   default security key; wiring it needs an ADR.
+- **Per-agent MCP forwarding** (owner-approved, one-time consent): `src/mcp/` reads the user's
+  Claude MCP config read-only (local > `.mcp.json` (approved only) > user scope) and decides which
+  servers are forwardable (pure `${VAR}` env/header references only; values never copied).
+  `dispatch setup` asks the trust grant `hosts.claude-code.forward_mcp` (wizard default yes;
+  absent = false; repo/flag `forward_mcp: false` only tightens). The hook cache carries
+  `policy.forwardMcp`, `policy.forwardableMcp` (user scope) and `trustedRepos[].forwardableMcp`
+  (per repo); `forwardableMcpFor(cache, cwd)` reads them. `executeTask` takes `mcpServers` (names),
+  re-resolves them at run time, restricts routing to instances that can host them and passes them to
+  `buildInvocation`. Doctor: `claude-code.mcp-forwarding`; `*.isolation` wording updated.
+  Wired to custom agents: the hook checks eligibility with `forwardableMcpFor` (consent honoured),
+  and `run --handoff` passes the handoff's `mcpServers` to `executeTask` (sync and detached).
+- **Deviation:** children no longer always run with MCP disabled: a codex child may start exactly
+  the servers the delegated agent needs (`-c mcp_servers.<name>.*`, variables by name, tools
+  pre-approved). Claude targets cannot receive MCP: `--safe-mode` drops `--mcp-config` (verified
+  live, `docs/spikes/mcp-forwarding.md`). The frozen `BuildInvocationArgs` is extended structurally
+  (`BuildInvocationWithMcp` in `src/mcp/forward.ts`), and the router's capability hint is applied by
+  disabling incapable instances in the effective routing config before `decide` (the routing
+  contract stays frozen); an ADR could make both first-class.
+- **Risk:** a forwarded server runs as the user outside the child's sandbox, driven by an
+  unsupervised agent (docs/security.md T13). Not live-verified: `env_http_headers` and
+  `shell_environment_policy.exclude` (keys taken from the codex 0.167 config schema).
 
 ## Process notes
 

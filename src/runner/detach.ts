@@ -47,7 +47,7 @@ export interface DetachHandoff {
   /** Recorded as a passthrough when the run hands the task back. */
   passthroughKey: string;
   autoApply: boolean;
-  /** MCP servers the agent needs (forwarded only by builds that support it). */
+  /** MCP servers the agent needs; the supervisor re-resolves and forwards them (names only). */
   mcpServers: string[];
 }
 
@@ -269,6 +269,7 @@ export async function superviseRun(
       signal: controller.signal,
       signals: null,
       ...(payload.sessionModel ? { sessionModel: payload.sessionModel } : {}),
+      ...(payload.handoff?.mcpServers.length ? { mcpServers: payload.handoff.mcpServers } : {}),
     };
     let result = await executeTask(runner, payload.task, opts);
     if (cancelled && result.outcome !== "success") {

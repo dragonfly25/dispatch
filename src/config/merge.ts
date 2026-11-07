@@ -62,6 +62,11 @@ export interface Settings {
   };
   /** Global-only: retention of finished runs and history, in days. */
   retention_days: number;
+  /**
+   * MCP forwarding consent: global `hosts.claude-code.forward_mcp` (default false); a repo or
+   * flag `forward_mcp: false` turns it off, never on.
+   */
+  forward_mcp: boolean;
 }
 
 export type Provenance = Record<keyof Settings, Source>;
@@ -134,6 +139,7 @@ function applyGlobal(s: Settings, g: GlobalConfigFile, prov: Provenance, issues:
   if (g.concurrency) set("concurrency", { ...s.concurrency, ...defined(g.concurrency) });
   set("max_depth", g.max_depth);
   set("retention_days", g.retention_days);
+  set("forward_mcp", g.hosts?.["claude-code"]?.forward_mcp);
   set("network", g.network);
   if (g.worktree) set("worktree", { ...s.worktree, ...defined(g.worktree) });
   if (g.quota) {
@@ -238,6 +244,13 @@ function applyOverlay(
     else {
       s.network = r;
       accept("network");
+    }
+  }
+  if (o.forward_mcp !== undefined) {
+    if (o.forward_mcp && !s.forward_mcp) loosen("forward_mcp", "enables MCP forwarding");
+    else {
+      s.forward_mcp = o.forward_mcp;
+      accept("forward_mcp");
     }
   }
   const wt = o.worktree;
