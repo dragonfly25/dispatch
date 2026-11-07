@@ -25,6 +25,8 @@ export interface ConfigPreview {
   path: string;
   mode: "create" | "update";
   lines: string[];
+  /** Trust grants the config change records (e.g. MCP forwarding), shown with the host grants. */
+  grants?: string[];
 }
 
 /** Rendered preview parts; `grants` is empty when nothing grants extra authority. */
@@ -66,10 +68,13 @@ export function renderPlanPreview(
   }
 
   const grants: string[] = [];
+  const lead = ui.enabled ? `${ui.mark("warn")} ` : "  ";
+  for (const grant of change?.grants ?? []) {
+    grants.push(`${lead}${ui.bold("Dispatch:")}`, ui.dim(`    ${grant}`));
+  }
   for (const g of plan.groups) {
     const granting = g.ops.filter((op) => op.trustGrant !== null);
     if (granting.length === 0) continue;
-    const lead = ui.enabled ? `${ui.mark("warn")} ` : "  ";
     grants.push(`${lead}${ui.bold(GRANT_SUMMARY[g.host] ?? `${label(g.host)}:`)}`);
     for (const op of granting) {
       grants.push(

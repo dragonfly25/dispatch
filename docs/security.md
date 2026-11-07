@@ -163,6 +163,8 @@ module.
     `CLAUDE_CODE_*`, `CODEX_*`, `ANTIGRAVITY_*` and `NODE_OPTIONS`.
   - Probes get their own minimal environment.
   - Every withheld value is added to the redactor.
+  - Exception (T13): with MCP forwarding, exactly the variables a forwarded server references
+    pass by name (`dangerouslyAllow`), and their values are redacted too.
   - Source: `src/runner/env.ts`.
 - **Proof.**
   - `test/security/run.test.ts` `[SEC-env]`: with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
@@ -356,8 +358,64 @@ Claude hard mode for custom agents (after v0.1.0) passes an agent's instructions
   decision): the external agent's edits land in the working tree without the host reviewing them
   first, as a native sub-agent's would. They are unstaged and visible in `git diff`. A local
   process running as the user could forge a handoff or a record; it could equally edit the files.
+### T13. An external, unsupervised agent gets the user's MCP tools (A2, A3; after v0.1.0)
+
+Context: when Claude Code hands one of the user's custom agents to Dispatch, the agent may use MCP
+tools (`mcp__<server>__*`). With the user's consent, the external agent that runs it (codex only)
+starts those servers itself. That agent is unsupervised and may be prompt injected: whatever a
+forwarded server can do (open issues, query a database, post messages), the child can do too.
+
+- **Mitigation.**
+  - **Consent.** `hosts.claude-code.forward_mcp` is a trust grant asked once by `dispatch setup`
+    (default yes in the wizard, as the owner approved; `--forward-mcp` / `--no-forward-mcp` or
+    `forward_mcp:` in the answers file; absent = false, so a non-interactive setup never assumes
+    it). It is global only and tighten-only: a repo or flag `forward_mcp: false` turns it off,
+    `true` is ignored and reported as an error. `setup --refresh` keeps the existing value.
+  - **Only what the agent needs.** The runner receives server NAMES (the handoff's `mcpServers`)
+    and re-resolves them from the user's Claude config at run time (`src/runner/mcp.ts`): the
+    hook's view is never trusted. An unknown server (built-in app tools such as `Claude_Browser`),
+    a server that is no longer forwardable or a referenced variable that is not set returns the task
+    to the host with the reason. The child still loads no other MCP server, hook, plugin or
+    project config (`--ignore-user-config --strict-config`, the untrusted-project override).
+  - **Secrets rule.** Credential values are never copied. A server is forwardable only when every
+    `env` and header value is a pure `${VAR}` reference with the same name (`GH_TOKEN:
+    ${GH_TOKEN}`); a literal value, a default (`${VAR:-x}`), text around the reference, a reference
+    in `command`/`args`/`url`, `headersHelper` or OAuth makes it not forwardable. Codex then gets
+    the NAME (`env_vars`, `env_http_headers`) and the value reaches the codex process from
+    Dispatch's own environment through an explicit `dangerouslyAllow` of exactly those names. The
+    values go to the redactor and never to disk, argv, state or logs; `shell_environment_policy.
+    exclude` keeps them out of the agent's own shell commands. Host markers, `DISPATCH_*`,
+    `NODE_OPTIONS`, `LD_*`/`DYLD_*` can never be referenced.
+  - **Repo-defined servers.** A `.mcp.json` server is forwardable only when the user approved it
+    in Claude Code (`enabledMcpjsonServers` / `enableAllProjectMcpServers` in `~/.claude.json`,
+    the user settings or the gitignored `.claude/settings.local.json`; never the repo-shared
+    `.claude/settings.json`).
+  - **Targets.** Only codex hosts forwarded servers (stdio and streamable HTTP). Claude's
+    `--safe-mode` drops `--mcp-config`, so claude instances are excluded by the router; agy never
+    receives MCP. Adapters refuse forwarded servers they cannot host (fail closed).
+  - The user's MCP config is read, never modified (`src/mcp/resolve.ts`).
+- **Proof.**
+  - `test/unit/mcp/resolve.test.ts` `[SEC-mcp]`: precedence (local > project > user), project
+    approval, `${VAR}` vs literal secrets and every other refusal, missing and malformed files,
+    run-time re-resolution.
+  - `test/unit/mcp/forward.test.ts` `[SEC-mcp][SEC-env]`: golden codex `-c` overrides with and
+    without servers, no value in argv or stdin; claude and agy refuse; router capability filter.
+  - `test/unit/runner-orchestrate.test.ts` "MCP forwarding": a canary token passes by name to the
+    codex process only; argv, stdin, the summary, the run log and the SQLite files never hold it;
+    consent off, a server that became a literal secret, and no capable provider all return the
+    task to the host without spawning anything.
+  - `test/unit/config/merge.test.ts`, `test/unit/setup-wizard.test.ts`,
+    `test/unit/hook-cache-writer.test.ts`: tighten-only consent, setup, refresh, cache fields.
+  - Live spikes: `docs/spikes/mcp-forwarding.md`.
+- **Residual risk.** A forwarded server runs as the user, outside the child's sandbox (codex
+  starts it), with the tools the user granted it in Claude Code, now driven by an unsupervised
+  agent. Literal secrets in `args` (e.g. `--token abc`) are not detected; keep secrets in `env`
+  references. Doctor `claude-code.mcp-forwarding` lists, per repo, what would be forwarded.
 
 ## 5. Accepted risks and disclosures
+
+- **MCP forwarding is a trust grant** (T13): the external agent can use the forwarded servers'
+  tools with the user's privileges.
 
 - **The worktree is not an OS boundary** (T3). Isolation rests on each CLI's native sandbox.
   Dispatch fails closed when it cannot request that sandbox, but cannot prove it at runtime.

@@ -12,6 +12,37 @@ import type { GlobalConfigFile, Overlay } from "../../../src/config/schema.js";
 
 const G = (g: Partial<GlobalConfigFile> = {}): GlobalConfigFile => ({ version: 1, ...g });
 
+describe("forward_mcp: global consent, repo and flags can only turn it off [SEC-mcp]", () => {
+  const on = G({ hosts: { "claude-code": { forward_mcp: true } } });
+  const merge = (global: GlobalConfigFile, repo?: Overlay, flags?: Overlay) =>
+    mergeLayers({
+      defaults: defaultSettings(),
+      global,
+      ...(repo ? { repo } : {}),
+      ...(flags ? { flags } : {}),
+    });
+
+  it("defaults to false and follows the global grant", () => {
+    expect(merge(G()).settings.forward_mcp).toBe(false);
+    expect(merge(on).settings.forward_mcp).toBe(true);
+    expect(merge(on).provenance.forward_mcp).toBe("global");
+  });
+
+  it("a repo or flag may switch it off, never on", () => {
+    expect(merge(on, { forward_mcp: false }).settings.forward_mcp).toBe(false);
+    expect(merge(on, undefined, { forward_mcp: false }).settings.forward_mcp).toBe(false);
+    expect(merge(on, { forward_mcp: true }).issues).toEqual([]);
+    for (const layer of ["repo", "flag"] as const) {
+      const res =
+        layer === "repo"
+          ? merge(G(), { forward_mcp: true })
+          : merge(G(), undefined, { forward_mcp: true });
+      expect(res.settings.forward_mcp).toBe(false);
+      expect(res.issues).toEqual([expect.objectContaining({ level: "error", key: "forward_mcp" })]);
+    }
+  });
+});
+
 describe("ordinary keys: flags > repo > global > defaults", () => {
   const cases: [string | undefined, string | undefined, string | undefined, string, string][] = [
     [undefined, undefined, undefined, "balance", "default"],

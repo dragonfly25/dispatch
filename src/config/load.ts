@@ -81,6 +81,8 @@ export interface ExecutionConfig {
   };
   /** How long `gc` keeps finished runs and history, in days (the loader always sets it; default 30). */
   retentionDays?: number;
+  /** MCP forwarding consent after tighten-only merging (absent: false). */
+  forwardMcp?: boolean;
 }
 
 export interface LoadOptions {
@@ -328,6 +330,7 @@ export function loadEffectiveConfig(opts: LoadOptions): EffectiveConfig {
     timeouts: { defaultTaskMs: s.timeouts.default_task_ms },
     quota: { cacheMinutes: s.quota.cache_minutes, readers: s.quota.readers },
     retentionDays: s.retention_days,
+    forwardMcp: s.forward_mcp,
   };
 
   return {

@@ -41,6 +41,7 @@ import {
   type SignalTarget,
   trapTermination,
 } from "./lifecycle.js";
+import { type McpResolver, planMcp } from "./mcp.js";
 import { completed, type ResultParts, rejected, toHost, truncate } from "./result.js";
 import { RunLog, resolveRunDir } from "./runlog.js";
 
@@ -89,6 +90,8 @@ export interface RunnerDeps {
   sessionHistory?: (sessionId: string) => Promise<SessionHistoryEntry[]>;
   /** Default: the process-wide cache. */
   probes?: ProbeCache;
+  /** Resolver of forwarded MCP servers (default: the user's Claude config, read only). */
+  resolveMcp?: McpResolver;
 }
 
 /** Per-call options of {@link executeTask}. */
@@ -106,6 +109,12 @@ export interface ExecuteOptions {
   signals?: SignalTarget | null;
   /** The run is already recorded as `running` (a detached run): update it instead of inserting. */
   recorded?: boolean;
+  /**
+   * MCP server names the delegated agent needs (a Claude Code handoff's `mcpServers`). They are
+   * re-resolved from the user's Claude config at run time ({@link planMcp}); when consent is off,
+   * a server is not forwardable or no provider can host them, the task returns to the host.
+   */
+  mcpServers?: readonly string[];
 }
 
 /** Host id (from env detection) → adapter id of the instance it runs on. */
@@ -207,6 +216,26 @@ export async function executeTask(
       return await finish(rejected(err.message));
     }
 
+    const mcp = planMcp({
+      wanted: opts.mcpServers ?? [],
+      forwardMcp: exec.forwardMcp === true,
+      repoRoot,
+      env: deps.env,
+      routing: deps.config.routing,
+      ...(deps.resolveMcp ? { resolve: deps.resolveMcp } : {}),
+    });
+    if (!mcp.ok) {
+      log.write({ type: "mcp.unavailable", reason: mcp.reason });
+      return await finish(toHost(null, mcp.reason));
+    }
+    if (mcp.servers.length > 0) {
+      log.write({
+        type: "mcp.forward",
+        servers: mcp.servers.map((s) => s.name),
+        excludedInstances: mcp.excluded,
+      });
+    }
+
     const input: DecisionInput = {
       task,
       host: {
@@ -214,7 +243,7 @@ export async function executeTask(
         ...(opts.sessionModel ? { sessionModel: opts.sessionModel } : {}),
         depth,
       },
-      routing: deps.config.routing as unknown as Record<string, unknown>,
+      routing: mcp.routing as unknown as Record<string, unknown>,
       quota: await deps.quota.snapshot(exec.instances),
       sessionHistory:
         deps.sessionHistory && deps.host.sessionId
@@ -252,6 +281,7 @@ export async function executeTask(
       secrets,
       signal: controller.signal,
       leaseWaitMs: opts.leaseWaitMs ?? DEFAULT_LEASE_WAIT_MS,
+      mcpServers: mcp.servers,
     };
     if (decision.mode === "fanout") return await finish(await runFanout(rc, decision.targets));
     const reports: AttemptReport[] = [];

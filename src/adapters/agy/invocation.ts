@@ -1,6 +1,7 @@
-import type { BuildInvocationArgs, Invocation } from "../../core/contracts.js";
+import type { Invocation } from "../../core/contracts.js";
 import { ExitCode } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import { type BuildInvocationWithMcp, refuseMcp } from "../../mcp/forward.js";
 
 /** Flags the read-only invocation depends on; a probe that lists flags without them fails closed. */
 export const REQUIRED_FLAGS = [
@@ -44,7 +45,8 @@ function nativeValue(what: string, value: string): string {
  * travels as `-p=<prompt>` (argv index 0, redacted) because agy ignores stdin. The env is exactly
  * `baseEnv`: nothing is added, in particular no `ANTIGRAVITY_*` variable.
  */
-export function buildAgyInvocation(args: BuildInvocationArgs): Invocation {
+export function buildAgyInvocation(args: BuildInvocationWithMcp): Invocation {
+  refuseMcp("antigravity", args);
   if (args.autonomy !== "read-only") {
     throw new DispatchError(
       `agy supports read-only only (requested ${args.autonomy})`,

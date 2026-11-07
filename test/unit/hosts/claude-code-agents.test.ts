@@ -325,7 +325,14 @@ describe("claude-code PreToolUse for custom agents [UC2][SEC-handoff]", () => {
     const w = world();
     writeFileSync(join(w.agents, "gh.md"), agentText("name: gh\ntools: Read, mcp__github__issue"));
     expect(preToolUseResponse(w.input("gh"), w.env, NOW)).toEqual(SILENT);
-    const f = world({ ...HARD, forwardableMcp: ["github"] });
+    // A forwardable server without the consent flag still stays on Claude [SEC-mcp].
+    const noConsent = world({ ...HARD, forwardableMcp: ["github"] });
+    writeFileSync(
+      join(noConsent.agents, "gh.md"),
+      agentText("name: gh\ntools: Read, mcp__github__issue"),
+    );
+    expect(preToolUseResponse(noConsent.input("gh"), noConsent.env, NOW)).toEqual(SILENT);
+    const f = world({ ...HARD, forwardMcp: true, forwardableMcp: ["github"] });
     writeFileSync(join(f.agents, "gh.md"), agentText("name: gh\ntools: Read, mcp__github__issue"));
     const o = out(preToolUseResponse(f.input("gh"), f.env, NOW));
     const id = /handoff ([0-9a-f]{32})/.exec(o.permissionDecisionReason)?.[1] as string;

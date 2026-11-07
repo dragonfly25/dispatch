@@ -17,6 +17,7 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { HookInput, HookResponse } from "../../core/contracts.js";
 import {
+  forwardableMcpFor,
   type HookCache,
   hookDispatchHome,
   readHookCache,
@@ -243,7 +244,7 @@ function customAgentResponse(
   if (consumePassthrough(t.home, key, nowMs)) return SILENT;
   const agent = findAgent(call.type, agentDirs(t.root, env));
   if (agent === null) return SILENT;
-  const verdict = eligibility(agent.def, { forwardableMcp: t.cache.policy.forwardableMcp });
+  const verdict = eligibility(agent.def, { forwardableMcp: forwardableMcpFor(t.cache, t.root) });
   if (!verdict.eligible) return SILENT;
   const description = typeof call.fields.description === "string" ? call.fields.description : null;
   const handoff: Handoff = {

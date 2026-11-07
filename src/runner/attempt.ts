@@ -12,12 +12,15 @@ import type {
   DecisionTarget,
   Task,
 } from "../core/contracts.js";
+import type { BuildInvocationWithMcp } from "../mcp/forward.js";
+import type { McpServer } from "../mcp/resolve.js";
 import { ingestClaudeObservations } from "../quota/readers/claude-passive.js";
 import { buildPatch, type PatchResult } from "../sandbox/patch.js";
 import type { WorktreeHandle } from "../sandbox/worktree.js";
 import { buildChildEnv } from "./env.js";
 import { acquireLease, holdLease } from "./lease.js";
 import type { ProbeCache } from "./lifecycle.js";
+import { mcpVariables } from "./mcp.js";
 import type { RunnerDeps } from "./orchestrate.js";
 import type { RunLog } from "./runlog.js";
 
@@ -42,6 +45,8 @@ export interface RunContext {
   secrets: string[];
   signal: AbortSignal;
   leaseWaitMs: number;
+  /** MCP servers forwarded to the child (already re-resolved; routing only picked capable hosts). */
+  mcpServers?: readonly McpServer[];
 }
 
 /** What one attempt produced. `outcome` is null when the target was skipped before spawning. */
@@ -164,18 +169,23 @@ export async function runAttempt(
       clock: deps.clock,
       resolveBinary: deps.resolveBinary,
     });
+    const mcpServers = rc.mcpServers ?? [];
+    // Variables the forwarded servers reference reach the child by name (the user consented at
+    // setup), even API-key-like names the deny-list would drop; their values are still redacted.
+    const mcpVars = mcpVariables(mcpServers, deps.env);
     const child = buildChildEnv({
       parentEnv: deps.env,
       passthrough: instance.envPassthrough,
       extra: {},
       depth: rc.depth,
       runId,
+      dangerouslyAllow: mcpVars.names,
     });
-    const withheld = child.secrets.filter(isSecretLike);
+    const withheld = [...child.secrets, ...mcpVars.values].filter(isSecretLike);
     rc.secrets.push(...withheld);
     deps.addSecrets?.(withheld);
     const worktree = await realpath(wt.path);
-    const inv = adapter.buildInvocation({
+    const args: BuildInvocationWithMcp = {
       task,
       target,
       autonomy,
@@ -185,7 +195,9 @@ export async function runAttempt(
       instance,
       probe,
       baseEnv: child.env,
-    });
+      mcpServers,
+    };
+    const inv = adapter.buildInvocation(args);
     rc.log.write({ type: "attempt.start", attempt: index + 1, target, autonomy, worktree });
 
     const ctx: AdapterRunContext = {

@@ -18,6 +18,11 @@ export interface TrustedRepo {
   root: string;
   /** Hash of the trusted repo policy, when one exists. */
   policyHash: string | null;
+  /**
+   * MCP servers forwardable in this repo (user, project and local scope), when forwarding is on.
+   * Absent or empty: none. Read it through {@link forwardableMcpFor}.
+   */
+  forwardableMcp?: string[];
 }
 
 /** Summary of the active routing policy, injected by SessionStart hooks. */
@@ -51,9 +56,11 @@ export interface PolicySummary {
    * (`hosts.claude-code.auto_apply`, default true). Absent: true.
    */
   claudeAutoApply?: boolean;
+  /** MCP forwarding consent (`hosts.claude-code.forward_mcp`). Absent: false. */
+  forwardMcp?: boolean;
   /**
-   * MCP server names that may be forwarded to the external agent for this repo (written by the
-   * MCP forwarding feature). Absent: none, so custom agents that use MCP tools stay on Claude.
+   * User-scope MCP servers forwardable in every repo (empty when forwarding is off). Absent: none.
+   * Per-repo lists (with project and local servers) are on {@link TrustedRepo.forwardableMcp}.
    */
   forwardableMcp?: string[];
   /** One short paragraph for the host model (`additionalContext`). */
@@ -95,7 +102,8 @@ function isCache(v: unknown): v is HookCache {
         r !== null &&
         typeof r === "object" &&
         typeof r.root === "string" &&
-        (r.policyHash === null || typeof r.policyHash === "string"),
+        (r.policyHash === null || typeof r.policyHash === "string") &&
+        optionalStrings(r.forwardableMcp),
     ) &&
     p !== undefined &&
     typeof p.profile === "string" &&
@@ -105,6 +113,7 @@ function isCache(v: unknown): v is HookCache {
     optionalStrings(p.claudeIntercept) &&
     optionalStrings(p.claudeExclude) &&
     (p.claudeAutoApply === undefined || typeof p.claudeAutoApply === "boolean") &&
+    (p.forwardMcp === undefined || typeof p.forwardMcp === "boolean") &&
     optionalStrings(p.forwardableMcp) &&
     typeof p.summary === "string"
   );
@@ -133,6 +142,16 @@ export function writeHookCache(dispatchHome: string, cache: HookCache): void {
     rmSync(tmp, { force: true });
     throw err;
   }
+}
+
+/**
+ * MCP servers an agent running in `cwd` may have forwarded: the trusted repo's own list when the
+ * cache has one, else the user-scope `policy.forwardableMcp`; empty when forwarding is off.
+ * The runner re-resolves every server at run time, so this only decides eligibility.
+ */
+export function forwardableMcpFor(cache: HookCache, cwd: string): string[] {
+  if (cache.policy.forwardMcp !== true) return [];
+  return trustedRepoFor(cache, cwd)?.forwardableMcp ?? cache.policy.forwardableMcp ?? [];
 }
 
 /** The trusted repo containing `cwd` (the longest matching root), or null. */

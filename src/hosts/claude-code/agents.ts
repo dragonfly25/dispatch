@@ -223,7 +223,7 @@ const BROWSER_SERVER = "Claude_Browser";
 
 /** What decides eligibility besides the agent file. */
 export interface EligibilityOptions {
-  /** MCP servers that may be forwarded for this repo (hook cache `policy.forwardableMcp`). */
+  /** MCP servers that may be forwarded for this repo (`forwardableMcpFor(cache, root)`: empty without consent). */
   forwardableMcp?: readonly string[] | undefined;
   /** True when the external agent can be given web access (WebFetch / WebSearch). */
   webSupported?: boolean;

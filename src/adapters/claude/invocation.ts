@@ -1,6 +1,7 @@
 import { isAbsolute, join, normalize } from "node:path";
-import { type BuildInvocationArgs, ExitCode, type Invocation } from "../../core/contracts.js";
+import { ExitCode, type Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import { type BuildInvocationWithMcp, refuseMcp } from "../../mcp/forward.js";
 
 /** `--max-turns` for every child; generous because the runner's timeout is the real bound. */
 export const CLAUDE_MAX_TURNS = 50;
@@ -94,8 +95,12 @@ export function wrapPrompt(prompt: string): string {
   ].join("\n");
 }
 
-/** Builds the child command for one run. Pure: no filesystem or process access. */
-export function buildClaudeInvocation(args: BuildInvocationArgs): Invocation {
+/**
+ * Builds the child command for one run. Pure: no filesystem or process access. Forwarded MCP
+ * servers are refused: `--safe-mode` drops `--mcp-config` (verified live on 2.1.301).
+ */
+export function buildClaudeInvocation(args: BuildInvocationWithMcp): Invocation {
+  refuseMcp("claude", args);
   const { autonomy, probe, instance, baseEnv, target } = args;
   if (autonomy === "direct") {
     throw new DispatchError(

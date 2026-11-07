@@ -322,18 +322,19 @@ describe("the interactive wizard", () => {
   const scenarios: FakeScenarioMap = { "codex:login": { loggedIn: false } };
 
   it("detects the CLIs, asks four questions and writes what was answered", async () => {
-    const s = script(["1", "max5x", "plus", "n", "preserve", "read-only", "y"]);
+    const s = script(["1", "max5x", "plus", "n", "preserve", "read-only", "2", "y"]);
     const k = harness({ interactive: true, ask: s.ask }, scenarios);
     expect(await k.run("setup")).toBe(0);
     expect(k.io.stdout).toMatch(/Detected: claude .*login unknown.*; codex .*NOT logged in/);
     expect(k.io.stdout).toContain("codex is installed but not logged in");
-    expect(s.asked).toHaveLength(7);
+    expect(s.asked).toHaveLength(8);
     expect(s.asked.at(-1)).toBe("Apply these changes? [y/N] ");
     expect(k.config()).toMatch(/^main_host: claude-code$/m);
     const eff = k.effective();
     expect(eff.routing.activeProfile).toBe("preserve");
     expect(eff.execution.autonomy).toBe("read-only");
     expect(k.instance("claude")?.plan).toBe("max5x");
+    expect(eff.execution.forwardMcp).toBe(false);
     expect(k.instance("codex")?.plan).toBe("plus");
     expect(k.instance("antigravity")?.enabled).toBe(false);
     // Only the quota-free probes ran, and agy was never started.
@@ -342,17 +343,21 @@ describe("the interactive wizard", () => {
   });
 
   it("Enter takes the defaults (host guessed from what is installed)", async () => {
-    const s = script(["", "", "", "n", "", "", "yes"]);
+    const s = script(["", "", "", "n", "", "", "", "yes"]);
     const k = harness({ interactive: true, ask: s.ask });
     expect(await k.run("setup")).toBe(0);
     expect(k.config()).toMatch(/^main_host: claude-code$/m);
     expect(k.config()).toMatch(/^profile: balance$/m);
     expect(k.config()).toMatch(/^autonomy: worktree$/m);
     expect(k.config()).not.toMatch(/^providers:/m);
+    // The MCP forwarding trust grant defaults to yes in the wizard (owner decision).
+    expect(k.io.stdout).toContain("Trust grant · Forward the MCP servers");
+    expect(k.config()).toMatch(/^ {4}forward_mcp: true$/m);
+    expect(k.effective().execution.forwardMcp).toBe(true);
   });
 
   it("declining the final confirmation writes nothing", async () => {
-    const s = script(["", "", "", "n", "", "", "n"]);
+    const s = script(["", "", "", "n", "", "", "", "n"]);
     const k = harness({ interactive: true, ask: s.ask });
     expect(await k.run("setup")).toBe(0);
     expect(k.io.stdout).toContain("Nothing was changed.");
@@ -360,7 +365,7 @@ describe("the interactive wizard", () => {
   });
 
   it("re-asks on an invalid answer, and gives up after three", async () => {
-    const ok = script(["9", "claude-code", "", "", "n", "", "", "y"]);
+    const ok = script(["9", "claude-code", "", "", "n", "", "", "", "y"]);
     const k = harness({ interactive: true, ask: ok.ask });
     expect(await k.run("setup")).toBe(0);
     expect(k.io.stdout).toContain("Please answer with a number from 1 to 3 or a name.");
@@ -391,6 +396,7 @@ describe("the interactive wizard", () => {
         "worktree",
         "--plan",
         "codex=plus",
+        "--no-forward-mcp",
       ),
     ).toBe(0);
     expect(s.asked).toEqual([
@@ -401,16 +407,17 @@ describe("the interactive wizard", () => {
     expect(k.config()).toMatch(/^main_host: codex$/m);
     expect(k.instance("claude")?.plan).toBe("max20x");
     expect(k.instance("codex")?.plan).toBe("plus");
+    expect(k.config()).toMatch(/^ {4}forward_mcp: false$/m);
   });
 
   it("direct autonomy needs a typed confirmation; anything else falls back to worktree", async () => {
-    const no = script(["", "", "", "n", "", "direct", "sure", "y"]);
+    const no = script(["", "", "", "n", "", "direct", "sure", "", "y"]);
     const a = harness({ interactive: true, ask: no.ask });
     expect(await a.run("setup")).toBe(0);
     expect(a.io.stdout).toContain("Not confirmed: using worktree.");
     expect(a.config()).toMatch(/^autonomy: worktree$/m);
 
-    const yes = script(["", "", "", "n", "", "3", "direct", "y"]);
+    const yes = script(["", "", "", "n", "", "3", "direct", "", "y"]);
     const b = harness({ interactive: true, ask: yes.ask });
     expect(await b.run("setup")).toBe(0);
     expect(b.config()).toMatch(/^autonomy: direct$/m);
@@ -424,7 +431,7 @@ describe("the interactive wizard", () => {
         ...["--profile", "specialize", "--host", "codex", "--autonomy", "read-only"],
       ),
     ).toBe(0);
-    const s = script(["", "", "", "n", "", "", "y"]);
+    const s = script(["", "", "", "n", "", "", "", "y"]);
     const k = harness({ interactive: true, ask: s.ask }, scenarios, {}, true);
     expect(await k.run("setup", "--reconfigure")).toBe(0);
     expect(k.io.stdout).toContain("Global config: update");
@@ -432,6 +439,23 @@ describe("the interactive wizard", () => {
     expect(k.config()).toMatch(/^profile: specialize$/m);
     expect(k.config()).toMatch(/^autonomy: read-only$/m);
     expect(k.instance("claude")?.plan).toBe("max20x");
+    // Non-interactive setup never assumes the MCP grant; reconfigure offers the current "no".
+    expect(k.config()).toMatch(/^ {4}forward_mcp: false$/m);
+  });
+
+  it("[SEC-mcp] the MCP grant comes from flags or answers; --refresh and --reconfigure keep it", async () => {
+    const k = harness({}, scenarios);
+    expect(await k.run("setup", "--non-interactive", "--yes", "--forward-mcp")).toBe(0);
+    expect(k.io.stdout).toContain("Trust grants");
+    expect(k.io.stdout).toContain("Forward the MCP servers an agent needs");
+    expect(k.effective().execution.forwardMcp).toBe(true);
+    const before = k.config();
+    expect(await k.run("setup", "--refresh", "--yes", "--non-interactive")).toBe(0);
+    expect(k.config()).toBe(before);
+    const s = script(["", "", "", "n", "", "", "", "y"]);
+    const again = harness({ interactive: true, ask: s.ask }, scenarios, {}, true);
+    expect(await again.run("setup", "--reconfigure")).toBe(0);
+    expect(again.effective().execution.forwardMcp).toBe(true);
   });
 });
 
@@ -474,7 +498,7 @@ describe("Antigravity is opt-in and never touched otherwise", () => {
   });
 
   it("interactively: the warning, a typed yes, then agy is probed and its plan asked", async () => {
-    const s = script(["", "", "", "y", "yes", "pro", "", "", "y"]);
+    const s = script(["", "", "", "y", "yes", "pro", "", "", "", "y"]);
     const k = harness({ interactive: true, ask: s.ask });
     expect(await k.run("setup")).toBe(0);
     expect(k.io.stdout).toContain("not supported under consumer plans");
@@ -488,13 +512,13 @@ describe("Antigravity is opt-in and never touched otherwise", () => {
   });
 
   it("interactively: saying no, or not typing yes, keeps agy off and unprobed", async () => {
-    const no = harness({ interactive: true, ask: script(["", "", "", "n", "", "", "y"]).ask });
+    const no = harness({ interactive: true, ask: script(["", "", "", "n", "", "", "", "y"]).ask });
     expect(await no.run("setup")).toBe(0);
     expect(no.fakeCalls("agy")).toEqual([]);
 
     const maybe = harness({
       interactive: true,
-      ask: script(["", "", "", "y", "y", "", "", "y"]).ask,
+      ask: script(["", "", "", "y", "y", "", "", "", "y"]).ask,
     });
     expect(await maybe.run("setup")).toBe(0);
     expect(maybe.io.stdout).toContain("Terms not accepted: Antigravity stays off.");
@@ -503,14 +527,14 @@ describe("Antigravity is opt-in and never touched otherwise", () => {
   });
 
   it("interactively: --enable-antigravity without the terms still asks for them", async () => {
-    const s = script(["", "", "", "yes", "unknown", "", "", "y"]);
+    const s = script(["", "", "", "yes", "unknown", "", "", "", "y"]);
     const k = harness({ interactive: true, ask: s.ask });
     expect(await k.run("setup", "--enable-antigravity")).toBe(0);
     expect(k.instance("antigravity")?.enabled).toBe(true);
   });
 
   it("an agy that is not installed stays off, with an explanation", async () => {
-    const s = script(["", "", "", "y", "yes", "", "", "y"]);
+    const s = script(["", "", "", "y", "yes", "", "", "", "y"]);
     const k = harness({
       interactive: true,
       ask: s.ask,
@@ -533,7 +557,7 @@ describe("Antigravity is opt-in and never touched otherwise", () => {
         "--accept-agy-terms",
       ),
     ).toBe(0);
-    const s = script(["", "", "", "", "", "", "", "y"]);
+    const s = script(["", "", "", "", "", "", "", "", "y"]);
     const k = harness({ interactive: true, ask: s.ask }, {}, {}, true);
     expect(await k.run("setup", "--reconfigure")).toBe(0);
     expect(s.asked.some((q) => q.includes("enable Antigravity") || q.includes('Type "yes"'))).toBe(

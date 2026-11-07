@@ -19,6 +19,7 @@ import type {
   QuotaSnapshot,
   Spawner,
 } from "../core/contracts.js";
+import { mcpCapableAdapters } from "../mcp/forward.js";
 import { type ResolvedBinary, type ResolveFs, resolveBinary } from "../platform/resolve.js";
 import type { ReaderHealth } from "../quota/provider.js";
 import { ClaudeUsageReader } from "../quota/readers/claude-usage.js";
@@ -362,10 +363,13 @@ function isolationLine(add: Add, caps: AdapterCapabilities): void {
     );
   } else {
     const plugins = iso.userPlugins === "builtin_only" ? " (built-in plugins only)" : "";
+    const mcp = mcpCapableAdapters().includes(caps.id)
+      ? "MCP servers (only the MCP servers the agent needs, when forwarding is on)"
+      : "MCP servers (forwarded MCP servers are not supported)";
     add(
       "ok",
       "isolation",
-      `user hooks, plugins${plugins}, MCP servers and project config are disabled in the child; sandbox: ${caps.sandbox}`,
+      `user hooks, plugins${plugins}, ${mcp} and project config are disabled in the child; sandbox: ${caps.sandbox}`,
     );
   }
 }

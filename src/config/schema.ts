@@ -339,6 +339,13 @@ export const GlobalConfigFileSchema = z
               .describe(
                 "SECURITY. Apply the clean patch of a successful run started for an intercepted custom agent, so the caller receives modified files as with a native sub-agent (default true; false keeps review-and-apply-yourself). Global only.",
               ),
+            forward_mcp: z
+              .boolean()
+              .optional()
+              .describe(
+                "SECURITY. Trust grant: forward the MCP servers an intercepted agent needs to the external agent that runs it (only servers whose env and header values are pure `$" +
+                  "{VAR}` references; codex targets only). Asked by `dispatch setup`; default false. A repo or flag can only turn it off (`forward_mcp: false`).",
+              ),
           })
           .strict()
           .optional()
@@ -372,6 +379,12 @@ export type ProviderOverlay = z.infer<typeof ProviderOverlaySchema>;
 
 const overlayShape = {
   providers: z.record(Id, ProviderOverlaySchema).optional(),
+  forward_mcp: z
+    .boolean()
+    .optional()
+    .describe(
+      "SECURITY. `false` turns MCP forwarding off here (global `hosts.claude-code.forward_mcp` turns it on; `true` cannot loosen it).",
+    ),
   ...securityKeys,
   ...ordinaryKeys,
 };

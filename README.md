@@ -77,11 +77,17 @@ shows the exact files it will write, and applies them only after you confirm. It
 `CLAUDE.md`, `AGENTS.md`, skills, existing sub-agents or any project file. Files written and
 non-interactive flags: [docs/setup.md](docs/setup.md).
 
-Setup asks you to accept two **trust grants** ([details](docs/setup.md#trust-grants)):
+Setup asks you to accept two host **trust grants** ([details](docs/setup.md#trust-grants)):
 
 - **Codex rules file:** lets Codex run exactly `dispatch run|wait|cancel|status` outside its sandbox,
   by absolute launcher path only.
 - **Codex hook approval:** Codex only runs hooks you approve in `/hooks`; there is no CLI for it.
+
+It also asks one Dispatch trust grant, **MCP forwarding** (default yes in the wizard): when Claude
+Code hands one of your agents to Dispatch, the codex agent that runs it may start the MCP servers
+that agent uses. Only servers whose env and header values are `${VAR}` references qualify; the
+values pass by variable name and are never copied. `--no-forward-mcp` (or `forward_mcp: false` in a
+repo) turns it off; `dispatch doctor` lists which servers of the current repo qualify.
 
 Dispatch never edits your Claude permissions; to stop the `dispatch` sub-agent prompting on every call,
 add the two rules `dispatch doctor` prints ([how](docs/setup.md#claude-permission-rule)).
@@ -243,6 +249,7 @@ and from you reviewing the result.
 | Patch filter | Rejected or trimmed if it touches `..`, absolute paths, symlinks, `.git*`, `.dispatch/`, host config, `.env*` or pinned paths. Secret scan sets `needsReview`; `git apply --check` runs against your tree. |
 | No automatic apply | Dispatch never commits or opens PRs, and applies a patch only for an intercepted Claude Code custom agent (auto-apply, see above; `hosts.claude-code.auto_apply: false` turns it off). Otherwise you or the host review the diff. |
 | Untrusted output | The summary is marked `EXTERNAL_AGENT_OUTPUT`; the host treats it as data, never as instructions. |
+| MCP servers | Children load no MCP server of yours, except, with the MCP forwarding grant, exactly the ones the delegated agent needs (codex children only; claude's `--safe-mode` cannot load them). Secrets pass by variable name. |
 | Settings only tighten | Security keys can be loosened only in your global config; a repo or flag can only be stricter, and repo policy is ignored until you `dispatch trust` it. |
 | Secrets | Credentials are never copied, stored, logged or sent, and no private provider API is called with your tokens. State is redacted before it is written. |
 | Collaborators see nothing | Host integration is user-scope; the repo only gains `.dispatch/`, which `dispatch uninstall` removes. Without Dispatch, hooks exit silently. |
