@@ -5,6 +5,7 @@ import { DispatchError } from "../core/errors.js";
 import { CODEX_SANDBOX_MESSAGE, codexSandboxActive } from "../platform/host.js";
 import { currentInstallPaths } from "../platform/launcher.js";
 import { assertSupportedPlatform } from "../platform/platform.js";
+import { defaultSetupDeps, registerSetupCommands, type SetupCommandDeps } from "./setup.js";
 
 /** Output sinks, injectable for tests. */
 export interface CliIo {
@@ -21,8 +22,11 @@ const processIo: CliIo = {
 export const VERSION: string = pkg.version;
 
 /** Builds the commander program. Subcommands are registered here by later work packages. */
-export function buildProgram(io: CliIo = processIo): Command {
-  return new Command()
+export function buildProgram(
+  io: CliIo = processIo,
+  setupDeps: Partial<SetupCommandDeps> = {},
+): Command {
+  const program = new Command()
     .name("dispatch")
     .description("Route coding-agent tasks across your Claude Code, Codex and Antigravity plans.")
     .version(VERSION, "-v, --version", "print the version")
@@ -36,6 +40,8 @@ export function buildProgram(io: CliIo = processIo): Command {
         .action(() => io.out(`${JSON.stringify(currentInstallPaths())}\n`)),
       { hidden: true },
     );
+  registerSetupCommands(program, io, { ...defaultSetupDeps(), ...setupDeps });
+  return program;
 }
 
 /** Process facts the entry gates depend on; injectable for tests. */

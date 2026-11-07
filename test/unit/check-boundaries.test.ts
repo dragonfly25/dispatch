@@ -32,6 +32,8 @@ describe("check-boundaries", () => {
       "src/router/decide.ts": "// Date is fine in comments\nexport const x = input.now;\n",
       "src/runner/proc.ts": 'import { spawn } from "node:child_process";\n',
       ".github/workflows/ci.yml": "on: [push]\n",
+      "src/hosts/_framework/edits.ts": 'writeFileSync(join(home, ".claude", "x"), "");\n',
+      "src/platform/host.ts": 'export const m = "see ~/.codex/rules";\n',
     });
     expect(run(root)).toEqual({ code: 0, out: "Boundaries OK\n" });
     expect(run(resolve(import.meta.dirname, "../..")).code).toBe(0);
@@ -45,6 +47,9 @@ describe("check-boundaries", () => {
     ["src/quota/y.ts", 'const cp = await import("node:child_process");', "child_process"],
     [".github/workflows/ci.yml", "env: { TOKEN: secrets.NPM }", "secrets"],
     [".github/workflows/pr.yaml", "on: pull_request_target", "pull_request_target"],
+    ["src/cli/w.ts", 'writeFileSync(join(home, ".codex", "hooks.json"), "{}");', ".codex"],
+    ["src/hosts/codex/p.ts", 'await mkdir("~/.agents/skills", {});', ".agents"],
+    ["src/state/g.ts", 'rmSync(home + "/.gemini/x");', ".gemini"],
   ])("flags %s", (file, content, needle) => {
     const { code, out } = run(tree({ [file]: content }));
     expect(code).toBe(1);

@@ -5,6 +5,8 @@
 //   1. src/router/** is pure: no `Date`, `Math.random` or `process.env` (comments are ignored).
 //   2. Only src/runner/** may import `child_process` / `node:child_process`.
 //   3. .github/workflows/* must not contain `secrets.` or `pull_request_target`.
+//   4. Only src/hosts/_framework/** writes host files: outside it, a file that calls an fs write
+//      API must not name a `.claude`, `.codex`, `.agents` or `.gemini` path (per-file heuristic).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -50,6 +52,19 @@ for (const file of walk(src, CODE)) {
   if (file.startsWith(runnerDir)) continue;
   check(file, stripComments(readFileSync(file, "utf8")), [
     [/["'](node:)?child_process["']/, "only src/runner may use child_process"],
+  ]);
+}
+
+const FS_WRITE =
+  /\b(writeFile|appendFile|mkdir|mkdtemp|rm|rmdir|unlink|rename|copyFile|cp|symlink|link|chmod|truncate|createWriteStream)(Sync)?\s*\(/;
+const HOST_PATH = /["'`](?:[^"'`\n]*[/~])?\.(claude|codex|agents|gemini)(?![\w-])/;
+const frameworkDir = join(src, "hosts", "_framework") + sep;
+for (const file of walk(src, CODE)) {
+  if (file.startsWith(frameworkDir)) continue;
+  const text = stripComments(readFileSync(file, "utf8"));
+  if (!FS_WRITE.test(text)) continue;
+  check(file, text, [
+    [HOST_PATH, "only src/hosts/_framework may write host files (.claude/.codex/.agents/.gemini)"],
   ]);
 }
 

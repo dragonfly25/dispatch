@@ -35,6 +35,7 @@ export default defineConfig({
         "src/adapters/codex/**": { lines: 90, functions: 90, branches: 90, statements: 90 },
         "src/adapters/agy/**": { lines: 90, functions: 90, branches: 90, statements: 90 },
         "src/adapters/claude/**": { lines: 90, functions: 90, branches: 90, statements: 90 },
+        "src/hosts/_framework/**": { lines: 90, functions: 90, branches: 90, statements: 90 },
       },
     },
   },
