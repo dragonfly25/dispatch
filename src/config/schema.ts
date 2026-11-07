@@ -16,6 +16,11 @@ const Names = z.array(Id);
 /** Current version of every config file kind. */
 export const CURRENT_VERSION = 1;
 
+/** The `version:` key every config, profile and mapping file starts with. */
+const VersionField = z
+  .literal(CURRENT_VERSION)
+  .describe("Format version of the file; 1 is the only version.");
+
 // ---------------------------------------------------------------------------
 // Rules, mappings, models
 // ---------------------------------------------------------------------------
@@ -66,8 +71,14 @@ export const DirectMappingFileSchema = z
 
 export const PresetFileSchema = z
   .object({
-    description: z.string().optional(),
-    effort_shift: z.number().int().optional().describe("Effort levels to shift when delegating."),
+    description: z.string().optional().describe("Free text."),
+    effort_shift: z
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Effort levels to shift when delegating (negative = cheaper); clamped to the scale.",
+      ),
     tier_by_task_type: z
       .record(Id, Id)
       .optional()
@@ -90,7 +101,14 @@ export const AdapterModelTableFileSchema = z
       )
       .describe("Tier → model."),
     reverse: z
-      .array(z.object({ pattern: Id, tier: Id }).strict())
+      .array(
+        z
+          .object({
+            pattern: Id.describe("Glob matched against the model name."),
+            tier: Id.describe("Tier given to a model that matches."),
+          })
+          .strict(),
+      )
       .describe("Ordered model-glob → tier list used to classify the host's model."),
   })
   .strict();
@@ -116,8 +134,18 @@ const securityKeys = {
   ),
   concurrency: z
     .object({
-      per_provider: z.number().int().positive().optional(),
-      total: z.number().int().positive().optional(),
+      per_provider: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Max concurrent runs on one instance (default 2)."),
+      total: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Max concurrent runs across all instances (default 4)."),
     })
     .strict()
     .optional()
@@ -155,10 +183,14 @@ const ordinaryKeys = {
   mappings: z
     .object({
       preset: Id.optional().describe("Active tier preset (default mirror)."),
-      direct: z.array(DirectMappingFileSchema).optional().describe("Explicit model mappings."),
+      direct: z
+        .array(DirectMappingFileSchema)
+        .optional()
+        .describe("Explicit model mappings; the first match wins and bypasses tiers."),
     })
     .strict()
-    .optional(),
+    .optional()
+    .describe("Tier preset selection and explicit model mappings."),
   profile: Id.optional().describe("Active routing profile (default balance)."),
   shadow_profiles: Names.optional().describe("Profiles evaluated in shadow mode."),
   thresholds: z
@@ -166,9 +198,17 @@ const ordinaryKeys = {
     .optional()
     .describe("Per-instance quota thresholds overrides."),
   timeouts: z
-    .object({ default_task_ms: z.number().int().positive().optional() })
+    .object({
+      default_task_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Timeout of a delegated task in milliseconds (default 600000)."),
+    })
     .strict()
-    .optional(),
+    .optional()
+    .describe("Run timeouts."),
 };
 
 // ---------------------------------------------------------------------------
@@ -185,7 +225,9 @@ export const ProviderFileSchema = z
     binary: Id.optional().describe("SECURITY. Explicit CLI binary path."),
     max_autonomy: AutonomySchema.optional().describe("SECURITY. Autonomy ceiling of the instance."),
     concurrency: z.number().int().positive().optional().describe("SECURITY. Max concurrent runs."),
-    thresholds: ThresholdsFileSchema.optional(),
+    thresholds: ThresholdsFileSchema.optional().describe(
+      "Quota thresholds of this instance (default soft 20, hard 5).",
+    ),
     effort_shift: z.number().int().optional().describe("Effort shift when delegating here."),
     env_passthrough: Names.optional().describe("SECURITY. Extra env vars passed to the child."),
     tos_acknowledged: z
@@ -198,16 +240,19 @@ export type ProviderFile = z.infer<typeof ProviderFileSchema>;
 
 export const TrustedRepoSchema = z
   .object({
-    hash: z.string().regex(/^[0-9a-f]{64}$/),
+    hash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .describe("sha256 over the relative path and bytes of every policy file."),
     files: z.record(Id, z.string()).describe("Repo-relative path → sha256 of each trusted file."),
-    trusted_at: z.string(),
+    trusted_at: z.string().describe("ISO-8601 time `dispatch trust` recorded the entry."),
   })
   .strict();
 export type TrustedRepo = z.infer<typeof TrustedRepoSchema>;
 
 export const GlobalConfigFileSchema = z
   .object({
-    version: z.literal(CURRENT_VERSION),
+    version: VersionField,
     providers: z
       .record(Id, ProviderFileSchema)
       .optional()
@@ -216,14 +261,26 @@ export const GlobalConfigFileSchema = z
     ...ordinaryKeys,
     quota: z
       .object({
-        cache_minutes: z.number().nonnegative().optional(),
-        readers: z
-          .record(Id, z.object({ enabled: z.boolean() }).strict())
+        cache_minutes: z
+          .number()
+          .nonnegative()
           .optional()
-          .describe("Quota readers by instance id."),
+          .describe("Minutes a real quota reading stays fresh (default 5)."),
+        readers: z
+          .record(
+            Id,
+            z
+              .object({
+                enabled: z.boolean().describe("`false` turns this instance's quota reader off."),
+              })
+              .strict(),
+          )
+          .optional()
+          .describe("Quota readers by instance id; `enabled: false` turns a reader off."),
       })
       .strict()
-      .optional(),
+      .optional()
+      .describe("Quota reading settings (global file only)."),
     trusted_repos: z
       .record(Id, TrustedRepoSchema)
       .optional()
@@ -257,9 +314,7 @@ const overlayShape = {
 export const OverlaySchema = z.object(overlayShape).strict();
 export type Overlay = z.infer<typeof OverlaySchema>;
 
-export const RepoConfigFileSchema = z
-  .object({ version: z.literal(CURRENT_VERSION), ...overlayShape })
-  .strict();
+export const RepoConfigFileSchema = z.object({ version: VersionField, ...overlayShape }).strict();
 export type RepoConfigFile = z.infer<typeof RepoConfigFileSchema>;
 
 /** CLI flags expressed as an overlay (same keys as the repo config, no version). */
@@ -272,8 +327,8 @@ export type ConfigFlags = Overlay;
 
 export const ProfileFileSchema = z
   .object({
-    version: z.literal(CURRENT_VERSION),
-    description: z.string().optional(),
+    version: VersionField,
+    description: z.string().optional().describe("Free text."),
     rules: z.array(RuleFileSchema).describe("Evaluated top to bottom; first match wins."),
   })
   .strict()
@@ -282,8 +337,8 @@ export type ProfileFile = z.infer<typeof ProfileFileSchema>;
 
 export const MappingFileSchema = z
   .object({
-    version: z.literal(CURRENT_VERSION),
-    description: z.string().optional(),
+    version: VersionField,
+    description: z.string().optional().describe("Free text."),
     preset: PresetFileSchema.optional().describe("Tier preset named after the file."),
     models: z
       .record(Id, AdapterModelTableFileSchema)
