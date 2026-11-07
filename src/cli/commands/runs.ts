@@ -29,7 +29,8 @@ import {
 import { repoRoot } from "../../sandbox/git.js";
 import { SqliteStateStore } from "../../state/store.js";
 import { ExitRequest } from "../exit.js";
-import { renderRunResult } from "./run.js";
+import { outUi, startSpinner } from "../ui.js";
+import { phaseText, type RunRenderOptions, renderRunResult } from "./run.js";
 import { type CliDeps, printJson } from "./shared.js";
 
 /** Starts `task` detached and prints `{ "runId": ... }` (the body of `run --detach`). */
@@ -77,8 +78,8 @@ async function withStore<T>(
  * Human-readable form of a `wait` / `cancel` answer: a finished run prints exactly like `run`;
  * a run still going lists its latest events.
  */
-export function renderRun(r: RunResult | RunningStatus): string {
-  if (!("progress" in r)) return renderRunResult(r);
+export function renderRun(r: RunResult | RunningStatus, opts: RunRenderOptions = {}): string {
+  if (!("progress" in r)) return renderRunResult(r, opts);
   const lines = [`Run ${r.runId}: running`];
   for (const e of r.progress) lines.push(`  ${e.ts} ${e.kind}${e.detail ? ` ${e.detail}` : ""}`);
   return `${lines.join("\n")}\n`;
@@ -114,9 +115,24 @@ export function registerRunCommands(program: Command, deps: CliDeps): void {
     .option("--json", "machine-readable output")
     .action(async (runId: string, opts: { timeout?: string; json?: boolean }) => {
       const timeoutMs = parseTimeout(opts.timeout, deps);
-      const { result, exitCode } = await withStore(deps, (w) => waitForRun(w, runId, timeoutMs));
+      const { result, exitCode } = await withStore(deps, async (w, store) => {
+        // Progress spinner on stderr: TTY only, never with --json; it polls the run's events.
+        if (opts.json || !io.decorate?.err) return waitForRun(w, runId, timeoutMs);
+        const spin = startSpinner(io, `waiting for ${runId}`);
+        const poll = setInterval(() => {
+          const ev = store.listEvents(runId).at(-1);
+          if (ev) spin.update(`${runId} · ${phaseText(null, ev).replace(/^routing · /, "")}`);
+        }, 500);
+        poll.unref?.();
+        try {
+          return await waitForRun(w, runId, timeoutMs);
+        } finally {
+          clearInterval(poll);
+          spin.stop();
+        }
+      });
       if (opts.json) printJson(io, result);
-      else io.out(renderRun(result));
+      else io.out(renderRun(result, { ui: outUi(io), home: deps.env.HOME }));
       if (exitCode !== ExitCode.OK) throw new ExitRequest(exitCode);
     });
 

@@ -50,6 +50,7 @@ export {
   type ApplyOptions,
   type ApplySummary,
   applySetup,
+  describeOp,
   hostPlanContext,
   launcherOp,
   launcherPath,

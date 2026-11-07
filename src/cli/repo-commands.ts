@@ -11,6 +11,7 @@ import { installRepo, requireRepo, uninstallRepo } from "../install/repo.js";
 import type { AnswerFlags } from "../setup/answers.js";
 import type { CliIo } from "./program.js";
 import { addAnswerOptions, runSetup, type SetupCommandDeps } from "./setup.js";
+import { nextSteps, outUi, type Ui } from "./ui.js";
 
 /** What `ensureGlobalSetup` receives. */
 export interface SetupContext {
@@ -40,6 +41,28 @@ export interface RepoCommandDeps {
    * the real `dispatch setup` flow (WP17). Return false to stop with exit 2.
    */
   ensureGlobalSetup(ctx: SetupContext): Promise<boolean>;
+}
+
+/** The hints printed after a successful `install`. */
+const INSTALL_NEXT: [string, string][] = [
+  ["dispatch doctor", "check the CLIs, logins and hooks"],
+  ["dispatch status", "see the quota of each provider"],
+  ["git add .dispatch && git commit", "share the policy with your team"],
+];
+
+/**
+ * Decorates one line printed by the repo install/uninstall flows: `+` creations green, `-`
+ * removals yellow, warnings with a symbol. Plain output is returned unchanged.
+ */
+export function styleInstallLine(ui: Ui, line: string): string {
+  if (!ui.enabled) return line;
+  if (line.startsWith("  + ")) return `  ${ui.green("+")} ${line.slice(4)}`;
+  if (line.startsWith("  - ")) return `  ${ui.yellow("-")} ${line.slice(4)}`;
+  if (line.startsWith("  = ")) return ui.dim(line);
+  if (line.startsWith("warning: ")) return `${ui.mark("warn")} ${ui.yellow(line.slice(9))}`;
+  if (line.startsWith("Aborted")) return `${ui.mark("warn")} ${line}`;
+  if (line.startsWith("Removed ")) return `${ui.mark("ok")} ${line}`;
+  return line;
 }
 
 /** Reads one answer line from `input`, printing `question` on `output`; only y/yes confirms. */
@@ -112,7 +135,8 @@ export function registerRepoCommands(
   setup: SetupCommandDeps,
 ): RepoCommandHandles {
   const deps: RepoCommandDeps = { ...defaultDeps(setup), ...overrides };
-  const say = (line: string): void => io.out(line);
+  const ui = outUi(io);
+  const say = (line: string): void => io.out(styleInstallLine(ui, line));
   /** Rewrites the hook cache for the policy now in effect in `cwd` (best effort). */
   const refresh = (cwd: string): void =>
     refreshHookCacheSafely({ cwd, env: deps.env }, (m) => io.err(`warning: ${m}\n`));
@@ -185,13 +209,9 @@ export function registerRepoCommands(
     });
     if (result.status === "aborted") return;
     refresh(cwd);
-    say(
-      `\nInstalled: ${result.created.length} file(s) in .dispatch/${result.trusted ? " (trusted)" : ""}.\n` +
-        "Next steps:\n" +
-        "  dispatch doctor   check the CLIs, logins and hooks\n" +
-        "  dispatch status   see the quota of each provider\n" +
-        "  git add .dispatch && git commit   share the policy with your team\n",
-    );
+    const done = `Installed: ${result.created.length} file(s) in .dispatch/${result.trusted ? " (trusted)" : ""}.`;
+    io.out(`\n${ui.enabled ? `${ui.mark("ok")} ${ui.bold(done)}` : done}\n`);
+    io.out(nextSteps(ui, INSTALL_NEXT));
   });
 
   return {

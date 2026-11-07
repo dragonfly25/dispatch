@@ -9,6 +9,7 @@ import { collectChecks, selectLiveTargets } from "../../doctor/run.js";
 import { type DoctorLine, mkLine } from "../../doctor/types.js";
 import { builtinRegistry } from "../../hosts/index.js";
 import { defaultSetupDeps } from "../setup.js";
+import { outUi } from "../ui.js";
 import { type CliDeps, printJson } from "./shared.js";
 
 interface DoctorOptions {
@@ -17,6 +18,7 @@ interface DoctorOptions {
   provider?: string;
   fromHost?: boolean;
   yes?: boolean;
+  verbose?: boolean;
 }
 
 const usage = (message: string) => new DispatchError(message, ExitCode.USAGE, "cli.usage");
@@ -72,6 +74,7 @@ export function registerDoctor(program: Command, deps: CliDeps): void {
     .option("--provider <ids>", "with --live: comma-separated instance ids to test")
     .option("--from-host", "check what a call made from inside Claude Code or Codex needs")
     .option("-y, --yes", "with --live: do not ask for confirmation")
+    .option("--verbose", "show the details of every check, not only of warnings and failures")
     .action(async (opts: DoctorOptions) => {
       const extras = deps.doctor ?? {};
       if (opts.provider !== undefined && !opts.live) throw usage("--provider needs --live");
@@ -102,10 +105,13 @@ export function registerDoctor(program: Command, deps: CliDeps): void {
         resolveFs: extras.resolveFs,
       });
       const { ctx } = collected;
+      const ui = outUi(deps.io);
+      const render = (part: readonly DoctorLine[]) =>
+        renderLines(part, { ui, verbose: opts.verbose === true, home: deps.env.HOME });
       const lines = [...collected.lines];
       let liveRan = false;
       try {
-        if (!opts.json) deps.io.out(`dispatch doctor\n${renderLines(lines)}`);
+        if (!opts.json) deps.io.out(`${ui.bold("dispatch doctor")}\n${render(lines)}`);
         if (opts.live) {
           const step = ctx
             ? await liveStep(deps, opts, ctx, collected, wanted)
@@ -117,14 +123,14 @@ export function registerDoctor(program: Command, deps: CliDeps): void {
               };
           liveRan = step.ran;
           lines.push(...step.lines);
-          if (!opts.json) deps.io.out(renderLines(step.lines));
+          if (!opts.json) deps.io.out(render(step.lines));
         }
       } finally {
         ctx?.close();
       }
       const report = buildReport(lines, liveRan);
       if (opts.json) printJson(deps.io, report);
-      else deps.io.out(renderSummary(lines));
+      else deps.io.out(renderSummary(lines, ui));
       if (!report.ok) {
         throw new DispatchError(
           `doctor found ${report.summary.fail} failing check(s)`,

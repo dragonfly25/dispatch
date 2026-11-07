@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { type Command, Option } from "commander";
+import pkg from "../../package.json" with { type: "json" };
 import { refreshHookCacheSafely } from "../app/hook-cache.js";
 import { dispatchHome, globalConfigPath, PROFILES_DIR } from "../config/paths.js";
 import { ExitCode, type HostIntegration } from "../core/contracts.js";
@@ -38,7 +39,11 @@ import {
   updateGlobalConfig,
   writeGlobalConfig,
 } from "../setup/global-config.js";
+import { linePrompter, type Prompter } from "../setup/prompter.js";
 import { describeAnswers, runWizard } from "../setup/wizard.js";
+import { type ClackApi, clackPrompter, loadClack } from "./prompter.js";
+import { type ConfigPreview, renderPlanPreview, setupNextSteps } from "./setup-preview.js";
+import { createUi, hintRows, nextSteps, outUi } from "./ui.js";
 
 /** Output sinks (same shape as the program's). */
 export interface SetupIo {
@@ -60,6 +65,10 @@ export interface SetupCommandDeps {
   detect?: Detector;
   /** Repo-level uninstall (WP21): `uninstall` without `--global`. */
   repoUninstall?: (io: SetupIo, opts: { yes: boolean; force: boolean }) => Promise<void>;
+  /** True when stdin AND stdout are terminals: the interactive flow then uses clack. */
+  tty?: boolean;
+  /** Loads `@clack/prompts` (tests inject a fake). */
+  clack?: () => Promise<ClackApi>;
 }
 
 async function askTty(question: string): Promise<string> {
@@ -80,6 +89,7 @@ export function defaultSetupDeps(): SetupCommandDeps {
     runner: (home) => createCommandRunner({ cwd: home }),
     ask: askTty,
     interactive: process.stdin.isTTY === true,
+    tty: process.stdin.isTTY === true && process.stdout.isTTY === true,
   };
 }
 
@@ -99,11 +109,8 @@ export interface SetupOptions extends AnswerFlags {
 }
 
 /** The global config setup is about to write. */
-interface ConfigChange {
-  path: string;
+interface ConfigChange extends ConfigPreview {
   text: string;
-  mode: "create" | "update";
-  lines: string[];
 }
 
 /** Profile names that exist: the shipped ones and the user's own in `~/.dispatch/profiles/`. */
@@ -125,7 +132,7 @@ async function planGlobalConfig(
   io: SetupIo,
   deps: SetupCommandDeps,
   opts: SetupOptions,
-  interactive: boolean,
+  prompter: Prompter | null,
 ): Promise<ConfigChange | null> {
   const path = globalConfigPath(deps.env);
   const existing = readConfigText(path);
@@ -135,14 +142,22 @@ async function planGlobalConfig(
         `warning: ${path} exists, so the answer flags were ignored; add --reconfigure to change it\n`,
       );
     } else {
-      io.out(`Keeping ${path} (\`dispatch setup --reconfigure\` changes it).\n`);
+      const keep = `Keeping ${path} (\`dispatch setup --reconfigure\` changes it).`;
+      if (prompter?.rich) prompter.info(keep);
+      else io.out(`${keep}\n`);
     }
     return null;
   }
   const preset = presetAnswers(opts, knownProfiles(deps.env));
-  const answers = interactive
+  const answers = prompter
     ? await runWizard(
-        { io, ask: deps.ask, detect: deps.detect ?? createDetector(deps.env), env: deps.env },
+        {
+          io,
+          ask: deps.ask,
+          detect: deps.detect ?? createDetector(deps.env),
+          env: deps.env,
+          prompter,
+        },
         preset,
         existing === null ? null : currentAnswers(existing),
       )
@@ -165,9 +180,18 @@ async function planGlobalConfig(
   };
 }
 
-function renderChange(c: ConfigChange): string {
-  const verb = c.mode === "create" ? "create" : "update";
-  return `Global config: ${verb} ${c.path}\n${c.lines.map((l) => `  - ${l}`).join("\n")}\n\n`;
+/**
+ * The prompter of an interactive setup: clack on a real terminal (stdin and stdout TTYs), the
+ * numbered readline prompter otherwise. Null when nobody can answer.
+ */
+export async function choosePrompter(
+  io: SetupIo,
+  deps: SetupCommandDeps,
+  interactive: boolean,
+): Promise<Prompter | null> {
+  if (!interactive) return null;
+  if (deps.tty) return clackPrompter(await (deps.clack ?? loadClack)());
+  return linePrompter(io, deps.ask);
 }
 
 /** The `dispatch setup` flow; `install` runs it too when the global config is missing. */
@@ -178,31 +202,40 @@ export async function runSetup(
 ): Promise<void> {
   const { home, dispatchHome: dHome } = requireHome(deps.env);
   const interactive = deps.interactive && !opts.nonInteractive;
-  const change = await planGlobalConfig(io, deps, opts, interactive);
+  const prompter = await choosePrompter(io, deps, interactive);
+  const rich = prompter?.rich === true;
+  const ui = rich ? createUi(true) : outUi(io);
+  if (rich) prompter?.intro(ui.bold(`Dispatch setup · v${pkg.version}`));
+  const change = await planGlobalConfig(io, deps, opts, prompter);
   const plan = await planSetup({
     home,
     dispatchHome: dHome,
     install: deps.install(),
     hosts: deps.hosts(),
   });
-  if (change) io.out(renderChange(change));
-  io.out(plan.preview);
-  if (!opts.yes && !interactive) {
+  const preview = renderPlanPreview(plan, change, { ui, home });
+  if (rich && prompter) {
+    prompter.note("Plan", preview.changes.trimEnd());
+    if (preview.grants) prompter.note("Trust grants", preview.grants.trimEnd());
+  } else io.out(`${preview.changes}${preview.grants ? `\n${preview.grants}` : ""}`);
+  if (!opts.yes && !prompter) {
     throw new DispatchError(
       "nothing was changed; re-run with --yes to apply this plan",
       ExitCode.USAGE,
       "setup.needs_confirmation",
     );
   }
-  const ok =
-    opts.yes === true || /^y(es)?$/i.test((await deps.ask("Apply these changes? [y/N] ")).trim());
+  const ok = opts.yes === true || (await prompter?.confirm("Apply these changes?")) === true;
   if (!ok) {
-    io.out("Nothing was changed.\n");
+    if (rich) prompter?.outro("Nothing was changed.");
+    else io.out("Nothing was changed.\n");
     return;
   }
+  const spin = prompter?.spinner();
+  spin?.start("Applying the changes");
   if (change) {
     writeGlobalConfig(change.path, change.text, change.mode);
-    io.out(`Wrote ${change.path}\n`);
+    if (!rich) io.out(`Wrote ${change.path}\n`);
   }
   const summary = await applySetup(plan, {
     dispatchHome: dHome,
@@ -210,16 +243,26 @@ export async function runSetup(
     runner: deps.runner(home),
     confirm: true,
   });
+  const done = `Setup done: ${summary.applied.length} applied, ${summary.unchanged.length} unchanged, ${summary.removed.length} removed.`;
+  spin?.stop(done);
   for (const w of summary.warnings) io.err(`warning: ${w}\n`);
   refreshHookCacheSafely({ cwd: process.cwd(), env: deps.env }, (m) => io.err(`warning: ${m}\n`));
-  io.out(
-    `Setup done: ${summary.applied.length} applied, ${summary.unchanged.length} unchanged, ${summary.removed.length} removed.\n`,
-  );
+  if (!rich) io.out(`${done}\n`);
   if (!opts.refresh && plan.stale.length > 0) {
-    io.out(
-      `${plan.stale.length} earlier edit(s) are no longer planned; run \`dispatch setup --refresh\` to remove them.\n`,
-    );
+    const stale = `${plan.stale.length} earlier edit(s) are no longer planned; run \`dispatch setup --refresh\` to remove them.`;
+    if (rich) prompter?.warn(stale);
+    else io.out(`${stale}\n`);
   }
+  const steps = setupNextSteps(plan.detected);
+  if (rich && prompter) {
+    prompter.note(
+      "Next steps",
+      hintRows(ui, steps)
+        .map((l) => l.trimStart())
+        .join("\n"),
+    );
+    prompter.outro(ui.green("Dispatch is set up."));
+  } else io.out(`\n${nextSteps(ui, steps)}`);
 }
 
 const collect = (value: string, previous: string[] = []): string[] => [...previous, value];
@@ -290,9 +333,9 @@ export function registerSetupCommands(program: Command, io: SetupIo, deps: Setup
             io.err(`warning: ${m}\n`),
           );
         }
-        io.out(
-          `Removed ${summary.reverted.length} Dispatch edit(s)${summary.homeRemoved ? ` and ${dHome}` : ""}.\n`,
-        );
+        const ui = outUi(io);
+        const removed = `Removed ${summary.reverted.length} Dispatch edit(s)${summary.homeRemoved ? ` and ${dHome}` : ""}.`;
+        io.out(`${ui.enabled ? `${ui.mark("ok")} ${removed}` : removed}\n`);
       },
     );
 }

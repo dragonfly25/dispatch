@@ -2,6 +2,7 @@
 import type { Command } from "commander";
 import { trustRepo } from "../../config/index.js";
 import { systemClock } from "../../core/clock.js";
+import { outUi } from "../ui.js";
 import { type CliDeps, printJson, refreshCache } from "./shared.js";
 
 /** Registers `trust`. Prints the repo identity, the policy hash and every file covered. */
@@ -24,7 +25,9 @@ export function registerTrust(program: Command, deps: CliDeps): void {
         printJson(deps.io, { repoId: id, hash: entry.hash, trustedAt: entry.trusted_at, files });
         return;
       }
-      deps.io.out(`Trusted ${id}\nhash ${entry.hash}\n`);
-      for (const f of files) deps.io.out(`  ${f.sha256.slice(0, 12)}  ${f.path}\n`);
+      const ui = outUi(deps.io);
+      const head = ui.enabled ? `${ui.mark("ok")} ${ui.bold(`Trusted ${id}`)}` : `Trusted ${id}`;
+      deps.io.out(`${head}\n${ui.dim(`hash ${entry.hash}`)}\n`);
+      for (const f of files) deps.io.out(`  ${ui.dim(f.sha256.slice(0, 12))}  ${f.path}\n`);
     });
 }

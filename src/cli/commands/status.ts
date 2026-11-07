@@ -10,7 +10,8 @@ import type { AppContext } from "../../app/context.js";
 import { ExitCode, type Pool, type QuotaWindow } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import { compareFromStore, renderCompare } from "../../shadow/index.js";
-import { formatLocal, formatWhen, parseDuration } from "../time.js";
+import { formatLocal, formatRelative, formatWhen, parseDuration } from "../time.js";
+import { columns, meter, outUi, plainUi, type Status, type Ui } from "../ui.js";
 import { type CliDeps, printJson, reportIssues, withContext } from "./shared.js";
 
 const usage = (message: string) => new DispatchError(message, ExitCode.USAGE, "cli.usage");
@@ -131,57 +132,116 @@ const REPO_LINE: Record<string, string> = {
 const EXPERIMENTAL_NOTE =
   "experimental and read-only; wrapping agy under a consumer plan is not supported by Google's terms";
 
-function windowLine(w: StatusWindow, now: Date, kindWidth: number): string {
-  const left = w.remainingPct === null ? "unknown" : `${w.remainingPct}% remaining`;
-  const reset = w.resetAt === null ? "reset unknown" : `resets ${formatWhen(w.resetAt, now)}`;
-  return `  ${w.kind.padEnd(kindWidth)} ${left.padEnd(15)} ${reset}  [${w.reliability}]  source ${w.source}`;
+/** Presentation options of {@link renderStatus}. */
+export interface StatusRenderOptions {
+  /** Colors and symbols (default: plain text). */
+  ui?: Ui;
+  /** Remaining-% thresholds per instance id, for the meter color (default soft 50, hard 20). */
+  thresholds?: Readonly<Record<string, { soft: number; hard: number }>>;
 }
 
-function instanceLines(r: StatusRow, now: Date): string[] {
+const METER_WIDTH = 10;
+const FALLBACK = { soft: 50, hard: 20 };
+
+/** One aligned row per window: kind, meter, remaining %, reset, reliability, source. */
+function windowRows(r: StatusRow, now: Date, opts: StatusRenderOptions): string[][] {
+  const ui = opts.ui ?? plainUi;
+  const limits = opts.thresholds?.[r.id] ?? FALLBACK;
+  return r.windows.map((w) => {
+    let bar: string;
+    let left: string;
+    if (w.remainingPct === null) {
+      bar = ui.dim((ui.enabled ? "░" : ".").repeat(METER_WIDTH));
+      left = ui.dim("unknown");
+    } else {
+      const status: Status =
+        w.remainingPct < limits.hard ? "fail" : w.remainingPct < limits.soft ? "warn" : "ok";
+      bar = ui.tone(status, meter(w.remainingPct, METER_WIDTH, ui.enabled));
+      left = ui.tone(status, `${w.remainingPct}% remaining`);
+    }
+    const reset =
+      w.resetAt === null
+        ? ui.dim("reset unknown")
+        : `resets ${formatRelative(w.resetAt, now)} ${ui.dim(`(${formatLocal(w.resetAt)})`)}`;
+    const tag = w.reliability === "real" ? ui.dim("[real]") : ui.yellow(`[${w.reliability}]`);
+    return [
+      `  ${w.kind}`,
+      ui.enabled ? bar : `[${bar}]`,
+      left,
+      reset,
+      tag,
+      ui.dim(`source ${w.source}`),
+    ];
+  });
+}
+
+/** `rows`: the instance's window rows, already aligned across every instance. */
+function instanceLines(
+  r: StatusRow,
+  now: Date,
+  opts: StatusRenderOptions,
+  rows: readonly string[],
+): string[] {
+  const ui = opts.ui ?? plainUi;
   const head = [
-    `${r.id}  (${r.adapter})`,
-    r.enabled ? "enabled" : "disabled",
+    `${ui.bold(r.id)}  ${ui.dim(`(${r.adapter})`)}`,
+    r.enabled ? ui.green("enabled") : ui.dim("disabled"),
     `pool ${r.pool}`,
     ...(r.plan ? [`plan ${r.plan}`] : []),
-    ...(r.experimental ? ["experimental"] : []),
+    ...(r.experimental ? [ui.yellow("experimental")] : []),
   ].join("  ");
-  const lines = [r.host ? `${head}  (host — interactive usage not visible)` : head];
-  if (!r.enabled) return [...lines, "  disabled: not read"];
+  const lines = [r.host ? `${head}  ${ui.dim("(host — interactive usage not visible)")}` : head];
+  if (!r.enabled) return [...lines, ui.dim("  disabled: not read")];
   if (r.unavailableUntil !== null) {
     lines.push(
-      `  unavailable until ${formatWhen(r.unavailableUntil, now)}${
-        r.lastQuotaError ? ` — ${r.lastQuotaError}` : ""
-      }`,
+      ui.red(
+        `  ${ui.enabled ? `${ui.sym.fail} ` : ""}unavailable until ${formatWhen(r.unavailableUntil, now)}${
+          r.lastQuotaError ? ` — ${r.lastQuotaError}` : ""
+        }`,
+      ),
     );
   }
-  const kindWidth = Math.max(...r.windows.map((w) => w.kind.length));
-  for (const w of r.windows) lines.push(windowLine(w, now, kindWidth));
+  lines.push(...rows);
   const last = r.lastGoodReading === null ? null : formatLocal(r.lastGoodReading);
   for (const p of r.readerProblems) {
     lines.push(
-      last
-        ? `  reader ${p.readerId}: stale — last good reading ${last}, channel error: ${p.error}`
-        : `  reader ${p.readerId}: no reading — channel error: ${p.error}`,
+      ui.yellow(
+        last
+          ? `  reader ${p.readerId}: stale — last good reading ${last}, channel error: ${p.error}`
+          : `  reader ${p.readerId}: no reading — channel error: ${p.error}`,
+      ),
     );
   }
-  if (last && r.readerProblems.length === 0) lines.push(`  stale — last good reading ${last}`);
+  if (last && r.readerProblems.length === 0) {
+    lines.push(ui.yellow(`  stale — last good reading ${last}`));
+  }
   return lines;
 }
 
 /** Text form of a {@link StatusReport}. */
-export function renderStatus(report: StatusReport): string {
+export function renderStatus(report: StatusReport, opts: StatusRenderOptions = {}): string {
+  const ui = opts.ui ?? plainUi;
   const now = new Date(report.generatedAt);
   const host = report.host.client
     ? `host ${report.host.client}${report.host.self ? ` (instance ${report.host.self})` : ""}`
     : "no host detected";
+  const repo = REPO_LINE[report.repo.status] ?? report.repo.status;
   const lines = [
-    `Profile: ${report.profile}   ${host}`,
-    `Repo: ${REPO_LINE[report.repo.status] ?? report.repo.status}`,
+    `${ui.dim("Profile:")} ${ui.bold(report.profile)}   ${host}`,
+    `${ui.dim("Repo:")} ${report.repo.status === "none" || report.repo.trusted ? repo : ui.yellow(repo)}`,
   ];
   for (const r of report.instances.filter((i) => i.enabled && i.experimental)) {
-    lines.push(`Experimental: ${r.id} is enabled — ${EXPERIMENTAL_NOTE}.`);
+    lines.push(ui.yellow(`Experimental: ${r.id} is enabled — ${EXPERIMENTAL_NOTE}.`));
   }
-  for (const r of report.instances) lines.push("", ...instanceLines(r, now));
+  // Window rows are aligned across all instances, so the meters line up.
+  const perInstance = report.instances.map((r) => (r.enabled ? windowRows(r, now, opts) : []));
+  const aligned = columns(perInstance.flat());
+  let next = 0;
+  report.instances.forEach((r, i) => {
+    const count = perInstance[i]?.length ?? 0;
+    lines.push("", ...instanceLines(r, now, opts, aligned.slice(next, next + count)));
+    next += count;
+  });
   return `${lines.join("\n")}\n`;
 }
 
@@ -282,7 +342,12 @@ export function registerStatus(program: Command, deps: CliDeps): void {
           }
           const report = await buildStatus(ctx);
           if (opts.json) printJson(io, report);
-          else io.out(renderStatus(report));
+          else {
+            const thresholds = Object.fromEntries(
+              ctx.config.routing.instances.map((i) => [i.id, i.thresholds]),
+            );
+            io.out(renderStatus(report, { ui: outUi(io), thresholds }));
+          }
         },
         { readOnly },
       );
