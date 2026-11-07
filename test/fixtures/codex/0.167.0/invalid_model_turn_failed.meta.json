@@ -1,0 +1,33 @@
+{
+  "cli": "codex",
+  "cliVersion": "0.167.0",
+  "scenario": "invalid_model_turn_failed",
+  "date": "2026-11-07",
+  "argv": [
+    "codex",
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--strict-config",
+    "--disable",
+    "hooks",
+    "--disable",
+    "plugins",
+    "-C",
+    "<TMP>/cx-trust-plain",
+    "-m",
+    "dispatch-nonexistent-model",
+    "-s",
+    "workspace-write",
+    "-"
+  ],
+  "exitCode": 1,
+  "synthetic": false,
+  "files": [
+    "invalid_model_turn_failed.stdout.jsonl",
+    "invalid_model_turn_failed.stderr.txt"
+  ],
+  "notes": "Real turn.failed shape (quota-free). Also demonstrated that exec persisted [projects.\"<repo>\"] trust_level=\"trusted\" into ~/.codex/config.toml (restored afterwards)."
+}

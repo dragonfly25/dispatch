@@ -1,0 +1,14 @@
+{
+  "cli": "codex",
+  "cliVersion": "0.167.0",
+  "scenario": "hook_subagent_start",
+  "date": "2026-11-07",
+  "kind": "hook-input",
+  "argv": [],
+  "exitCode": null,
+  "synthetic": false,
+  "files": [
+    "hook_subagent_start.json"
+  ],
+  "notes": "SubagentStart stdin (cannot block)."
+}

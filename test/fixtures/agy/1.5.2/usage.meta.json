@@ -1,0 +1,20 @@
+{
+  "cli": "agy",
+  "cliVersion": "1.5.2",
+  "scenario": "usage",
+  "date": "2026-11-07",
+  "argv": [
+    "agy",
+    "-p",
+    "/usage",
+    "--output-format",
+    "json"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "usage.json",
+    "usage.stderr.txt"
+  ],
+  "notes": "Quota-free. Recorded during plan verification (2026-11-07) on the same machine."
+}

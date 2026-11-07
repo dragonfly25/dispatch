@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Tool call blocked by PreToolUse hook: Dispatch: sub-agent spawning is delegated. Task queued as dispatch run id=dsp_TEST123 (detached). Call `dispatch wait dsp_TEST123` via shell to get the result; do not retry spawn_agent."}}
+{"type":"turn.completed","usage":{"input_tokens":30047,"cached_input_tokens":26240,"cache_write_input_tokens":0,"output_tokens":86,"reasoning_output_tokens":0}}

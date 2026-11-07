@@ -1,0 +1,32 @@
+{
+  "cli": "agy",
+  "cliVersion": "1.5.2",
+  "scenario": "plan_mode_write_denied",
+  "date": "2026-11-07",
+  "argv": [
+    "agy",
+    "-p=Create a file named hello.txt in the current directory containing exactly the word hi. Then reply DONE or explain why you could not.",
+    "--output-format",
+    "stream-json",
+    "--mode",
+    "plan",
+    "--sandbox",
+    "--disable-slash-commands",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--print-timeout",
+    "120s"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "plan_mode_write_denied.stdout.jsonl",
+    "plan_mode_write_denied.stderr.txt"
+  ],
+  "notes": [
+    "cwd = temp git repo (agy has no cwd flag). No file created.",
+    "stderr: '--mode plan has no effect while slash command expansion is disabled' => plan mode is a /plan prompt prefix, not an enforcement mechanism.",
+    "write_file denied by headless permission_mode 'request-review' (cannot prompt => auto-deny). result.status is still SUCCESS with response '' and denied_actions[]."
+  ],
+  "env": "env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin HOME USER LANG TMPDIR SHELL TERM=dumb DISPATCH_DEPTH=1"
+}

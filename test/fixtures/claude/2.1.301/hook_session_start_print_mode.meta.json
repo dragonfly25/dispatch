@@ -1,0 +1,14 @@
+{
+  "cli": "claude",
+  "cliVersion": "2.1.301",
+  "scenario": "hook_session_start_print_mode",
+  "date": "2026-11-07",
+  "kind": "hook-input",
+  "argv": [],
+  "exitCode": null,
+  "synthetic": false,
+  "files": [
+    "hook_session_start_print_mode.json"
+  ],
+  "notes": "SessionStart stdin in claude -p (source=startup): NO model field."
+}

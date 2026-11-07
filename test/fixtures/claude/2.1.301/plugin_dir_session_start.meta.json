@@ -1,0 +1,31 @@
+{
+  "cli": "claude",
+  "cliVersion": "2.1.301",
+  "scenario": "plugin_dir_session_start",
+  "date": "2026-11-07",
+  "argv": [
+    "claude",
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "haiku",
+    "--max-turns",
+    "2",
+    "--permission-mode",
+    "dontAsk",
+    "--tools",
+    "Read",
+    "--plugin-dir",
+    "<TMP>/plugin/dspike"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "plugin_dir_session_start.stdout.jsonl",
+    "plugin_dir_session_start.stderr.txt"
+  ],
+  "notes": "--plugin-dir loads the plugin in -p; SessionStart hook ran (hook_started/hook_response events) and additionalContext reached the model (answered PLUM-7)."
+}

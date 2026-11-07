@@ -1,0 +1,42 @@
+{
+  "cli": "codex",
+  "cliVersion": "0.167.0",
+  "scenario": "spawn_agent_v2_hook_deny_redirect",
+  "date": "2026-11-07",
+  "argv": [
+    "codex",
+    "exec",
+    "--json",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--strict-config",
+    "--disable",
+    "plugins",
+    "--dangerously-bypass-hook-trust",
+    "-c",
+    "hooks.SessionStart=[{hooks=[{type=\"command\",command=\"<HOOK> SessionStart\"}]}]",
+    "-c",
+    "hooks.PreToolUse=[{matcher=\"spawn_agent|collaborationspawn_agent|Agent\",hooks=[{type=\"command\",command=\"<HOOK> PreToolUse\"}]}]",
+    "-c",
+    "hooks.SubagentStart=[{hooks=[{type=\"command\",command=\"<HOOK> SubagentStart\"}]}]",
+    "-C",
+    "<TMP>/cx-hook",
+    "-m",
+    "gpt-6-luna",
+    "-c",
+    "model_reasoning_effort=low",
+    "-s",
+    "workspace-write",
+    "-"
+  ],
+  "exitCode": 0,
+  "synthetic": false,
+  "files": [
+    "spawn_agent_v2_hook_deny_redirect.stdout.jsonl",
+    "spawn_agent_v2_hook_deny_redirect.stderr.txt"
+  ],
+  "notes": [
+    "prompt: Delegate this to a sub-agent (spawn one): \"Write a haiku about git.\" Then give me the sub-agent result.",
+    "deny reason told the model to run '<launcher> run --detach --json '<task>'' then '<launcher> wait <id>'. It complied; fake launcher log: run --detach --json Write a haiku about git. | wait dsp_FAKE1 --timeout 100"
+  ]
+}

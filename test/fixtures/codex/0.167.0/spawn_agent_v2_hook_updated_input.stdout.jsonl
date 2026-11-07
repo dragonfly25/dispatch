@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation."}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_2","type":"collab_tool_call","tool":"wait","sender_thread_id":"00000000-0000-4000-8000-000000000001","receiver_thread_ids":[],"prompt":null,"agents_states":{},"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"collab_tool_call","tool":"wait","sender_thread_id":"00000000-0000-4000-8000-000000000001","receiver_thread_ids":[],"prompt":null,"agents_states":{},"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Agent errored: {\"type\":\"error\",\"error\":{\"message\":\"The encrypted content for item amsg_REDACTED0001-fa29-70e3-bf22-c1325e485a4c could not be verified. Reason: encrypted content hydration failed: Encrypted content could not be decrypted or parsed.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_encrypted_content\"},\"status\":400}"}}
+{"type":"turn.completed","usage":{"input_tokens":45216,"cached_input_tokens":41088,"cache_write_input_tokens":0,"output_tokens":143,"reasoning_output_tokens":0}}
