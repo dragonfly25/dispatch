@@ -231,6 +231,19 @@ Taken during execution:
   (`BuildInvocationWithMcp` in `src/mcp/forward.ts`), and the router's capability hint is applied by
   disabling incapable instances in the effective routing config before `decide` (the routing
   contract stays frozen); an ADR could make both first-class.
+- **Isolated browser for delegated agents** (owner-approved): agents that list
+  `mcp__Claude_Browser__*` are now eligible when `hosts.claude-code.browser` (setup trust grant,
+  global, tighten-only) is on, the pinned `@playwright/mcp@0.0.84` is installed with verified
+  integrities, Google Chrome is found, the agent lists Bash and the run gets the sandbox network.
+  Codex only (`planBrowser` restricts routing like the MCP hint; claude/agy adapters refuse). The
+  codex child gets `-c mcp_servers.dispatch_browser.*` (node + pinned `cli.js`, `--isolated
+  --headless --browser chrome`, `--allowed-origins` from `.claude/launch.json` ports,
+  `--output-dir`, `HOME` and `cwd` in the attempt dir, an `enabled_tools` allowlist of 22 tools).
+  The task gets a translation note (Claude_Browser to Playwright tools; dev servers started as
+  long-running commands and stopped with Ctrl-C). Setup provisions it as a manifest-tracked
+  `cli-command` (new `env` and `ensure` spec fields; `CommandRunner.run` takes an optional env).
+  Verified live: 3 codex runs, `docs/spikes/browser.md` (a job backgrounded with `&` dies with its
+  command; `kill` across commands is denied by the sandbox). Threat model: docs/security.md T16.
 - **Risk:** a forwarded server runs as the user outside the child's sandbox, driven by an
   unsupervised agent (docs/security.md T13). Not live-verified: `env_http_headers` and
   `shell_environment_policy.exclude` (keys taken from the codex 0.167 config schema).

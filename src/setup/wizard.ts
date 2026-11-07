@@ -4,6 +4,7 @@
  * starting strategy and the autonomy of delegated agents. Answers already given by flags or an
  * answers file are not asked again.
  */
+import { BROWSER_DETAIL, BROWSER_GRANT } from "../browser/install.js";
 import {
   AGY_WARNING,
   AUTONOMIES,
@@ -173,6 +174,21 @@ export async function runWizard(
     );
     out.forwardMcp = choice === "yes";
   }
+
+  // Trust grant: the isolated browser (default yes, as the owner approved; it downloads ~19 MB).
+  if (preset.browser !== undefined) out.browser = preset.browser;
+  else {
+    p.note(`Trust grant · ${BROWSER_GRANT}`, BROWSER_DETAIL);
+    const choice = await p.select(
+      `${BROWSER_GRANT}?`,
+      [
+        { value: "yes", label: "yes, download it now (temporary profile, localhost only)" },
+        { value: "no", label: "no, agents that use the desktop browser tools stay on Claude" },
+      ],
+      cur.browser === false ? "no" : "yes",
+    );
+    out.browser = choice === "yes";
+  }
   return out;
 }
 
@@ -242,6 +258,9 @@ export function describeAnswers(a: SetupAnswers): string[] {
   }
   if (a.forwardMcp !== undefined) {
     lines.push(`trust grant · ${FORWARD_MCP_GRANT}: ${a.forwardMcp ? "yes" : "no"}`);
+  }
+  if (a.browser !== undefined) {
+    lines.push(`trust grant · ${BROWSER_GRANT}: ${a.browser ? "yes" : "no"}`);
   }
   return lines;
 }

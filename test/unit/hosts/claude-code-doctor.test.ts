@@ -458,6 +458,7 @@ describe("registration", () => {
       "claude-code.permission-rule",
       "claude-code.hard-mode",
       "claude-code.mcp-forwarding",
+      "claude-code.browser",
       "codex.files",
       "codex.rules-launcher",
       "codex.hooks-trusted",

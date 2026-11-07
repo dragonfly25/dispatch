@@ -54,6 +54,8 @@ export interface Handoff {
   web: boolean;
   /** The agent declares WebFetch. Absent (older handoffs): treated as true when `web` is. */
   webFetch?: boolean;
+  /** The agent uses the Claude desktop browser tools: the run gets the isolated browser. */
+  browser?: boolean;
   autoApply: boolean;
   /** {@link passthroughKey} of the original call. */
   passthroughKey: string;
@@ -121,6 +123,7 @@ function isHandoff(v: unknown): v is Handoff {
     h.mcpServers.every(isStr) &&
     typeof h.web === "boolean" &&
     (h.webFetch === undefined || typeof h.webFetch === "boolean") &&
+    (h.browser === undefined || typeof h.browser === "boolean") &&
     typeof h.autoApply === "boolean" &&
     isStr(h.passthroughKey)
   );

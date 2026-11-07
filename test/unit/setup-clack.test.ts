@@ -127,8 +127,9 @@ describe("setup with the clack prompter [UC1]", () => {
   });
 
   it("cancelling the final confirmation writes no file either", async () => {
-    // Questions: host, claude plan, codex plan, agy (confirm), strategy, autonomy, MCP grant, then Apply.
-    const fake = fakeClack([], 7);
+    // Questions: host, claude plan, codex plan, agy (confirm), strategy, autonomy, MCP grant,
+    // browser grant, then Apply.
+    const fake = fakeClack([], 8);
     const k = harness({ tty: true, clack: async () => fake.api });
     expect(await k.run("setup")).toBe(2);
     expect(fake.calls.at(-2)).toBe("confirm Apply these changes?");
@@ -144,6 +145,7 @@ describe("setup with the clack prompter [UC1]", () => {
       undefined,
       undefined,
       undefined,
+      "no",
       false,
     ]);
     const k = harness({ tty: true, clack: async () => fake.api });
@@ -153,7 +155,10 @@ describe("setup with the clack prompter [UC1]", () => {
   });
 
   it("the full flow: banner, detected CLIs, numbered steps, plan, grants, spinner, next steps", async () => {
-    const fake = fakeClack(["codex", "max5x", "plus", false, "preserve", "read-only", "no", true]);
+    const fake = fakeClack([
+      ...["codex", "max5x", "plus", false, "preserve", "read-only", "no", "no"],
+      true,
+    ]);
     const k = harness({ tty: true, clack: async () => fake.api, hosts: () => [fakeCodexHost()] });
     expect(await k.run("setup")).toBe(0);
     const calls = fake.calls.join("\n");
@@ -180,11 +185,16 @@ describe("setup with the clack prompter [UC1]", () => {
       "select Forward the MCP servers an agent needs to the external agent that runs it?",
     );
     expect(config).toMatch(/^ {4}forward_mcp: false$/m);
+    expect(calls).toContain(
+      "select Install an isolated browser for delegated agents (Playwright MCP, driving Google Chrome)?",
+    );
+    expect(config).toMatch(/^ {4}browser: false$/m);
     expect(k.io.stdout).toBe("");
   });
 
   it("the Antigravity opt-in still needs the typed 'yes': anything else keeps it off", async () => {
-    // host, claude plan, codex plan, agy opt-in (yes), terms text ("ok"), strategy, autonomy, MCP grant, apply.
+    // host, claude plan, codex plan, agy opt-in (yes), terms text ("ok"), strategy, autonomy,
+    // MCP grant, browser grant, apply.
     const fake = fakeClack([
       undefined,
       undefined,
@@ -194,6 +204,7 @@ describe("setup with the clack prompter [UC1]", () => {
       undefined,
       undefined,
       undefined,
+      "no",
       true,
     ]);
     const k = harness({ tty: true, clack: async () => fake.api });

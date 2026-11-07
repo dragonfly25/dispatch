@@ -11,8 +11,10 @@ import { createInterface } from "node:readline/promises";
 import { type Command, Option } from "commander";
 import pkg from "../../package.json" with { type: "json" };
 import { refreshHookCacheSafely } from "../app/hook-cache.js";
+import { browserToolsDir, installStatus } from "../browser/index.js";
+import { browserInstallOp, npmCliFor, provisionBlocker } from "../browser/install.js";
 import { dispatchHome, globalConfigPath, PROFILES_DIR } from "../config/paths.js";
-import { ExitCode, type HostIntegration } from "../core/contracts.js";
+import { type EditOp, ExitCode, type HostIntegration } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import {
   applySetup,
@@ -70,6 +72,8 @@ export interface SetupCommandDeps {
   tty?: boolean;
   /** Loads `@clack/prompts` (tests inject a fake). */
   clack?: () => Promise<ClackApi>;
+  /** Effective user id (setup never installs the browser as root); default `process.getuid()`. */
+  uid?: number | undefined;
 }
 
 async function askTty(question: string): Promise<string> {
@@ -91,6 +95,7 @@ export function defaultSetupDeps(): SetupCommandDeps {
     ask: askTty,
     interactive: process.stdin.isTTY === true,
     tty: process.stdin.isTTY === true && process.stdout.isTTY === true,
+    uid: process.getuid?.(),
   };
 }
 
@@ -98,6 +103,23 @@ function requireHome(env: SetupCommandDeps["env"]): { home: string; dispatchHome
   const home = env.HOME;
   if (!home) throw new DispatchError("HOME is not set", ExitCode.USAGE, "setup.no_home");
   return { home, dispatchHome: dispatchHome(env) };
+}
+
+/**
+ * The setup op that installs the isolated browser, or why it cannot be planned (root, no npm next
+ * to node). Only called when the config being written (or kept) says `hosts.claude-code.browser`.
+ */
+function browserTool(
+  dispatchHome: string,
+  nodePath: string,
+  uid: number | undefined,
+): { op?: EditOp; blocked?: string } {
+  const blocked = provisionBlocker(nodePath, uid);
+  const npmCli = blocked === null ? npmCliFor(nodePath) : null;
+  if (npmCli === null) {
+    return { blocked: `${blocked ?? "npm not found"}; the isolated browser is not installed` };
+  }
+  return { op: browserInstallOp({ dispatchHome, nodePath, npmCli }) };
 }
 
 /** Options of `dispatch setup`. */
@@ -212,11 +234,17 @@ export async function runSetup(
   const ui = rich ? createUi(true) : outUi(io);
   if (rich) prompter?.intro(ui.bold(`Dispatch setup · v${pkg.version}`));
   const change = await planGlobalConfig(io, deps, opts, prompter);
+  const install = deps.install();
+  const configText = change?.text ?? readConfigText(globalConfigPath(deps.env));
+  const browserOn = configText !== null && currentAnswers(configText).browser === true;
+  const browser = browserOn ? browserTool(dHome, install.nodePath, deps.uid) : null;
+  if (browser?.blocked) io.err(`warning: ${browser.blocked}\n`);
   const plan = await planSetup({
     home,
     dispatchHome: dHome,
-    install: deps.install(),
+    install,
     hosts: deps.hosts(),
+    ...(browser?.op ? { tools: [{ id: "browser", ops: [browser.op] }] } : {}),
   });
   const preview = renderPlanPreview(plan, change, { ui, home });
   if (rich && prompter) {
@@ -251,6 +279,10 @@ export async function runSetup(
   const done = `Setup done: ${summary.applied.length} applied, ${summary.unchanged.length} unchanged, ${summary.removed.length} removed.`;
   spin?.stop(done);
   for (const w of summary.warnings) io.err(`warning: ${w}\n`);
+  if (browser?.op) {
+    const st = installStatus(browserToolsDir(dHome));
+    if (!st.ok) io.err(`warning: the isolated browser is ${st.reason}; it will not be used\n`);
+  }
   refreshHookCacheSafely({ cwd: process.cwd(), env: deps.env }, (m) => io.err(`warning: ${m}\n`));
   if (!rich) io.out(`${done}\n`);
   if (!opts.refresh && plan.stale.length > 0) {
@@ -289,7 +321,15 @@ export function addAnswerOptions(cmd: Command): Command {
       "--forward-mcp",
       "trust grant: forward the MCP servers an agent needs to the external agent that runs it",
     )
-    .option("--no-forward-mcp", "do not forward MCP servers (agents that use MCP stay on Claude)");
+    .option("--no-forward-mcp", "do not forward MCP servers (agents that use MCP stay on Claude)")
+    .option(
+      "--browser",
+      "trust grant: install the isolated browser (Playwright MCP + installed Chrome) for delegated agents",
+    )
+    .option(
+      "--no-browser",
+      "no isolated browser (agents that use the desktop browser stay on Claude)",
+    );
 }
 
 /** Registers `setup` and `uninstall` on `program`. */

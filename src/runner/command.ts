@@ -7,9 +7,10 @@ import { execTool } from "./exec.js";
  */
 export function createCommandRunner(opts: { cwd: string; timeoutMs?: number }): CommandRunner {
   return {
-    async run(binary, argv) {
+    async run(binary, argv, runOpts) {
       const r = await execTool(binary, argv, {
         cwd: opts.cwd,
+        ...(runOpts?.env ? { env: runOpts.env } : {}),
         timeoutMs: opts.timeoutMs ?? 120_000,
       });
       return { code: r.code, stdout: r.stdout, stderr: r.stderr };

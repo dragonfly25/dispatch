@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { browserNote, type LaunchConfig, readLaunchConfigs } from "../browser/note.js";
 import type { RunResult, Task } from "../core/contracts.js";
 import { addPassthrough, type Handoff } from "../hosts/claude-code/handoff.js";
 import type { DetachHandoff } from "../runner/detach.js";
@@ -41,8 +42,16 @@ function shownPath(h: Handoff, repoRoot: string, home: string | undefined): stri
   return home && p.startsWith(`${home}/`) ? `~/${relative(home, p)}` : p;
 }
 
-/** The prompt of a handoff run: the agent's instructions, then the caller's task. */
-export function handoffPromptText(h: Handoff, repoRoot: string, home?: string): string {
+/**
+ * The prompt of a handoff run: the agent's instructions, then (for a browser agent) the
+ * {@link browserNote} built from `launch` (the repo's `.claude/launch.json`), then the task.
+ */
+export function handoffPromptText(
+  h: Handoff,
+  repoRoot: string,
+  home?: string,
+  launch: readonly LaunchConfig[] = [],
+): string {
   const parts = [
     `The task below was given to the "${h.agent.name}" sub-agent of the user's Claude Code ` +
       "setup. Act as that agent: follow its instructions, then do the task.",
@@ -53,6 +62,7 @@ export function handoffPromptText(h: Handoff, repoRoot: string, home?: string): 
       h.instructions.trim(),
     );
   }
+  if (h.browser === true) parts.push(browserNote(launch));
   parts.push("## Task", h.task.trim());
   return parts.join("\n\n");
 }
@@ -63,7 +73,12 @@ export function handoffPromptText(h: Handoff, repoRoot: string, home?: string): 
  */
 export function handoffTask(ctx: AppContext, h: Handoff, repoRoot: string): Task {
   return buildTask(ctx, {
-    task: handoffPromptText(h, repoRoot, ctx.env.HOME),
+    task: handoffPromptText(
+      h,
+      repoRoot,
+      ctx.env.HOME,
+      h.browser === true ? readLaunchConfigs(repoRoot) : [],
+    ),
     ...(h.model === null ? {} : { model: h.model }),
     ...(h.effort === null || !ctx.config.routing.efforts.includes(h.effort)
       ? {}
@@ -81,6 +96,7 @@ export function detachHandoff(h: Handoff): DetachHandoff {
     mcpServers: [...h.mcpServers],
     web: h.web,
     ...(h.webFetch === undefined ? {} : { webFetch: h.webFetch }),
+    ...(h.browser === true ? { browser: true } : {}),
   };
 }
 

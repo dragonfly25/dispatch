@@ -1,12 +1,9 @@
 import { isAbsolute, join, normalize } from "node:path";
+import { type BuildInvocationWithBrowser, refuseBrowser } from "../../browser/index.js";
 import { ExitCode, type Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import { refuseMcp } from "../../mcp/forward.js";
-import {
-  type BuildInvocationWithNetwork,
-  packageCacheEnv,
-  type SandboxNetwork,
-} from "../../sandbox/network.js";
+import { packageCacheEnv, type SandboxNetwork } from "../../sandbox/network.js";
 import type { WebAccess } from "../../web/index.js";
 
 /** `--max-turns` for every child; generous because the runner's timeout is the real bound. */
@@ -136,8 +133,9 @@ export function webTools(web: WebAccess | undefined): string[] {
  * adds the web tools to `--tools` and pre-approves them with `--allowedTools` ({@link webTools}).
  * `network` (worktree runs only) opens the Bash sandbox network ({@link childSettings}).
  */
-export function buildClaudeInvocation(args: BuildInvocationWithNetwork): Invocation {
+export function buildClaudeInvocation(args: BuildInvocationWithBrowser): Invocation {
   refuseMcp("claude", args);
+  refuseBrowser("claude", args);
   const { autonomy, probe, instance, baseEnv, target } = args;
   if (autonomy === "direct") {
     throw new DispatchError(

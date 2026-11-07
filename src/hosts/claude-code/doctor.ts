@@ -6,7 +6,10 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
-import { forwardableMcpFor, forwardWebFor, readHookCache } from "../../hook/cache.js";
+import { type BrowserFs, browserReadiness } from "../../browser/index.js";
+import { globalConfigPath, parseYaml } from "../../config/index.js";
+import { GlobalConfigFileSchema } from "../../config/schema.js";
+import { browserFor, forwardableMcpFor, forwardWebFor, readHookCache } from "../../hook/cache.js";
 import { listMcpServers } from "../../mcp/resolve.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { createCommandRunner } from "../../runner/command.js";
@@ -27,6 +30,9 @@ export interface ClaudeDoctorDeps {
   fs?: ResolveFs;
   /** Directory whose repo's agents `claude-code.hard-mode` lists; default `process.cwd()`. */
   cwd?: () => string;
+  /** Filesystem and platform of `claude-code.browser` (tests inject fakes). */
+  browserFs?: BrowserFs;
+  platform?: string;
 }
 
 const SETUP_FIX = "dispatch setup";
@@ -352,10 +358,11 @@ export function agentReport(
     const v = eligibility(a.def, {
       forwardableMcp: forwardableMcpFor(cache, cwd),
       webSupported: forwardWebFor(cache, cwd),
+      browser: browserFor(cache, cwd, a.name),
     });
     const mcp =
       v.eligible && v.mcpServers.length > 0 ? `, MCP forwarded: ${v.mcpServers.join(", ")}` : "";
-    const web = v.eligible && v.web ? ", web" : "";
+    const web = `${v.eligible && v.web ? ", web" : ""}${v.eligible && v.browser ? ", isolated browser" : ""}`;
     return v.eligible
       ? `${where}: delegated (${v.autonomy}${a.def.model ? `, model ${a.def.model}` : ""}${web}${mcp})`
       : `${where}: stays on Claude (${v.reason})`;
@@ -397,6 +404,63 @@ function mcpForwardingCheck(deps: ClaudeDoctorDeps): DoctorCheck {
   };
 }
 
+/** `hosts.claude-code.browser` and `network` of the global config (lenient: unreadable is off). */
+function browserSettings(env: DoctorContext["env"]): { enabled: boolean; network: string } {
+  try {
+    const path = globalConfigPath(env);
+    const g = parseYaml(readFileSync(path, "utf8"), path, GlobalConfigFileSchema);
+    const network = g.network === "on" ? "all" : (g.network ?? "off");
+    return { enabled: g.hosts?.["claude-code"]?.browser === true, network };
+  } catch {
+    return { enabled: false, network: "off" };
+  }
+}
+
+/**
+ * `claude-code.browser`: the isolated browser for agents that use the Claude desktop browser
+ * tools: switched on, installed (pinned version, lockfile integrity) and Google Chrome found.
+ */
+function browserCheck(deps: ClaudeDoctorDeps): DoctorCheck {
+  return {
+    id: "claude-code.browser",
+    run(ctx) {
+      const { enabled, network } = browserSettings(ctx.env);
+      if (!enabled) {
+        return {
+          status: "ok",
+          message:
+            "the isolated browser is off (hosts.claude-code.browser): agents that use the Claude desktop browser tools stay on Claude",
+        };
+      }
+      const r = browserReadiness({
+        enabled,
+        dispatchHome: ctx.dispatchHome,
+        platform: deps.platform ?? process.platform,
+        home: ctx.home,
+        ...(deps.browserFs ? { fs: deps.browserFs } : {}),
+      });
+      if (!r.ready) {
+        return {
+          status: "warn",
+          message: `${r.reason}: agents that use the Claude desktop browser tools stay on Claude`,
+          fix: r.reason.includes("Chrome")
+            ? "install Google Chrome"
+            : "run `dispatch setup --refresh --yes` to install it",
+        };
+      }
+      const base = `on: @playwright/mcp ${r.version} (integrity checked), Google Chrome at ${r.chrome}, temporary profile, localhost origins only`;
+      if (network === "off") {
+        return {
+          status: "warn",
+          message: `${base}; but the sandbox network is off, so browser agents stay on Claude (needs network)`,
+          fix: "set `network: delegated-agents` in ~/.dispatch/config.yaml",
+        };
+      }
+      return { status: "ok", message: `${base}; sandbox network: ${network}` };
+    },
+  };
+}
+
 /** The Claude Code doctor checks. */
 export function claudeDoctorChecks(deps: ClaudeDoctorDeps = {}): DoctorCheck[] {
   return [
@@ -405,5 +469,6 @@ export function claudeDoctorChecks(deps: ClaudeDoctorDeps = {}): DoctorCheck[] {
     permissionCheck(deps),
     hardModeCheck(deps),
     mcpForwardingCheck(deps),
+    browserCheck(deps),
   ];
 }

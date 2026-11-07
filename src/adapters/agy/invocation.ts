@@ -1,3 +1,4 @@
+import { type BrowserForwarding, refuseBrowser } from "../../browser/index.js";
 import type { Invocation } from "../../core/contracts.js";
 import { ExitCode } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
@@ -46,8 +47,9 @@ function nativeValue(what: string, value: string): string {
  * travels as `-p=<prompt>` (argv index 0, redacted) because agy ignores stdin. The env is exactly
  * `baseEnv`: nothing is added, in particular no `ANTIGRAVITY_*` variable.
  */
-export function buildAgyInvocation(args: BuildInvocationWithWeb): Invocation {
+export function buildAgyInvocation(args: BuildInvocationWithWeb & BrowserForwarding): Invocation {
   refuseMcp("antigravity", args);
+  refuseBrowser("antigravity", args);
   refuseWeb("antigravity", args);
   if (args.autonomy !== "read-only") {
     throw new DispatchError(

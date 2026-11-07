@@ -45,5 +45,6 @@ export function defaultSettings(): Settings {
     retention_days: DEFAULT_RETENTION_DAYS,
     forward_mcp: false,
     forward_web: true,
+    browser: false,
   };
 }

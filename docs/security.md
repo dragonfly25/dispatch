@@ -340,8 +340,8 @@ Claude hard mode for custom agents (after v0.1.0) passes an agent's instructions
     malformed contents, and deletes the file once read. `gc` removes stale handoffs.
   - The agent's model, effort and autonomy are requests: routing, autonomy ceilings and every
     tighten-only security key still apply. Agents that need tools Dispatch cannot give the child
-    (desktop browser, non-forwardable MCP servers, unknown tools) are never delegated; web tools
-    only with `forward_web` on (T14).
+    (non-forwardable MCP servers, unknown tools) are never delegated; web tools only with
+    `forward_web` on (T14); the desktop browser only through the isolated browser (T16).
   - `dispatch apply <runId>` applies only a run recorded from a handoff (0600 record under
     `~/.dispatch/handoff-runs/`, written by Dispatch itself) with `autoApply`, with
     `hosts.claude-code.auto_apply` not false in the global config, status `completed` and outcome
@@ -497,6 +497,48 @@ reach local services and databases, the Docker socket and the whole internet, un
   `network_agents` list) for repositories or machines with sensitive data or live credentials,
   and turn it off per repo with `network: off`.
 
+### T16. A delegated agent's browser is steered by page content, or reaches the user's browser data (A2, A4; after v0.1.0)
+
+Context: agents that list the Claude desktop browser tools (`mcp__Claude_Browser__*`) may be
+delegated to codex with a Dispatch-owned Playwright MCP server (`dispatch_browser`) that drives the
+installed Google Chrome (owner-approved, switched on by the `hosts.claude-code.browser` trust grant
+at setup). The server runs outside the codex shell sandbox, as the user.
+
+- **Risks.** Page content (the app under test, or anything it loads) is a prompt-injection
+  vector for an unsupervised agent; a browser driven with the user's profile would expose cookies,
+  logged-in sessions and saved passwords; a tool that runs code in the server process would escape
+  the sandbox; a tampered package would run as the user.
+- **Mitigation.**
+  - **Isolated profile, never the user's browser.** Always `--isolated --headless --browser chrome`:
+    a temporary empty profile in TMPDIR, removed on close, Chrome driven over a pipe (verified live:
+    `--user-data-dir=<TMPDIR>/playwright_chromiumdev_profile-*`, `--remote-debugging-pipe`,
+    `--use-mock-keychain`). Dispatch never passes `--user-data-dir`, `--cdp-endpoint`,
+    `--extension` or `--storage-state` and never attaches to a running browser; the server's `HOME`
+    and cwd are in the attempt's run dir, so nothing lands in the user's caches or the worktree.
+  - **No in-process code, no local files.** codex's per-server `enabled_tools` allowlist offers 22
+    page tools; `browser_run_code_unsafe` (arbitrary code in the server process),
+    `browser_file_upload` and `browser_drop` are never listed (verified live). `file://` stays
+    blocked (Playwright default).
+  - **Origins.** `--allowed-origins` lists only `http://localhost:<p>` and `http://127.0.0.1:<p>`
+    for the ports of the repo's `.claude/launch.json` (any localhost port without one). Playwright
+    states that this list is **not a security boundary** (redirects pass; it is a convenience).
+  - **Pinned and verified.** Setup installs exactly `@playwright/mcp@0.0.84` with npm
+    `--ignore-scripts` (no lifecycle scripts), `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` and a local
+    `--prefix` under `~/.dispatch/tools/playwright-mcp`, never global and never as root; the three
+    package integrities of the lockfile are compared with the pinned ones before every use.
+  - **Switches.** Off unless the setup trust grant was accepted (`hosts.claude-code.browser`,
+    global; a repo or flag `browser: false` turns it off). It also needs the sandbox network for
+    the agent (T15), Bash, a worktree run and a codex target; otherwise the agent stays on Claude.
+- **Proof.** `test/unit/browser/browser.test.ts` `[SEC-browser]` `[SEC-flags]` (install
+  verification, golden codex overrides and argv without profile/CDP flags, allowlist, claude/agy
+  refusal, reserved server name, eligibility, run plan), `test/unit/browser/setup.test.ts`
+  `[UC1][UC14][AC2]` (fake npm: install, refresh, reinstall, uninstall, never as root),
+  `test/unit/browser-handoff-e2e.test.ts` `[UC2]`. Live spikes: `docs/spikes/browser.md`.
+- **Residual risk.** A steered agent can still drive the page tools against what the origin list
+  does not stop (redirects), and, with the sandbox network on, its shell can do everything T15
+  describes. `browser_evaluate` runs script in the page (not in the server). Turn the browser off
+  (`browser: false`) for repositories whose local services are sensitive.
+
 ## 5. Accepted risks and disclosures
 
 - **MCP forwarding is a trust grant** (T13): the external agent can use the forwarded servers'
@@ -514,6 +556,8 @@ reach local services and databases, the Docker socket and the whole internet, un
   workarounds.
 - **Opt-in shell network for delegated agents** (T15), off by default; `network:
   delegated-agents | all` in the global config opens it (localhost, Docker, internet).
+- **Isolated browser for delegated agents** (T16), off unless the setup trust grant is accepted;
+  its origin allowlist is not a security boundary.
 - **Web access for delegated custom agents** (T14), on by default for agents that declare
   `WebSearch`/`WebFetch`; `hosts.claude-code.forward_web: false` turns it off.
 - **Redaction is best-effort** (T6), and patches are not redacted.

@@ -1,4 +1,10 @@
 import { join } from "node:path";
+import {
+  BROWSER_SERVER_NAME,
+  type BrowserRun,
+  type BuildInvocationWithBrowser,
+  ENABLED_TOOLS,
+} from "../../browser/index.js";
 import type { Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import type { McpServer } from "../../mcp/resolve.js";
@@ -157,15 +163,60 @@ export function networkOverride(
 }
 
 /**
+ * The Dispatch-owned `dispatch_browser` server (live-verified on 0.167 with @playwright/mcp
+ * 0.0.84, docs/spikes/browser.md): node runs the pinned install with `--isolated --headless
+ * --browser chrome` (installed Chrome, temporary profile), `--allowed-origins` (localhost dev
+ * servers; not a hard boundary) and `--output-dir` in the attempt dir; its HOME and cwd are the
+ * attempt's browser dirs, so nothing lands in the worktree or the user's caches. `enabled_tools`
+ * is an allowlist: `browser_run_code_unsafe` (code in the server process, outside the sandbox) and
+ * the file-reading tools are never offered. Worktree runs only (dev servers need the shell).
+ */
+export function browserOverrides(
+  browser: BrowserRun | undefined,
+  autonomy: BuildInvocationWithBrowser["autonomy"],
+  runDir: string,
+): string[] {
+  if (browser === undefined || autonomy !== "worktree") return [];
+  const key = `mcp_servers.${BROWSER_SERVER_NAME}`;
+  const out = join(runDir, "browser");
+  const args = [
+    browser.cliPath,
+    "--isolated",
+    "--headless",
+    "--browser",
+    "chrome",
+    "--output-dir",
+    out,
+    "--allowed-origins",
+    browser.origins.join(";"),
+  ];
+  return [
+    "-c",
+    `${key}.command=${tomlString(browser.nodePath)}`,
+    "-c",
+    `${key}.args=${tomlArray(args)}`,
+    "-c",
+    `${key}.env={HOME=${tomlString(join(runDir, "browser-home"))}}`,
+    "-c",
+    `${key}.cwd=${tomlString(out)}`,
+    "-c",
+    `${key}.enabled_tools=${tomlArray(ENABLED_TOOLS)}`,
+    "-c",
+    `${key}.default_tools_approval_mode="approve"`,
+  ];
+}
+
+/**
  * Builds the `codex exec` child command (pure). Prompt goes on stdin (trailing `-`).
  * `worktree` and `repoRoot` must be canonical (realpath) paths, since codex keys project trust
  * on them. `mcpServers` (optional) adds only those MCP servers ({@link mcpOverrides}); the user's
  * own MCP config stays ignored. `web` (optional) turns on codex's web search ({@link webOverride});
- * `network` (optional, worktree only) opens the shell sandbox network ({@link networkOverride}).
+ * `network` (optional, worktree only) opens the shell sandbox network ({@link networkOverride});
+ * `browser` (optional, worktree only) adds the isolated browser server ({@link browserOverrides}).
  * Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
  * required isolation feature is unknown to the installed CLI (fail closed).
  */
-export function buildCodexInvocation(args: BuildInvocationWithNetwork): Invocation {
+export function buildCodexInvocation(args: BuildInvocationWithBrowser): Invocation {
   const { probe, autonomy, worktree, repoRoot, runDir, target, instance } = args;
   if (autonomy === "direct") {
     throw new DispatchError(
@@ -206,6 +257,7 @@ export function buildCodexInvocation(args: BuildInvocationWithNetwork): Invocati
     ...mcpOverrides(args.mcpServers ?? []),
     ...webOverride(args.web),
     ...networkOverride(args.network, autonomy),
+    ...browserOverrides(args.browser, autonomy, runDir),
     "-C",
     worktree,
     "-m",
@@ -237,6 +289,9 @@ export function buildCodexInvocation(args: BuildInvocationWithNetwork): Invocati
       ...(args.mcpServers?.length ? ["codex-mcp-forwarded-only"] : []),
       ...(args.web ? ["codex-web-model-side-only"] : []),
       ...(net ? ["codex-network-opt-in"] : []),
+      ...(browserOverrides(args.browser, autonomy, runDir).length > 0
+        ? ["codex-browser-isolated"]
+        : []),
     ],
   };
 }

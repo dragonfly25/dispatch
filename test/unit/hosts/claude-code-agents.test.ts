@@ -407,7 +407,9 @@ describe("claude-code PreToolUse for custom agents [UC2][SEC-handoff]", () => {
     writeFileSync(join(w.agents, "web.md"), agentText("name: web\ntools: Read, WebSearch"));
     mkdirSync(join(w.repo, ".git"));
     const text = agentReport(cache, { HOME: join(h.home, "nobody") }, join(w.repo));
-    expect(text).toContain("browser (project): stays on Claude (uses Claude_Browser)");
+    expect(text).toContain(
+      "browser (project): stays on Claude (uses Claude_Browser; the isolated browser is off (hosts.claude-code.browser))",
+    );
     expect(text).toContain("reader (project): delegated (read-only, model claude-sonnet-5-5)");
     expect(text).toContain("x (project): stays on Claude (not in hosts.claude-code.intercept");
     expect(text).toContain("web (project): delegated (read-only, web)");

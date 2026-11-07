@@ -142,7 +142,11 @@ automatically too, when Dispatch can run them elsewhere: their tools are only fi
 `Grep`, `Glob`, `LS`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, `Bash`, `TodoWrite`), or MCP
 servers that are forwardable for the repo, and the web tools `WebSearch` / `WebFetch` (the external
 agent gets web search; `hosts.claude-code.forward_web: false` keeps such agents on Claude). Agents
-that need the desktop browser (`mcp__Claude_Browser__*`), other MCP servers or other tools stay on
+that use the desktop browser (`mcp__Claude_Browser__*`) are delegated to codex with an isolated
+browser when you accepted it at setup (`hosts.claude-code.browser`: a pinned Playwright MCP drives
+your installed Google Chrome with a temporary empty profile, never your own, localhost only) and
+the sandbox network is on for them (`network: delegated-agents`); they start the dev servers of
+`.claude/launch.json` in their sandbox. Agents that need other MCP servers or other tools stay on
 Claude, silently.
 The hook writes the agent's instructions and the task to a one-time handoff file
 (`~/.dispatch/handoffs/<id>.json`, 0600) and the `dispatch` sub-agent runs `dispatch run --handoff
@@ -251,6 +255,7 @@ and from you reviewing the result.
 | Patch filter | Rejected or trimmed if it touches `..`, absolute paths, symlinks, `.git*`, `.dispatch/`, host config, `.env*` or pinned paths. Secret scan sets `needsReview`; `git apply --check` runs against your tree. |
 | No automatic apply | Dispatch never commits or opens PRs, and applies a patch only for an intercepted Claude Code custom agent (auto-apply, see above; `hosts.claude-code.auto_apply: false` turns it off). Otherwise you or the host review the diff. |
 | Untrusted output | The summary is marked `EXTERNAL_AGENT_OUTPUT`; the host treats it as data, never as instructions. |
+| Isolated browser (opt-in) | Agents that use the Claude desktop browser get, on codex, Playwright MCP with your installed Chrome and a temporary empty profile (no cookies, no logins), origins limited to localhost dev servers (not a hard boundary), and no tool that runs code in the server process. Installed by `dispatch setup` (pinned `@playwright/mcp`, install scripts never run) only after you accept the trust grant. Details: [docs/security.md](docs/security.md) T16. |
 | Shell network (opt-in) | Off by default: a delegated agent cannot start a server on localhost, reach Docker or the internet. To let builder agents run your API, database and tests, add `network: delegated-agents` (runs a Claude Code or Codex session delegates; narrow with `network_agents: [builder, general-purpose]`) or `network: all` (also runs you start by hand) to `~/.dispatch/config.yaml`; `network: off` closes it (a repo can only close it). **Warning:** an unsupervised agent with network can be steered by prompt injection to send out your code or data, or act on real services, local databases and containers. `dispatch doctor` warns while it is on. Details: [docs/security.md](docs/security.md) T15. |
 | MCP servers | Children load no MCP server of yours, except, with the MCP forwarding grant, exactly the ones the delegated agent needs (codex children only; claude's `--safe-mode` cannot load them). Secrets pass by variable name. |
 | Settings only tighten | Security keys can be loosened only in your global config; a repo or flag can only be stricter, and repo policy is ignored until you `dispatch trust` it. |
