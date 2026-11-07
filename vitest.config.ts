@@ -25,6 +25,7 @@ export default defineConfig({
         statements: 85,
         "src/platform/**": { lines: 95, functions: 95, branches: 95, statements: 95 },
         "src/state/redact.ts": { lines: 95, functions: 95, branches: 95, statements: 95 },
+        "src/router/**": { lines: 95, functions: 95, branches: 95, statements: 95 },
       },
     },
   },

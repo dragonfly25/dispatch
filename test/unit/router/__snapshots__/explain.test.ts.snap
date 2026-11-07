@@ -1,0 +1,158 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderExplain > [UC4] filters, quota used and alternative profiles 1`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset mirror)
+Input: sha256 11fa20f326207263
+Task: t1 | type test | autonomy read-only | paths 1
+Host: self claude | session model -
+Requested model: gpt-5-pro
+Tier and effort:
+  + [mapping] tier:reverse:codex[1]: tier max (gpt-5-pro ~ gpt-5-pro)
+  + [mapping] effort:task: effort high (effort declared by the task)
+Rules:
+  - [pin] migrations: no match (paths did not match)
+  + [profile] spread: fallback codex → agy → claude-alt (ordered)
+Candidates:
+  - [filter] codex: filtered: below hard limit (remaining 5% < 10%)
+  - [filter] agy: filtered: unavailable until 2026-11-07T12:00:00.000Z
+  + [filter] claude-alt: kept: quota unknown
+Decision: delegate (fallback)
+  1. claude-alt: model claude-opus-4-1, effort high, tier max [models.claude.tiers.max]
+Quota used (snapshot 2026-11-07T10:00:00.000Z):
+  codex: 95% used [5h] (real, source codex-app-server, read 2026-11-07T09:55:00.000Z)
+  agy: unknown
+  claude-alt: unknown
+Reason: delegate to claude-alt in order, then host (profile balance rule spread)
+Other profiles:
+  preserve: host (single) | host: codex was filtered out (profile preserve rule all)
+  specialize: host (single) | host: codex was filtered out (profile specialize rule tests)
+  off: host (single) | host: no rule matched (default)
+"
+`;
+
+exports[`renderExplain > [UC5] pin and direct mapping sources 1`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset mirror)
+Input: sha256 649b2011109c7ffa
+Task: t1 | type - | autonomy read-only | paths 1
+Host: self claude | session model -
+Requested model: (unspecified: balanced)
+Tier and effort:
+  + [mapping] tier:unspecified:balanced: tier balanced (unspecified model uses the configured tier)
+  + [mapping] effort:task: effort medium (default effort)
+Rules:
+  + [pin] migrations: host
+Candidates:
+  (none)
+Decision: host (single)
+Reason: host: pin migrations
+Other profiles:
+  off: host (single) | host: pin migrations
+"
+`;
+
+exports[`renderExplain > [UC5] pin and direct mapping sources 2`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset economy)
+Input: sha256 8c18c9d33650bb00
+Task: t1 | type - | autonomy read-only | paths 1
+Host: self none | session model -
+Requested model: claude-opus-4-1
+Tier and effort:
+  + [mapping] tier:reverse:claude[0]: tier max (claude-opus-4-1 ~ claude-opus-*)
+  + [mapping] effort:task: effort medium (default effort)
+  + [preset] effort:preset:economy: effort low (effortShift -1, clamped)
+Rules:
+  - [pin] migrations: no match (paths did not match)
+  + [mapping] map:claude-opus-*: provider codex model gpt-5-pro effort xhigh
+Candidates:
+  + [filter] codex: kept: quota unknown
+Decision: delegate (single)
+  1. codex: model gpt-5-pro, effort xhigh, tier max [direct mapping map:claude-opus-*]
+Quota used (snapshot 2026-11-07T10:00:00.000Z):
+  codex: unknown
+Reason: delegate to codex (direct mapping map:claude-opus-*)
+"
+`;
+
+exports[`renderExplain > [UC6] balanced: an Opus session still gets the balanced tier 1`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset mirror)
+Input: sha256 708b42e52ef3f7db
+Task: t1 | type - | autonomy read-only | paths 1
+Host: self claude | session model claude-opus-4-1
+Requested model: (unspecified: balanced)
+Tier and effort:
+  + [mapping] tier:unspecified:balanced: tier balanced (unspecified model uses the configured tier)
+  + [mapping] effort:task: effort medium (default effort)
+Rules:
+  - [pin] migrations: no match (paths did not match)
+  + [profile] spread: fallback codex → agy → claude-alt (ordered)
+Candidates:
+  + [filter] codex: kept: remaining 60%
+  + [filter] agy: kept: quota unknown
+  + [filter] claude-alt: kept: quota unknown
+Decision: delegate (fallback)
+  1. codex: model gpt-5, effort medium, tier balanced [models.codex.tiers.balanced]
+  2. agy: model gemini-pro, effort medium, tier balanced [models.antigravity.tiers.balanced]
+  3. claude-alt: model claude-sonnet-4-5, effort medium, tier balanced [models.claude.tiers.balanced]
+Quota used (snapshot 2026-11-07T10:00:00.000Z):
+  codex: 40% used [5h] (real, source test-reader, read 2026-11-07T09:55:00.000Z)
+  agy: unknown
+  claude-alt: unknown
+Reason: delegate to codex, agy, claude-alt in order, then host (profile balance rule spread)
+"
+`;
+
+exports[`renderExplain > [UC6] inherit: an Opus session maps to max; unobserved records decided_without 1`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset mirror)
+Input: sha256 1900dccb51570e8d
+Task: t1 | type - | autonomy read-only | paths 1
+Host: self claude | session model claude-opus-4-1
+Requested model: (unspecified: inherit)
+Tier and effort:
+  + [mapping] tier:unspecified:inherit: tier max (session model claude-opus-4-1 ~ claude-opus-* via tier:reverse:claude[0])
+  + [mapping] effort:task: effort medium (default effort)
+Rules:
+  - [pin] migrations: no match (paths did not match)
+  + [profile] spread: fallback codex → agy → claude-alt (ordered)
+Candidates:
+  + [filter] codex: kept: remaining 60%
+  + [filter] agy: kept: quota unknown
+  + [filter] claude-alt: kept: quota unknown
+Decision: delegate (fallback)
+  1. codex: model gpt-5-pro, effort medium, tier max [models.codex.tiers.max]
+  2. agy: model gemini-ultra, effort medium, tier max [models.antigravity.tiers.max]
+  3. claude-alt: model claude-opus-4-1, effort medium, tier max [models.claude.tiers.max]
+Quota used (snapshot 2026-11-07T10:00:00.000Z):
+  codex: 40% used [5h] (real, source test-reader, read 2026-11-07T09:55:00.000Z)
+  agy: unknown
+  claude-alt: unknown
+Reason: delegate to codex, agy, claude-alt in order, then host (profile balance rule spread)
+"
+`;
+
+exports[`renderExplain > [UC6] inherit: an Opus session maps to max; unobserved records decided_without 2`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset mirror)
+Input: sha256 1f113f7b68757d8a
+Task: t1 | type - | autonomy read-only | paths 1
+Host: self claude | session model -
+Requested model: (unspecified: inherit)
+Tier and effort:
+  + [mapping] tier:unspecified:inherit: tier balanced (decided_without: session_model (session model absent))
+  + [mapping] effort:task: effort medium (default effort)
+Rules:
+  - [pin] migrations: no match (paths did not match)
+  + [profile] spread: fallback codex → agy → claude-alt (ordered)
+Candidates:
+  + [filter] codex: kept: quota unknown
+  + [filter] agy: kept: quota unknown
+  + [filter] claude-alt: kept: quota unknown
+Decision: delegate (fallback)
+  1. codex: model gpt-5, effort medium, tier balanced [models.codex.tiers.balanced]
+  2. agy: model gemini-pro, effort medium, tier balanced [models.antigravity.tiers.balanced]
+  3. claude-alt: model claude-sonnet-4-5, effort medium, tier balanced [models.claude.tiers.balanced]
+Quota used (snapshot 2026-11-07T10:00:00.000Z):
+  codex: unknown
+  agy: unknown
+  claude-alt: unknown
+Reason: delegate to codex, agy, claude-alt in order, then host (profile balance rule spread)
+"
+`;
