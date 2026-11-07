@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadAppContext } from "../../src/app/context.js";
 import {
   buildHookCache,
+  policyDelegates,
   refreshHookCache,
   refreshHookCacheSafely,
   summarizePolicy,
@@ -79,7 +80,11 @@ describe("hook cache writer [UC9][UC2]", () => {
     expect(cache?.trustedRepos).toEqual([
       { root: k.dir, policyHash: expect.stringMatching(/^[0-9a-f]{64}$/) },
     ]);
-    expect(cache?.policy).toMatchObject({ profile: "preserve", hardMode: false });
+    expect(cache?.policy).toMatchObject({
+      profile: "preserve",
+      hardMode: true,
+      hardInterception: true,
+    });
     expect(cache?.policy.summary).toContain("db/migrations/**: kept on the host");
     expect(cache?.policy.summary).toContain("Pinned to the host: db/migrations/**");
 
@@ -231,5 +236,43 @@ describe("summarizePolicy", () => {
       makeConfig({ activeProfile: "off", profiles: { off: { rules: [] } }, pins: [] }),
     );
     expect(text).toBe("Routing policy (profile off):\nA task no rule delegates stays on the host.");
+  });
+});
+
+describe("Codex hard-mode fields [UC3]", () => {
+  const routing = (rules: Rule[], pins: Rule[] = []): RoutingConfig =>
+    makeConfig({ activeProfile: "p", profiles: { p: { rules } }, pins });
+  const r = (id: string, action: Rule["action"]): Rule => ({ id, match: {}, action });
+
+  it("policyDelegates: any provider/fallback/fanout pin or rule; host/reject/--provider do not", () => {
+    expect(policyDelegates(routing([r("h", { type: "host" })]))).toBe(false);
+    expect(policyDelegates(routing([r("x", { type: "reject", reason: "no" })]))).toBe(false);
+    expect(
+      policyDelegates(routing([], [r("flag:provider", { type: "provider", instance: "codex" })])),
+    ).toBe(false);
+    expect(policyDelegates(routing([r("p", { type: "provider", instance: "codex" })]))).toBe(true);
+    expect(
+      policyDelegates(routing([], [r("f", { type: "fanout", instances: ["codex", "claude"] })])),
+    ).toBe(true);
+    expect(
+      policyDelegates(
+        routing([r("f", { type: "fallback", instances: ["codex"], strategy: "ordered" })]),
+      ),
+    ).toBe(true);
+    expect(policyDelegates(makeConfig({ activeProfile: "gone", profiles: {}, pins: [] }))).toBe(
+      false,
+    );
+  });
+
+  it("hardMode follows hosts.codex.hard (default true)", () => {
+    home = tempHome();
+    mkdirSync(home.dispatchHome, { recursive: true });
+    const config = join(home.dispatchHome, "config.yaml");
+    writeFileSync(config, "version: 1\n");
+    const ctx = loadAppContext({ cwd: process.cwd(), env: home.env });
+    expect(buildHookCache(ctx).policy).toMatchObject({ hardMode: true, hardInterception: true });
+    writeFileSync(config, "version: 1\nhosts:\n  codex:\n    hard: false\n");
+    expect(buildHookCache(ctx).policy.hardMode).toBe(false);
+    ctx.close();
   });
 });

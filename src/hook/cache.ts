@@ -24,8 +24,14 @@ export interface TrustedRepo {
 export interface PolicySummary {
   /** Active profile name, e.g. "balance". */
   profile: string;
-  /** True when native sub-agent spawns are redirected (Codex `deny_redirect`). */
+  /** Codex hard mode is switched on (`hosts.codex.hard`, default true). */
   hardMode: boolean;
+  /**
+   * True when the policy delegates at least one kind of task (some pin or profile rule routes to
+   * a provider). With `hardMode`, the Codex PreToolUse hook redirects native sub-agent spawns
+   * (`deny_redirect`); otherwise the spawn proceeds. Absent in caches written before WP27: false.
+   */
+  hardInterception?: boolean;
   /** One short paragraph for the host model (`additionalContext`). */
   summary: string;
 }
@@ -65,6 +71,7 @@ function isCache(v: unknown): v is HookCache {
     p !== undefined &&
     typeof p.profile === "string" &&
     typeof p.hardMode === "boolean" &&
+    (p.hardInterception === undefined || typeof p.hardInterception === "boolean") &&
     typeof p.summary === "string"
   );
 }

@@ -289,7 +289,7 @@ describe("claude-code.permission-rule [UC1]", () => {
 });
 
 describe("registration", () => {
-  it("builtinRegistry registers the claude-code host and its three checks", () => {
+  it("builtinRegistry registers the claude-code and codex hosts and their checks", () => {
     const reg = builtinRegistry();
     expect(reg.getHost("claude-code")?.waitTimeoutSec).toBe(100);
     expect(reg.doctorChecks().map((c) => c.id)).toEqual([
@@ -297,6 +297,9 @@ describe("registration", () => {
       "claude-code.plugin",
       "claude-code.files",
       "claude-code.permission-rule",
+      "codex.files",
+      "codex.rules-launcher",
+      "codex.hooks-trusted",
     ]);
   });
 });
