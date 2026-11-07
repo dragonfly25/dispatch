@@ -46,6 +46,8 @@ export interface CliDeps {
   isAlive?: (pid: number) => boolean;
   /** Replaces runner dependencies, e.g. a per-test probe cache (tests). */
   runner?: Partial<RunnerDeps>;
+  /** Command that starts this CLI for `run --detach`'s supervisor (default: this process's). */
+  detachCli?: readonly string[];
 }
 
 /** Default {@link CliDeps.sleep}. */

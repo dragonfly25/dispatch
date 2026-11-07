@@ -4,27 +4,25 @@
  *
  * Flow: depth check → DecisionInput → `decide` → `recordDecisionWithShadow` → per target
  * {@link runAttempt} → {@link RunResult} (schema v1). Fanout, detach/wait/cancel and idempotency
- * are WP23. Everything side-effecting arrives through {@link RunnerDeps}; this module never loads
+ * are WP23 (`fanout.ts`, `detach.ts`, `wait.ts`). Everything side-effecting arrives through {@link RunnerDeps}; this module never loads
  * configuration.
  */
 import { realpath } from "node:fs/promises";
 import type { EffectiveConfig } from "../config/load.js";
 import { dispatchHome as defaultDispatchHome } from "../config/paths.js";
-import {
-  type Adapter,
-  type AdapterDeps,
-  type Clock,
-  type Decision,
-  type DecisionInput,
-  EXTERNAL_AGENT_MARKER,
-  type HostContext,
-  type PatchInfo,
-  type QuotaProvider,
-  type RunResult,
-  type SessionHistoryEntry,
-  type Spawner,
-  type StateStore,
-  type Task,
+import type {
+  Adapter,
+  AdapterDeps,
+  Clock,
+  Decision,
+  DecisionInput,
+  HostContext,
+  QuotaProvider,
+  RunResult,
+  SessionHistoryEntry,
+  Spawner,
+  StateStore,
+  Task,
 } from "../core/contracts.js";
 import { newRunId } from "../core/ids.js";
 import type { HostDetection } from "../platform/host.js";
@@ -36,16 +34,17 @@ import { redact } from "../state/redact.js";
 import type { SqliteStateStore } from "../state/store.js";
 import { type AttemptReport, type RunContext, runAttempt } from "./attempt.js";
 import { assertDepthAllowed, RecursionRejectedError } from "./depth.js";
+import { runFanout } from "./fanout.js";
 import {
   type ProbeCache,
   processProbeCache,
   type SignalTarget,
   trapTermination,
 } from "./lifecycle.js";
+import { completed, type ResultParts, rejected, toHost, truncate } from "./result.js";
 import { RunLog, resolveRunDir } from "./runlog.js";
 
-/** Longest summary handed back to the host (characters). */
-export const MAX_SUMMARY_CHARS = 8 * 1024;
+export { MAX_SUMMARY_CHARS, reportedPatch } from "./result.js";
 /** Default bounded wait for a concurrency slot on the last target. */
 export const DEFAULT_LEASE_WAIT_MS = 30_000;
 
@@ -99,6 +98,8 @@ export interface ExecuteOptions {
   signal?: AbortSignal;
   /** Where SIGINT/SIGTERM are trapped: default `process`; null disables trapping. */
   signals?: SignalTarget | null;
+  /** The run is already recorded as `running` (a detached run): update it instead of inserting. */
+  recorded?: boolean;
 }
 
 /** Host id (from env detection) → adapter id of the instance it runs on. */
@@ -122,11 +123,6 @@ function pinnedGlobs(deps: RunnerDeps): string[] {
     .flatMap((r) => r.match.paths ?? []);
 }
 
-function truncate(text: string): string {
-  if (text.length <= MAX_SUMMARY_CHARS) return text;
-  return `${text.slice(0, MAX_SUMMARY_CHARS)}\n…[truncated ${text.length - MAX_SUMMARY_CHARS} chars]`;
-}
-
 /**
  * Executes `task` end to end and returns its {@link RunResult}. Never throws for an agent, quota,
  * sandbox or patch failure: those become the result. Throws only when the run cannot even be
@@ -147,15 +143,18 @@ export async function executeTask(
   const log = new RunLog(runDir, () => secrets);
   const decisions: Decision[] = [];
   const createdAt = clock.now().toISOString();
-  await store.recordRun({
-    runId,
-    status: "running",
-    createdAt,
-    updatedAt: createdAt,
-    instance: null,
-    pid: process.pid,
-    result: null,
-  });
+  if (opts.recorded) await store.updateRun(runId, { pid: process.pid });
+  else {
+    await store.recordRun({
+      runId,
+      status: "running",
+      createdAt,
+      updatedAt: createdAt,
+      instance: null,
+      pid: process.pid,
+      result: null,
+    });
+  }
 
   const controller = new AbortController();
   const onAbort = () => controller.abort();
@@ -169,10 +168,7 @@ export async function executeTask(
       })
     : () => {};
 
-  const finish = async (
-    parts: Pick<RunResult, "status" | "outcome" | "summary" | "externalAgent" | "patch"> &
-      Pick<Partial<RunResult>, "usage">,
-  ): Promise<RunResult> => {
+  const finish = async (parts: ResultParts): Promise<RunResult> => {
     const result: RunResult = {
       schemaVersion: 1,
       runId,
@@ -183,6 +179,7 @@ export async function executeTask(
       durationMs: Math.max(0, clock.monotonicMs() - startedMs),
     };
     if (parts.usage === undefined) delete result.usage;
+    if (parts.results === undefined) delete result.results;
     log.write({ type: "run.end", status: result.status, outcome: result.outcome });
     await store.updateRun(runId, {
       status: result.status,
@@ -232,7 +229,6 @@ export async function executeTask(
 
     if (decision.action === "reject") return await finish(rejected(decision.reason));
     if (decision.action === "host") return await finish(toHost(null, decision.reason));
-    if (decision.mode === "fanout") return await finish(rejected("fanout not implemented yet"));
 
     const rc: RunContext = {
       deps,
@@ -250,6 +246,7 @@ export async function executeTask(
       signal: controller.signal,
       leaseWaitMs: opts.leaseWaitMs ?? DEFAULT_LEASE_WAIT_MS,
     };
+    if (decision.mode === "fanout") return await finish(await runFanout(rc, decision.targets));
     const reports: AttemptReport[] = [];
     for (const [i, target] of decision.targets.entries()) {
       if (controller.signal.aborted) break;
@@ -272,54 +269,4 @@ export async function executeTask(
     opts.signal?.removeEventListener("abort", onAbort);
     untrap();
   }
-}
-
-function rejected(summary: string) {
-  return {
-    status: "rejected",
-    outcome: "rejected",
-    summary,
-    externalAgent: null,
-    patch: null,
-  } as const;
-}
-
-function toHost(outcome: RunResult["outcome"], summary: string) {
-  return {
-    status: "returned_to_host",
-    outcome,
-    summary,
-    externalAgent: null,
-    patch: null,
-  } as const;
-}
-
-/**
- * The patch reported to the host: the real one; or, when every change was rejected by the filter,
- * an empty one (no file, `diffstat` "", `applies: false`: there is nothing to apply) that still
- * lists `rejectedPaths`, so the host sees what was dropped (spec §9 rule 6). No change at all: null.
- */
-export function reportedPatch(result: AttemptReport["patch"]): PatchInfo | null {
-  if (!result) return null;
-  if (!result.empty) return result.patch;
-  if (result.patch.rejectedPaths.length === 0) return null;
-  return { ...result.patch, diffstat: "", applies: false };
-}
-
-function completed(report: AttemptReport) {
-  const out = report.outcome as NonNullable<AttemptReport["outcome"]>;
-  const patch = reportedPatch(report.patch);
-  return {
-    status: "completed",
-    outcome: out.outcome,
-    summary: out.summary,
-    externalAgent: {
-      provider: report.adapterId ?? report.target.instance,
-      instance: report.target.instance,
-      model: report.target.model,
-      marker: EXTERNAL_AGENT_MARKER,
-    },
-    patch,
-    usage: out.usage,
-  } as const;
 }

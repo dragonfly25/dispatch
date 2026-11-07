@@ -2,12 +2,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { exitCodeForResult, renderRunResult } from "../../src/cli/commands/run.js";
+import { renderRunResult } from "../../src/cli/commands/run.js";
 import { ExitRequest } from "../../src/cli/exit.js";
 import { buildProgram, runCli } from "../../src/cli/program.js";
 import { ExitCode, type RunResult, RunResultSchema } from "../../src/core/contracts.js";
 import { QuotaReaderRegistry } from "../../src/quota/reader.js";
 import { ProbeCache } from "../../src/runner/lifecycle.js";
+import { exitCodeForResult } from "../../src/runner/result.js";
 import { probeResult } from "../fixtures/contracts.js";
 import {
   createFakes,
@@ -191,14 +192,14 @@ describe("dispatch run", () => {
     expect(r.err).toMatch(/codex.*disabled/);
   });
 
-  it("usage errors exit 2: missing task, both task flags, --detach not available yet", async () => {
+  it("usage errors exit 2: missing task, both task flags, --idempotency-key without --detach", async () => {
     const { run } = setup();
     expect((await run(["run"])).code).toBe(2);
     expect((await run(["run", "--task", "x", "--task-file", "y"])).code).toBe(2);
-    const detach = await run([...TASK, "--detach"]);
-    expect(detach.code).toBe(2);
-    expect(detach.err).toMatch(/--detach is not available yet/);
-    expect((await run(["run", "--help"])).out).not.toContain("--detach");
+    const key = await run([...TASK, "--idempotency-key", "k"]);
+    expect(key.code).toBe(2);
+    expect(key.err).toMatch(/--idempotency-key needs --detach/);
+    expect((await run(["run", "--help"])).out).toContain("--detach");
   });
 
   it("a recursion child is rejected: exit 3 and no CLI runs", async () => {

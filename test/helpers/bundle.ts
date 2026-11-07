@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "tsup";
@@ -7,9 +7,18 @@ import { build } from "tsup";
  * Bundles a helper entry from test/helpers into a temp directory as a self-contained ESM file
  * (dependencies inlined), so tests can run it with plain `node` and no TypeScript loader.
  * The caller removes `dir` afterwards.
+ *
+ * `opts.parent` places the temp directory elsewhere. With `opts.external` the npm dependencies
+ * stay external (some, like `yaml`, cannot be inlined into ESM); `parent` must then be inside the
+ * package so node resolves them from its `node_modules`.
  */
-export async function bundleHelper(name: string): Promise<{ dir: string; file: string }> {
-  const dir = mkdtempSync(join(tmpdir(), `dispatch-helper-${name}-`));
+export async function bundleHelper(
+  name: string,
+  opts: { parent?: string; external?: boolean } = {},
+): Promise<{ dir: string; file: string }> {
+  const parent = opts.parent ?? tmpdir();
+  mkdirSync(parent, { recursive: true });
+  const dir = mkdtempSync(join(parent, `dispatch-helper-${name}-`));
   await build({
     entry: { [name]: `test/helpers/${name}.ts` },
     outDir: dir,
@@ -17,7 +26,7 @@ export async function bundleHelper(name: string): Promise<{ dir: string; file: s
     outExtension: () => ({ js: ".mjs" }),
     platform: "node",
     target: "node22",
-    noExternal: [/.*/],
+    ...(opts.external ? { removeNodeProtocol: false } : { noExternal: [/.*/] }),
     silent: true,
     clean: false,
     dts: false,
