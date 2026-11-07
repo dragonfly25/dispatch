@@ -48,7 +48,8 @@ describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framewo
         .readLog({ cli: "codex", kind: "run" })
         .filter((c) => c.args.includes("--json"));
       expect(execs).toHaveLength(1);
-      expect(fakes.readLog({ cli: "claude" })).toEqual([]);
+      // Only the quota-free `claude -p /usage` read; never a claude run.
+      expect(fakes.readLog({ cli: "claude" }).map((c) => c.key)).toEqual(["usage"]);
     } finally {
       fakes.dispose();
       home.cleanup();

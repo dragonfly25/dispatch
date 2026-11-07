@@ -27,7 +27,7 @@ import { newRunId } from "../core/ids.js";
 import { detectHost, type HostDetection } from "../platform/host.js";
 import { DefaultQuotaProvider, type RunCostContext } from "../quota/provider.js";
 import type { QuotaReaderRegistry } from "../quota/reader.js";
-import { defaultReaders } from "../quota/readers/index.js";
+import { CLAUDE_USAGE_ID, defaultReaders } from "../quota/readers/index.js";
 import { ROUTER_VERSION } from "../router/index.js";
 import { ProcessSpawner } from "../runner/proc.js";
 import { SqliteStateStore } from "../state/store.js";
@@ -148,6 +148,8 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
           env: opts.env,
           reliability: { cacheMinutes: ctx.config.execution.quota.cacheMinutes },
           onObservation: (o) => ctx.quota.recordObservation(o),
+          claudeLlmFallback:
+            ctx.config.execution.quota.readers[CLAUDE_USAGE_ID]?.llm_fallback !== false,
         });
       return readers;
     },

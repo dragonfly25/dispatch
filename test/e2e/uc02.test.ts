@@ -134,9 +134,10 @@ describe("[UC2] automatic delegation from Claude Code", () => {
       codex?.windows.every((x) => x.reliability === "estimated" && x.source === "estimator"),
     ).toBe(true);
 
-    // Verifica 3: no `claude -p` call (the host's own provider is never invoked).
+    // Verifica 3: no `claude -p` call (the host's own provider is never invoked); only the
+    // quota-free `claude -p /usage` read of `status` may run.
     expect(w.fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
-    for (const call of w.fakes.readLog({ cli: "claude" })) {
+    for (const call of w.fakes.readLog({ cli: "claude" }).filter((c) => c.key !== "usage")) {
       expect(call.args).not.toContain("-p");
       expect(call.args).not.toContain("--print");
     }

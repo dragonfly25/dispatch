@@ -5,10 +5,13 @@ import { QuotaReaderRegistry } from "../reader.js";
 import type { ReliabilityConfig } from "../reliability.js";
 import { AgyUsageReader } from "./agy-usage.js";
 import { ClaudePassiveReader } from "./claude-passive.js";
+import { ClaudeUsageReader } from "./claude-usage.js";
 import { CodexAppServerReader } from "./codex-app-server.js";
 
 export * from "./agy-usage.js";
 export * from "./claude-passive.js";
+export * from "./claude-usage.js";
+export * from "./claude-usage-parse.js";
 export * from "./codex-app-server.js";
 export * from "./env.js";
 export * from "./errors.js";
@@ -16,7 +19,7 @@ export * from "./errors.js";
 /** Dependencies of {@link defaultReaders}. */
 export interface DefaultReadersOptions {
   clock: Clock;
-  /** Runs `agy`. */
+  /** Runs `agy` and `claude -p /usage`. */
   spawner: Spawner;
   /** Where the claude adapter's passive readings are stored (the quota core's store). */
   store: Pick<QuotaStore, "latestQuotaReadings">;
@@ -27,15 +30,26 @@ export interface DefaultReadersOptions {
   reliability?: Partial<ReliabilityConfig>;
   /** Wire to `QuotaProvider.recordObservation` so Codex exhaustion becomes an unavailability signal. */
   onObservation?: (observation: QuotaObservation) => void | Promise<void>;
+  /** Haiku fallback of the claude-usage reader (config `quota.readers.claude-usage.llm_fallback`, default true). */
+  claudeLlmFallback?: boolean;
 }
 
-/** Registry with claude-passive (claude), codex-app-server (codex) and agy-usage (antigravity). */
+/**
+ * Registry with claude-passive and claude-usage (claude), codex-app-server (codex) and agy-usage
+ * (antigravity). Per window kind the quota core keeps the reading with the latest `readAt`, so a
+ * fresh `/usage` reading wins over an older passive one.
+ */
 export function defaultReaders(options: DefaultReadersOptions): QuotaReaderRegistry {
   const { clock, spawner, store, version, env, reliability, onObservation } = options;
+  const llmFallback = options.claudeLlmFallback !== false;
   return new QuotaReaderRegistry()
     .register(
       "claude",
       new ClaudePassiveReader({ store, clock, ...(reliability ? { reliability } : {}) }),
+    )
+    .register(
+      "claude",
+      new ClaudeUsageReader({ spawner, clock, llmFallback, ...(env ? { env } : {}) }),
     )
     .register(
       "codex",

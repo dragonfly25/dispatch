@@ -9,6 +9,7 @@ import { adapterCapabilities } from "../../app/adapters.js";
 import type { AppContext } from "../../app/context.js";
 import { ExitCode, type Pool, type QuotaWindow } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import { INTERACTIVE_READER_TIMEOUT_MS } from "../../quota/provider.js";
 import { compareFromStore, renderCompare } from "../../shadow/index.js";
 import { formatLocal, formatRelative, formatWhen, parseDuration } from "../time.js";
 import { columns, meter, outUi, plainUi, type Status, type Ui } from "../ui.js";
@@ -42,7 +43,10 @@ export interface StatusRow {
   enabled: boolean;
   pool: Pool;
   plan: string | null;
-  /** The instance of the calling host: its interactive usage is not visible to Dispatch. */
+  /**
+   * The instance of the calling host. Its interactive usage is visible only through an account-wide
+   * reader (`claude-usage`); otherwise Dispatch sees just its own delegated runs.
+   */
   host: boolean;
   experimental: boolean;
   windows: StatusWindow[];
@@ -81,7 +85,10 @@ function toWindow(w: QuotaWindow): StatusWindow {
 export async function buildStatus(ctx: AppContext): Promise<StatusReport> {
   const all = ctx.config.execution.instances;
   const enabled = all.filter((i) => i.enabled);
-  const snap = await ctx.quota.snapshot(enabled, { hostInstanceId: ctx.host.self });
+  const snap = await ctx.quota.snapshot(enabled, {
+    hostInstanceId: ctx.host.self,
+    readerTimeoutMs: INTERACTIVE_READER_TIMEOUT_MS,
+  });
   const instances = all.map((inst): StatusRow => {
     const q = snap.instances[inst.id];
     const windows = (q?.windows ?? []).map(toWindow);
@@ -141,6 +148,8 @@ export interface StatusRenderOptions {
 }
 
 const METER_WIDTH = 10;
+/** Sources that read the whole account (interactive sessions included), not only Dispatch's runs. */
+const ACCOUNT_WIDE = /^(claude-usage|codex-app-server|agy-usage|manual)/;
 const FALLBACK = { soft: 50, hard: 20 };
 
 /** One aligned row per window: kind, meter, remaining %, reset, reliability, source. */
@@ -190,7 +199,11 @@ function instanceLines(
     ...(r.plan ? [`plan ${r.plan}`] : []),
     ...(r.experimental ? [ui.yellow("experimental")] : []),
   ].join("  ");
-  const lines = [r.host ? `${head}  ${ui.dim("(host — interactive usage not visible)")}` : head];
+  const accountWide = r.windows.some((w) => ACCOUNT_WIDE.test(w.source) && w.usedPct !== null);
+  const hostNote = accountWide
+    ? "(host — includes interactive usage)"
+    : "(host — interactive usage not visible)";
+  const lines = [r.host ? `${head}  ${ui.dim(hostNote)}` : head];
   if (!r.enabled) return [...lines, ui.dim("  disabled: not read")];
   if (r.unavailableUntil !== null) {
     lines.push(

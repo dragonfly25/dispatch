@@ -110,6 +110,11 @@ function classify() {
   // file has a "<cli>:help" key; otherwise it is a run, answered by the run scenarios as before.
   if (a.includes("--help") && loadScenarioFile()[`${cli}:help`] !== undefined) return sub("help");
   if (cli === "claude" && (a[0] === "plugin" || a[0] === "plugins")) return sub("plugin");
+  if (cli === "claude" && a.includes("-p") && a.includes("/usage")) return sub("usage");
+  if (cli === "claude" && a.includes("haiku") && a[a.indexOf("--tools") + 1] === "") {
+    const i = a.indexOf("--output-format");
+    if (i >= 0 && a[i + 1] === "json") return sub("usage-llm");
+  }
   if (cli === "codex") {
     if (a[0] === "login" && a[1] === "status") return sub("login");
     if (a[0] === "features" && a[1] === "list") return sub("features");
@@ -547,6 +552,53 @@ function agyUsage(cfg) {
   return { stdout: `${JSON.stringify(fixture)}\n` };
 }
 
+/** `claude -p /usage`: the recorded text, or a variant ("session", "changed_format", "unauthenticated"). */
+function claudeUsage(cfg) {
+  const variant = cfg.variant ?? "fixture";
+  if (variant === "unauthenticated") {
+    return { exitCode: 1, stderr: "Not logged in · Please run /login\n" };
+  }
+  const root = process.env.FAKE_FIXTURES_DIR ?? path.join(HERE, "..", "fixtures");
+  let text = fs.readFileSync(
+    path.join(root, "claude", FIXTURE_VERSION.claude, "usage.txt"),
+    "utf8",
+  );
+  if (variant === "session") {
+    text = text.replace(
+      "Current week (all models)",
+      "Current session: 12% used · resets 3:30pm (Europe/Tirane)\nCurrent week (all models)",
+    );
+  }
+  if (variant === "changed_format") {
+    text = text
+      .replace(
+        "Current week (all models): 34% used · resets",
+        "Current week (all models) — 34 percent, renews",
+      )
+      .replace(
+        "Current week (Fable): 8% used · resets",
+        "Current week (Fable) — 8 percent, renews",
+      );
+  }
+  return { stdout: text };
+}
+
+/** `claude -p --model haiku --tools ""` (the /usage fallback): a JSON result echoing a grounded reading. */
+function claudeUsageLlm() {
+  const windows = [
+    {
+      label: "week (all models)",
+      usedPercent: 34,
+      resetText: "Nov 11 at 10am",
+      timeZone: "Europe/Tirane",
+    },
+  ];
+  const result = JSON.stringify({ windows });
+  return {
+    stdout: `${JSON.stringify({ type: "result", subtype: "success", is_error: false, result })}\n`,
+  };
+}
+
 /** Flags listed by `--help` (`codex exec --help` for codex), short ones as the real CLI prints them: what the adapter probes and `doctor` look for. */
 const HELP_FLAGS = {
   claude: [
@@ -612,11 +664,16 @@ const defaults = {
     return { stdout: `${JSON.stringify({ models })}\n` };
   },
   plugin: () => ({ stdout: args.includes("list") && args.includes("--json") ? "[]\n" : "ok\n" }),
-  usage: agyUsage,
+  usage: (cfg) => (cli === "claude" ? claudeUsage(cfg) : agyUsage(cfg)),
+  "usage-llm": claudeUsageLlm,
 };
 
 async function runSubcommand(key, cfg) {
   if (key === "app-server") return runAppServer(cfg);
+  if (key === "usage-llm") {
+    const stdin = await readStdin(Number(cfg.stdinTimeoutMs ?? 1000));
+    writeLog("update", { stdin: truncate(stdin.toString("utf8")), stdinBytes: stdin.length });
+  }
   const base = defaults[key]?.(cfg) ?? {
     exitCode: 2,
     stderr: `fake-cli: unsupported subcommand ${cli} ${args.join(" ")}\n`,

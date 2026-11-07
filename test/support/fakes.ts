@@ -73,8 +73,13 @@ export interface FakeSubConfig {
   delayMs?: number;
   /** `codex login status`: false -> exit 1. */
   loggedIn?: boolean;
-  /** `agy -p=/usage` variants (default "fixture") or the `codex app-server` variants (default "ok"). */
-  variant?: "fixture" | "changed_format" | "unauthenticated" | AppServerVariant;
+  /**
+   * `agy -p=/usage` / `claude -p /usage` variants (default "fixture"; "session" is claude only) or
+   * the `codex app-server` variants (default "ok").
+   */
+  variant?: "fixture" | "session" | "changed_format" | "unauthenticated" | AppServerVariant;
+  /** `claude:usage-llm`: how long the fake waits for stdin (default 1000 ms). */
+  stdinTimeoutMs?: number;
   /** `agy /usage` (fixture variant): value for every bucket's remaining_fraction. */
   remainingFraction?: number;
   resetTime?: string;
@@ -105,6 +110,8 @@ export type FakeSubKey =
   | "agy:help"
   | "claude:version"
   | "claude:plugin"
+  | "claude:usage"
+  | "claude:usage-llm"
   | "codex:version"
   | "codex:login"
   | "codex:features"

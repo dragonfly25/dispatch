@@ -87,7 +87,7 @@ discloses to the user, so it must be true:
 | `cliRange` | Semver range of the CLI you have fixtures for | `>=2.1.301 <2.2` | `>=0.167.0 <0.168` | `>=1.5.2 <1.6` |
 | `streaming` | Output arrives line by line while it runs | yes | yes | yes |
 | `autonomy` | Levels you can **enforce** | read-only, worktree | read-only, worktree | read-only |
-| `quotaChannel` | `passive` (from the run's stream), `reader` (out-of-band), `passive+reader`, `none` | passive | reader | reader |
+| `quotaChannel` | `passive` (from the run's stream), `reader` (out-of-band), `passive+reader`, `none` | passive+reader | reader | reader |
 | `pool` | Billing pool: `subscription`, `api_credit`, `unknown` | subscription | subscription | subscription |
 | `experimental` | Off by default and flagged | no | no | yes |
 | `promptChannel` | `stdin` or `argv` | stdin | stdin | argv |
@@ -319,7 +319,7 @@ labels (`5h`, `7d`, `weekly`) must match the windows of the plan table in `src/q
 `ClaudePassiveReader` serves the latest stored reading as a `QuotaReader`. Copy that pair for a new
 passive channel.
 
-### A reader (codex, agy)
+### A reader (codex, agy, claude)
 
 A reader is a separate object, not part of the adapter, implementing `QuotaReader`
 (`src/quota/reader.ts`):

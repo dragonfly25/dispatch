@@ -14,6 +14,7 @@ import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import type { HostRegistry } from "../hosts/_framework/registry.js";
 import type { ResolveFs } from "../platform/resolve.js";
+import { INTERACTIVE_READER_TIMEOUT_MS } from "../quota/provider.js";
 import { fromHostLines } from "./host.js";
 import { type LiveTarget, needsReadOnly } from "./live.js";
 import {
@@ -115,6 +116,7 @@ async function quotaLines(
     const snapshot = await ctx.quota.snapshot(enabled, {
       hostInstanceId: ctx.host.self,
       fresh: true,
+      readerTimeoutMs: INTERACTIVE_READER_TIMEOUT_MS,
     });
     for (const inst of enabled) {
       out.set(inst.id, quotaLine(ctx, inst, snapshot, ctx.quota.readerHealth(inst.id)));

@@ -219,7 +219,7 @@ describe("claude adapter: capabilities", () => {
     expect(CLAUDE_CAPABILITIES).toMatchObject({
       id: "claude",
       cliRange: ">=2.1.301 <2.2",
-      quotaChannel: "passive",
+      quotaChannel: "passive+reader",
       promptChannel: "stdin",
       sandbox: "os",
       autonomy: ["read-only", "worktree"],

@@ -105,7 +105,8 @@ dispatch doctor
 `doctor` spends no quota. It checks the platform, launcher, config, repo trust, each provider CLI,
 the quota channel and the host integration; each warning has a `fix:` line. `dispatch status` then
 shows remaining quota per provider, its reset time and how far to trust it (`real`, `estimated`,
-`stale`, `unknown`). `--live` and `--from-host`: [docs/setup.md](docs/setup.md#dispatch-doctor).
+`stale`, `unknown`). Claude quota is read with the official, quota-free `claude -p /usage`, so it
+includes your own interactive sessions. `--live` and `--from-host`: [docs/setup.md](docs/setup.md#dispatch-doctor).
 
 ### 5. Delegate
 

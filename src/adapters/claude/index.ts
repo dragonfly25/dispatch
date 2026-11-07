@@ -33,7 +33,7 @@ export const CLAUDE_CAPABILITIES: AdapterCapabilities = {
   cliRange: ">=2.1.301 <2.2",
   streaming: true,
   autonomy: ["read-only", "worktree"],
-  quotaChannel: "passive",
+  quotaChannel: "passive+reader",
   pool: "subscription",
   experimental: false,
   promptChannel: "stdin",
