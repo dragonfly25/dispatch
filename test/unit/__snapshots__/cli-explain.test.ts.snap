@@ -1,0 +1,23 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`explain > [UC5] snapshot: the pin wins and every profile agrees 1`] = `
+"Dispatch explain (router 0.1.0, profile balance, preset mirror)
+Input: sha256 <hash>
+Task: task-1 | type refactor | autonomy worktree | paths 1
+Host: self none | session model -
+Requested model: (unspecified: balanced)
+Tier and effort:
+  + [mapping] tier:unspecified:balanced: tier balanced (unspecified model uses the configured tier)
+  + [mapping] effort:task: effort medium (default effort)
+Rules:
+  + [pin] migrations: host
+Candidates:
+  (none)
+Decision: host (single)
+Reason: host: pin migrations
+Other profiles:
+  off: host (single) | host: pin migrations
+  preserve: host (single) | host: pin migrations
+  specialize: host (single) | host: pin migrations
+"
+`;
