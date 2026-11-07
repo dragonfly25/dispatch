@@ -6,4 +6,6 @@ import type { HookHostTable } from "./run.js";
  * Those modules must import only node built-ins, types and `src/hook/cache.ts`, so the hook entry
  * stays within its 80 ms budget (no zod, no SQLite, no config loader).
  */
-export const HOOK_HOSTS: HookHostTable = {};
+export const HOOK_HOSTS: HookHostTable = {
+  "claude-code": async () => (await import("../hosts/claude-code/hook.js")).hookHandlers,
+};

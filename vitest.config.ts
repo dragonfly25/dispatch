@@ -39,6 +39,7 @@ export default defineConfig({
         "src/runner/proc.ts": { lines: 90, functions: 90, branches: 90, statements: 90 },
         "src/runner/env.ts": { lines: 90, functions: 90, branches: 90, statements: 90 },
         "src/runner/depth.ts": { lines: 90, functions: 90, branches: 90, statements: 90 },
+        "src/hosts/claude-code/**": { lines: 90, functions: 90, branches: 90, statements: 90 },
       },
     },
   },
