@@ -79,6 +79,8 @@ export function detachHandoff(h: Handoff): DetachHandoff {
     passthroughKey: h.passthroughKey,
     autoApply: h.autoApply,
     mcpServers: [...h.mcpServers],
+    web: h.web,
+    ...(h.webFetch === undefined ? {} : { webFetch: h.webFetch }),
   };
 }
 

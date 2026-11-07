@@ -50,7 +50,10 @@ export interface Handoff {
   autonomy: "read-only" | "worktree";
   /** MCP servers the agent's tools reference (all forwardable when the hook wrote the file). */
   mcpServers: string[];
+  /** The agent declares WebSearch or WebFetch (web forwarding was on when the hook wrote the file). */
   web: boolean;
+  /** The agent declares WebFetch. Absent (older handoffs): treated as true when `web` is. */
+  webFetch?: boolean;
   autoApply: boolean;
   /** {@link passthroughKey} of the original call. */
   passthroughKey: string;
@@ -117,6 +120,7 @@ function isHandoff(v: unknown): v is Handoff {
     Array.isArray(h.mcpServers) &&
     h.mcpServers.every(isStr) &&
     typeof h.web === "boolean" &&
+    (h.webFetch === undefined || typeof h.webFetch === "boolean") &&
     typeof h.autoApply === "boolean" &&
     isStr(h.passthroughKey)
   );

@@ -216,7 +216,9 @@ export function renderGlobalConfig(a: ResolvedAnswers): string {
       "Host integrations. hosts.claude-code.forward_mcp is a TRUST GRANT (SECURITY):",
       `"${FORWARD_MCP_GRANT}".`,
       `Only servers whose env/header values are \${VAR} references are forwarded, by variable name;`,
-      "a repo or flag can only turn it off. Also: hard (default true), intercept, and hosts.codex.hard.",
+      "a repo or flag can only turn it off. hosts.claude-code.forward_web (default true) gives agents",
+      "that use WebSearch/WebFetch web access when delegated; false keeps them on Claude.",
+      "Also: hard (default true), intercept, and hosts.codex.hard.",
     ])}\nhosts:\n  claude-code:\n    forward_mcp: ${a.forwardMcp}`,
     ...OTHER_OPTIONS.map((o) => `${comment(o.explain)}\n${comment(o.example)}`),
   ];

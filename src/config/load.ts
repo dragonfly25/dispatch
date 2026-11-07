@@ -83,6 +83,8 @@ export interface ExecutionConfig {
   retentionDays?: number;
   /** MCP forwarding consent after tighten-only merging (absent: false). */
   forwardMcp?: boolean;
+  /** Web forwarding after tighten-only merging (absent: true, the default). */
+  forwardWeb?: boolean;
 }
 
 export interface LoadOptions {
@@ -331,6 +333,7 @@ export function loadEffectiveConfig(opts: LoadOptions): EffectiveConfig {
     quota: { cacheMinutes: s.quota.cache_minutes, readers: s.quota.readers },
     retentionDays: s.retention_days,
     forwardMcp: s.forward_mcp,
+    forwardWeb: s.forward_web,
   };
 
   return {

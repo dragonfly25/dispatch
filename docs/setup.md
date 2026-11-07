@@ -126,7 +126,7 @@ Run `dispatch doctor`; each line has a status and a `fix:`. The usual ones:
 | `<cli> was not found on PATH` | Install the CLI, or set `providers.<id>.binary` in `~/.dispatch/config.yaml`. |
 | `not logged in` / `login state is unknown` | `codex login`; for `claude` and `agy` run the CLI once interactively. `doctor --live` proves the login. |
 | `claude-code.permission-rule` warns | Add the printed `Bash(... run:*)`, `Bash(... wait:*)` and `Bash(... apply:*)` rules to `permissions.allow`. |
-| One of your sub-agents is not delegated | `dispatch doctor` (`claude-code.hard-mode`) lists each agent of the current repo and why it stays on Claude (desktop browser, web tools, an MCP server that is not forwardable, an unknown tool, instructions over 32 KB, or `intercept`/`exclude`). |
+| One of your sub-agents is not delegated | `dispatch doctor` (`claude-code.hard-mode`) lists each agent of the current repo and why it stays on Claude (desktop browser, web tools with `forward_web: false`, an MCP server that is not forwardable, an unknown tool, instructions over 32 KB, or `intercept`/`exclude`). |
 | `claude-code.hard-mode` warns (no PreToolUse hook, or the cache does not say) | The plugin predates hard mode: `dispatch setup --refresh`, then restart Claude Code sessions. |
 | `CODEX_SANDBOX` set (`host.codex-rule`) | The Codex rule did not match. Use the absolute launcher path and a single-quoted task, run `dispatch setup --refresh`, and approve the Dispatch hooks in Codex `/hooks`. |
 | `quota channel is broken` | A provider changed its format. Routing continues on estimates and `status` shows `stale`; update Dispatch, or set `quota.readers.<id>.enabled: false`. |

@@ -185,10 +185,18 @@ Taken during execution:
   a handoff: the relay runs `dispatch apply <runId>`, which applies a successful, clean, unreviewed-
   flag-free patch to the working tree (no index, no commit), as approved by the owner
   (`hosts.claude-code.auto_apply`, default true, global only). The Codex host does not auto-apply.
-- **Deviation (web tools):** agents with `WebFetch`/`WebSearch` stay on Claude. `codex exec` 0.167
-  can search the web (`-c web_search="live"`, what the top-level `--search` flag sets), but the
-  frozen `Task`/`BuildInvocationArgs` contracts carry no web request and `network: off` is the
-  default security key; wiring it needs an ADR.
+- **Web access for delegated custom agents** (owner-approved, zero-touch): agents whose `tools:`
+  list `WebSearch`/`WebFetch` are now delegated (agents that also use `Claude_Browser` still stay).
+  The handoff carries `web` and `webFetch`; `executeTask` takes `web: "search" | "fetch"` and, like
+  MCP forwarding, restricts routing before `decide` to instances that can give it (codex, claude;
+  never antigravity), returning to the host when none can or when `hosts.claude-code.forward_web`
+  (default true, global, tighten-only) is off. The frozen contracts are untouched:
+  `BuildInvocationWithWeb` is a structural superset of the invocation args. Codex gets
+  `-c web_search="cached"` (WebSearch) or `"live"` (WebFetch); claude gets the tools in `--tools`
+  and `--allowedTools`. Verified live once each (codex 0.167 `open_page` on a given URL while shell
+  `curl` stayed offline; claude 2.1.301 `--safe-mode` used both tools): `docs/spikes/web-access.md`.
+  The `network` key still does not govern this (the shell sandbox network is unchanged); runs
+  without a web request keep codex's default argv. Threat model: docs/security.md T14.
 - **Per-agent MCP forwarding** (owner-approved, one-time consent): `src/mcp/` reads the user's
   Claude MCP config read-only (local > `.mcp.json` (approved only) > user scope) and decides which
   servers are forwardable (pure `${VAR}` env/header references only; values never copied).

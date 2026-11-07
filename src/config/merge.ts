@@ -67,6 +67,12 @@ export interface Settings {
    * flag `forward_mcp: false` turns it off, never on.
    */
   forward_mcp: boolean;
+  /**
+   * Web access for delegated agents that declare WebSearch/WebFetch: global
+   * `hosts.claude-code.forward_web` (default true); a repo or flag `forward_web: false` turns it
+   * off, never on.
+   */
+  forward_web: boolean;
 }
 
 export type Provenance = Record<keyof Settings, Source>;
@@ -140,6 +146,7 @@ function applyGlobal(s: Settings, g: GlobalConfigFile, prov: Provenance, issues:
   set("max_depth", g.max_depth);
   set("retention_days", g.retention_days);
   set("forward_mcp", g.hosts?.["claude-code"]?.forward_mcp);
+  set("forward_web", g.hosts?.["claude-code"]?.forward_web);
   set("network", g.network);
   if (g.worktree) set("worktree", { ...s.worktree, ...defined(g.worktree) });
   if (g.quota) {
@@ -251,6 +258,13 @@ function applyOverlay(
     else {
       s.forward_mcp = o.forward_mcp;
       accept("forward_mcp");
+    }
+  }
+  if (o.forward_web !== undefined) {
+    if (o.forward_web && !s.forward_web) loosen("forward_web", "enables web forwarding");
+    else {
+      s.forward_web = o.forward_web;
+      accept("forward_web");
     }
   }
   const wt = o.worktree;

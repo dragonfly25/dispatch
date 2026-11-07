@@ -32,6 +32,7 @@ import type { WorktreeCreateOptions, WorktreeHandle } from "../sandbox/worktree.
 import { recordDecisionWithShadow } from "../shadow/record.js";
 import { redact } from "../state/redact.js";
 import type { SqliteStateStore } from "../state/store.js";
+import type { WebAccess } from "../web/index.js";
 import { type AttemptReport, type RunContext, runAttempt } from "./attempt.js";
 import { assertDepthAllowed, RecursionRejectedError } from "./depth.js";
 import { runFanout } from "./fanout.js";
@@ -44,6 +45,7 @@ import {
 import { type McpResolver, planMcp } from "./mcp.js";
 import { completed, type ResultParts, rejected, toHost, truncate } from "./result.js";
 import { RunLog, resolveRunDir } from "./runlog.js";
+import { planWeb } from "./web.js";
 
 export { MAX_SUMMARY_CHARS, reportedPatch } from "./result.js";
 /** Default bounded wait for a concurrency slot on the last target. */
@@ -115,6 +117,12 @@ export interface ExecuteOptions {
    * a server is not forwardable or no provider can host them, the task returns to the host.
    */
   mcpServers?: readonly string[];
+  /**
+   * Web access the delegated agent needs (a handoff of an agent that declares `WebSearch` /
+   * `WebFetch`). Only instances that can give it are routed to; when web forwarding is off or none
+   * can, the task returns to the host.
+   */
+  web?: WebAccess;
 }
 
 /** Host id (from env detection) → adapter id of the instance it runs on. */
@@ -236,6 +244,19 @@ export async function executeTask(
       });
     }
 
+    const web = planWeb({
+      wanted: opts.web,
+      forwardWeb: exec.forwardWeb !== false,
+      routing: mcp.routing,
+    });
+    if (!web.ok) {
+      log.write({ type: "web.unavailable", reason: web.reason });
+      return await finish(toHost(null, web.reason));
+    }
+    if (web.web !== undefined) {
+      log.write({ type: "web.forward", access: web.web, excludedInstances: web.excluded });
+    }
+
     const input: DecisionInput = {
       task,
       host: {
@@ -243,7 +264,7 @@ export async function executeTask(
         ...(opts.sessionModel ? { sessionModel: opts.sessionModel } : {}),
         depth,
       },
-      routing: mcp.routing as unknown as Record<string, unknown>,
+      routing: web.routing as unknown as Record<string, unknown>,
       quota: await deps.quota.snapshot(exec.instances),
       sessionHistory:
         deps.sessionHistory && deps.host.sessionId
@@ -282,6 +303,7 @@ export async function executeTask(
       signal: controller.signal,
       leaseWaitMs: opts.leaseWaitMs ?? DEFAULT_LEASE_WAIT_MS,
       mcpServers: mcp.servers,
+      ...(web.web === undefined ? {} : { web: web.web }),
     };
     if (decision.mode === "fanout") return await finish(await runFanout(rc, decision.targets));
     const reports: AttemptReport[] = [];

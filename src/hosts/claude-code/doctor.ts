@@ -6,7 +6,7 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
-import { forwardableMcpFor, readHookCache } from "../../hook/cache.js";
+import { forwardableMcpFor, forwardWebFor, readHookCache } from "../../hook/cache.js";
 import { listMcpServers } from "../../mcp/resolve.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { createCommandRunner } from "../../runner/command.js";
@@ -349,11 +349,15 @@ export function agentReport(
     if (!interceptable(a.name, list, exclude)) {
       return `${where}: stays on Claude (not in hosts.claude-code.intercept, or excluded)`;
     }
-    const v = eligibility(a.def, { forwardableMcp: forwardableMcpFor(cache, cwd) });
+    const v = eligibility(a.def, {
+      forwardableMcp: forwardableMcpFor(cache, cwd),
+      webSupported: forwardWebFor(cache, cwd),
+    });
     const mcp =
       v.eligible && v.mcpServers.length > 0 ? `, MCP forwarded: ${v.mcpServers.join(", ")}` : "";
+    const web = v.eligible && v.web ? ", web" : "";
     return v.eligible
-      ? `${where}: delegated (${v.autonomy}${a.def.model ? `, model ${a.def.model}` : ""}${mcp})`
+      ? `${where}: delegated (${v.autonomy}${a.def.model ? `, model ${a.def.model}` : ""}${web}${mcp})`
       : `${where}: stays on Claude (${v.reason})`;
   });
   return `\nyour sub-agents here:\n${lines.map((l) => `  ${l}`).join("\n")}`;

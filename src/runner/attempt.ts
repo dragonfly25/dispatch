@@ -12,11 +12,11 @@ import type {
   DecisionTarget,
   Task,
 } from "../core/contracts.js";
-import type { BuildInvocationWithMcp } from "../mcp/forward.js";
 import type { McpServer } from "../mcp/resolve.js";
 import { ingestClaudeObservations } from "../quota/readers/claude-passive.js";
 import { buildPatch, type PatchResult } from "../sandbox/patch.js";
 import type { WorktreeHandle } from "../sandbox/worktree.js";
+import type { BuildInvocationWithWeb, WebAccess } from "../web/index.js";
 import { buildChildEnv } from "./env.js";
 import { acquireLease, holdLease } from "./lease.js";
 import type { ProbeCache } from "./lifecycle.js";
@@ -47,6 +47,8 @@ export interface RunContext {
   leaseWaitMs: number;
   /** MCP servers forwarded to the child (already re-resolved; routing only picked capable hosts). */
   mcpServers?: readonly McpServer[];
+  /** Web access given to the child (routing only picked instances that can give it). */
+  web?: WebAccess;
 }
 
 /** What one attempt produced. `outcome` is null when the target was skipped before spawning. */
@@ -185,7 +187,7 @@ export async function runAttempt(
     rc.secrets.push(...withheld);
     deps.addSecrets?.(withheld);
     const worktree = await realpath(wt.path);
-    const args: BuildInvocationWithMcp = {
+    const args: BuildInvocationWithWeb = {
       task,
       target,
       autonomy,
@@ -196,6 +198,7 @@ export async function runAttempt(
       probe,
       baseEnv: child.env,
       mcpServers,
+      ...(rc.web === undefined ? {} : { web: rc.web }),
     };
     const inv = adapter.buildInvocation(args);
     rc.log.write({ type: "attempt.start", attempt: index + 1, target, autonomy, worktree });

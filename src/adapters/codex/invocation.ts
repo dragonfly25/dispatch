@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import type { Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
-import type { BuildInvocationWithMcp } from "../../mcp/forward.js";
 import type { McpServer } from "../../mcp/resolve.js";
+import type { BuildInvocationWithWeb, WebAccess } from "../../web/index.js";
 
 /** Name of the file `codex exec -o` writes the final agent message to, inside `runDir`. */
 export const CODEX_OUTPUT_FILE = "last.txt";
@@ -127,13 +127,25 @@ export function mcpOverrides(servers: readonly McpServer[]): string[] {
 }
 
 /**
+ * The `web_search` mode for the requested web access (live-verified on 0.167, docs/spikes/
+ * web-access.md): `cached` (OpenAI's index, no live fetch) is enough for `WebSearch`; `WebFetch`
+ * must open a given URL, which needs `live`. The tool runs model-side: the shell sandbox's network
+ * is unchanged. No access: no override (codex's own default applies, as before).
+ */
+export function webOverride(web: WebAccess | undefined): string[] {
+  if (web === undefined) return [];
+  return ["-c", `web_search=${web === "fetch" ? '"live"' : '"cached"'}`];
+}
+
+/**
  * Builds the `codex exec` child command (pure). Prompt goes on stdin (trailing `-`).
  * `worktree` and `repoRoot` must be canonical (realpath) paths, since codex keys project trust
  * on them. `mcpServers` (optional) adds only those MCP servers ({@link mcpOverrides}); the user's
- * own MCP config stays ignored. Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
+ * own MCP config stays ignored. `web` (optional) turns on codex's web search ({@link webOverride}).
+ * Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
  * required isolation feature is unknown to the installed CLI (fail closed).
  */
-export function buildCodexInvocation(args: BuildInvocationWithMcp): Invocation {
+export function buildCodexInvocation(args: BuildInvocationWithWeb): Invocation {
   const { probe, autonomy, worktree, repoRoot, runDir, target, instance } = args;
   if (autonomy === "direct") {
     throw new DispatchError(
@@ -172,6 +184,7 @@ export function buildCodexInvocation(args: BuildInvocationWithMcp): Invocation {
     "-c",
     untrustedProjectsOverride([worktree, repoRoot]),
     ...mcpOverrides(args.mcpServers ?? []),
+    ...webOverride(args.web),
     "-C",
     worktree,
     "-m",
@@ -199,6 +212,7 @@ export function buildCodexInvocation(args: BuildInvocationWithMcp): Invocation {
     sideEffectGuards: [
       ...CODEX_SIDE_EFFECT_GUARDS,
       ...(args.mcpServers?.length ? ["codex-mcp-forwarded-only"] : []),
+      ...(args.web ? ["codex-web-model-side-only"] : []),
     ],
   };
 }

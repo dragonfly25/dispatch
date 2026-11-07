@@ -628,3 +628,48 @@ describe("MCP forwarding [SEC-mcp] [SEC-env]", () => {
     expect(fakes.readLog({ kind: "run" })).toEqual([]);
   });
 });
+
+describe("web access [UC2]", () => {
+  const browse = (deps: RunnerDeps, web: "search" | "fetch") =>
+    executeTask(deps, task(), { repoPath: repo?.dir ?? "", signals: null, leaseWaitMs: 0, web });
+
+  it("codex gets live web search for a fetching agent; the shell sandbox is unchanged", async () => {
+    const { deps, fakes } = setup({
+      scenarios: { codex: [{ scenario: "success_edit", file: "math.js", content: "x\n" }] },
+    });
+    const r = await browse(deps, "fetch");
+    valid(r);
+    expect(r).toMatchObject({ status: "completed", outcome: "success" });
+    const [call] = fakes.readLog({ cli: "codex", kind: "run" });
+    expect(call?.args).toContain('web_search="live"');
+    expect(call?.args[(call?.args.indexOf("-s") ?? 0) + 1]).toBe("workspace-write");
+    expect(readFileSync(r.log.path, "utf8")).toContain('"type":"web.forward"');
+  });
+
+  it("claude gets the web tools, pre-approved", async () => {
+    const { deps, fakes } = setup({
+      action: { type: "provider", instance: "claude" },
+      scenarios: { claude: [{ scenario: "success_edit", file: "math.js", content: "x\n" }] },
+    });
+    const r = await browse(deps, "search");
+    expect(r.externalAgent?.instance).toBe("claude");
+    const [call] = fakes.readLog({ cli: "claude", kind: "run" });
+    expect(call?.args[(call?.args.indexOf("--allowedTools") ?? 0) + 1]).toBe("WebSearch");
+  });
+
+  it("returns to host when web forwarding is off or no enabled provider can give web", async () => {
+    const off = setup({ exec: { forwardWeb: false } });
+    const r = await browse(off.deps, "search");
+    expect(r.status).toBe("returned_to_host");
+    expect(r.summary).toMatch(/web forwarding is off \(hosts.claude-code.forward_web\)/);
+    expect(off.fakes.readLog({ kind: "run" })).toEqual([]);
+    const agy = setup({
+      routing: { instances: makeConfig().instances.filter((i) => i.id === "agy") },
+      action: { type: "provider", instance: "agy" },
+    });
+    const r2 = await browse(agy.deps, "fetch");
+    expect(r2.status).toBe("returned_to_host");
+    expect(r2.summary).toMatch(/no enabled provider can give the agent web access/);
+    expect(agy.fakes.readLog({ kind: "run" })).toEqual([]);
+  });
+});

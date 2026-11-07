@@ -21,6 +21,7 @@ import type { HostDetection } from "../platform/host.js";
 import { canonicalJson } from "../router/canonical.js";
 import { repoRoot as gitRepoRoot } from "../sandbox/git.js";
 import type { SqliteStateStore } from "../state/store.js";
+import { withWeb } from "../web/index.js";
 import { type ExecuteOptions, executeTask, type RunnerDeps } from "./orchestrate.js";
 import { failedRun, toHost } from "./result.js";
 import { EVENTS_FILE, resolveRunDir } from "./runlog.js";
@@ -49,6 +50,10 @@ export interface DetachHandoff {
   autoApply: boolean;
   /** MCP servers the agent needs; the supervisor re-resolves and forwards them (names only). */
   mcpServers: string[];
+  /** The agent needs web access (see `webAccessOf`). Absent: none. */
+  web?: boolean;
+  /** The agent declares WebFetch (absent with `web`: treated as true). */
+  webFetch?: boolean;
 }
 
 /** What the supervisor needs to run the task (the content of {@link TASK_FILE}). */
@@ -270,6 +275,7 @@ export async function superviseRun(
       signals: null,
       ...(payload.sessionModel ? { sessionModel: payload.sessionModel } : {}),
       ...(payload.handoff?.mcpServers.length ? { mcpServers: payload.handoff.mcpServers } : {}),
+      ...withWeb(payload.handoff),
     };
     let result = await executeTask(runner, payload.task, opts);
     if (cancelled && result.outcome !== "success") {

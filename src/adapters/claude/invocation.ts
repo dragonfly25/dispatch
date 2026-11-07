@@ -1,7 +1,8 @@
 import { isAbsolute, join, normalize } from "node:path";
 import { ExitCode, type Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
-import { type BuildInvocationWithMcp, refuseMcp } from "../../mcp/forward.js";
+import { refuseMcp } from "../../mcp/forward.js";
+import type { BuildInvocationWithWeb, WebAccess } from "../../web/index.js";
 
 /** `--max-turns` for every child; generous because the runner's timeout is the real bound. */
 export const CLAUDE_MAX_TURNS = 50;
@@ -96,10 +97,21 @@ export function wrapPrompt(prompt: string): string {
 }
 
 /**
- * Builds the child command for one run. Pure: no filesystem or process access. Forwarded MCP
- * servers are refused: `--safe-mode` drops `--mcp-config` (verified live on 2.1.301).
+ * The built-in web tools for the requested access (live-verified on 2.1.301: a `--safe-mode` child
+ * uses them when listed in `--tools` and `--allowedTools`). `fetch` gives both tools, `search`
+ * only WebSearch.
  */
-export function buildClaudeInvocation(args: BuildInvocationWithMcp): Invocation {
+export function webTools(web: WebAccess | undefined): string[] {
+  if (web === undefined) return [];
+  return web === "fetch" ? ["WebSearch", "WebFetch"] : ["WebSearch"];
+}
+
+/**
+ * Builds the child command for one run. Pure: no filesystem or process access. Forwarded MCP
+ * servers are refused: `--safe-mode` drops `--mcp-config` (verified live on 2.1.301). Web access
+ * adds the web tools to `--tools` and pre-approves them with `--allowedTools` ({@link webTools}).
+ */
+export function buildClaudeInvocation(args: BuildInvocationWithWeb): Invocation {
   refuseMcp("claude", args);
   const { autonomy, probe, instance, baseEnv, target } = args;
   if (autonomy === "direct") {
@@ -134,17 +146,20 @@ export function buildClaudeInvocation(args: BuildInvocationWithMcp): Invocation 
   delete env.CLAUDE_CONFIG_DIR;
   if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
 
+  const web = webTools(args.web);
+  const tools = (base: string) => [base, ...web].join(",");
   const mode =
     autonomy === "read-only"
-      ? ["--permission-mode", "dontAsk", "--tools", "Read,Grep,Glob"]
+      ? ["--permission-mode", "dontAsk", "--tools", tools("Read,Grep,Glob")]
       : [
           "--permission-mode",
           "acceptEdits",
           "--tools",
-          "Read,Grep,Glob,Edit,Write,Bash",
+          tools("Read,Grep,Glob,Edit,Write,Bash"),
           "--disallowedTools",
           "Agent",
         ];
+  if (web.length > 0) mode.push("--allowedTools", web.join(","));
   const settings = JSON.stringify(childSettings(deniedPaths(home, configDir)));
   const argv = [
     "-p",
@@ -165,6 +180,7 @@ export function buildClaudeInvocation(args: BuildInvocationWithMcp): Invocation 
   ];
   const guards: string[] = [...CLAUDE_SIDE_EFFECT_GUARDS];
   if (autonomy === "worktree") guards.push("claude-no-agent-tool");
+  if (web.length > 0) guards.push("claude-web-tools-only");
   return {
     binary: probe.binaryPath,
     argv,

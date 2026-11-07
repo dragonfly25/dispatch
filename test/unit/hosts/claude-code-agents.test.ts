@@ -167,8 +167,25 @@ describe("agent eligibility [UC2]", () => {
     ["read-only agent", { tools: ["Read", "Grep", "Glob", "LS"] }, {}, { autonomy: "read-only" }],
     ["editor agent", { tools: ["Read", "Edit", "Bash(npm test)"] }, {}, { autonomy: "worktree" }],
     ["no tools list", { tools: null }, {}, { autonomy: "worktree", mcpServers: [] }],
-    ["web tools, no web", { tools: ["Read", "WebFetch"] }, {}, /WebFetch/],
-    ["web tools, web", { tools: ["WebSearch"] }, { webSupported: true }, { web: true }],
+    ["web tools, web forwarding off", { tools: ["Read", "WebFetch"] }, {}, /forward_web/],
+    [
+      "web search only, delegated with web",
+      { tools: ["Read", "WebSearch"] },
+      { webSupported: true },
+      { autonomy: "read-only", web: true, webFetch: false },
+    ],
+    [
+      "web fetch, delegated with web",
+      { tools: ["Read", "Write", "WebSearch", "WebFetch(domain:example.com)"] },
+      { webSupported: true },
+      { autonomy: "worktree", web: true, webFetch: true },
+    ],
+    [
+      "web + Claude_Browser stays on Claude",
+      { tools: ["WebSearch", "WebFetch", "mcp__Claude_Browser__navigate"] },
+      { webSupported: true },
+      /Claude_Browser/,
+    ],
     ["MCP not forwardable", { tools: ["mcp__github__get_issue"] }, {}, /github/],
     [
       "MCP forwardable",
@@ -295,6 +312,7 @@ describe("claude-code PreToolUse for custom agents [UC2][SEC-handoff]", () => {
       autonomy: "read-only",
       mcpServers: [],
       web: false,
+      webFetch: false,
       autoApply: true,
       passthroughKey: passthroughKey("reader", "Summarize src/"),
     });
@@ -339,6 +357,33 @@ describe("claude-code PreToolUse for custom agents [UC2][SEC-handoff]", () => {
     expect(loadHandoff(h.dispatchHome, id, NOW).mcpServers).toEqual(["github"]);
   });
 
+  it("a web agent is delegated with web; forward_web false (global or repo) keeps it [UC2]", () => {
+    const tools = "name: researcher\ntools: Read, WebSearch, WebFetch";
+    const w = world();
+    writeFileSync(join(w.agents, "researcher.md"), agentText(tools));
+    const o = out(preToolUseResponse(w.input("researcher"), w.env, NOW));
+    const id = /handoff ([0-9a-f]{32})/.exec(o.permissionDecisionReason)?.[1] as string;
+    expect(loadHandoff(h.dispatchHome, id, NOW)).toMatchObject({
+      autonomy: "read-only",
+      web: true,
+      webFetch: true,
+    });
+    const off = world({ ...HARD, forwardWeb: false });
+    writeFileSync(join(off.agents, "researcher.md"), agentText(tools));
+    expect(preToolUseResponse(off.input("researcher"), off.env, NOW)).toEqual(SILENT);
+    // A trusted repo whose merged config says `forward_web: false` keeps it on Claude too.
+    const repoOff = world();
+    writeHookCache(h.dispatchHome, {
+      version: 1,
+      writtenAt: "2026-11-07T00:00:00.000Z",
+      trustedRepos: [{ root: repoOff.repo, policyHash: null, forwardWeb: false }],
+      policy: { profile: "balance", hardMode: true, summary: "s", ...HARD },
+    });
+    writeFileSync(join(repoOff.agents, "researcher.md"), agentText(tools));
+    expect(preToolUseResponse(repoOff.input("researcher"), repoOff.env, NOW)).toEqual(SILENT);
+    expect(handoffs()).toEqual([]);
+  });
+
   it("a passthrough entry lets exactly one identical retry through", () => {
     const w = world();
     addPassthrough(h.dispatchHome, passthroughKey("reader", "Summarize src/"), NOW);
@@ -359,11 +404,17 @@ describe("claude-code PreToolUse for custom agents [UC2][SEC-handoff]", () => {
       policy: { profile: "p", hardMode: true, summary: "s", ...HARD, claudeExclude: ["x"] },
     };
     writeFileSync(join(w.agents, "x.md"), agentText("name: x"));
+    writeFileSync(join(w.agents, "web.md"), agentText("name: web\ntools: Read, WebSearch"));
     mkdirSync(join(w.repo, ".git"));
     const text = agentReport(cache, { HOME: join(h.home, "nobody") }, join(w.repo));
     expect(text).toContain("browser (project): stays on Claude (uses Claude_Browser)");
     expect(text).toContain("reader (project): delegated (read-only, model claude-sonnet-5-5)");
     expect(text).toContain("x (project): stays on Claude (not in hosts.claude-code.intercept");
+    expect(text).toContain("web (project): delegated (read-only, web)");
+    const off = { ...cache, policy: { ...cache.policy, forwardWeb: false } };
+    expect(agentReport(off, { HOME: join(h.home, "nobody") }, w.repo)).toContain(
+      "web (project): stays on Claude (uses WebSearch, and web forwarding is off",
+    );
     expect(agentReport(cache, {}, "/")).toBe("");
   });
 });

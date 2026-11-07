@@ -216,7 +216,7 @@ export function agentDirs(
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS", "TodoWrite", "NotebookRead"]);
 /** Tools that need a worktree (they write, or run commands). */
 const WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]);
-/** Web tools: delegable only when the routed provider can search the web. */
+/** Web tools: delegable when web forwarding is on; the runner routes to a provider that can give them. */
 const WEB_TOOLS = new Set(["WebFetch", "WebSearch"]);
 /** The desktop app's built-in browser: never forwarded. */
 const BROWSER_SERVER = "Claude_Browser";
@@ -225,7 +225,7 @@ const BROWSER_SERVER = "Claude_Browser";
 export interface EligibilityOptions {
   /** MCP servers that may be forwarded for this repo (`forwardableMcpFor(cache, root)`: empty without consent). */
   forwardableMcp?: readonly string[] | undefined;
-  /** True when the external agent can be given web access (WebFetch / WebSearch). */
+  /** Web forwarding is on (`hosts.claude-code.forward_web`, `forwardWebFor(cache, root)`). */
   webSupported?: boolean;
 }
 
@@ -235,7 +235,10 @@ export type Eligibility =
       eligible: true;
       autonomy: "read-only" | "worktree";
       mcpServers: string[];
+      /** The agent declares WebSearch or WebFetch. */
       web: boolean;
+      /** The agent declares WebFetch (opens given URLs: codex needs live search). */
+      webFetch: boolean;
     }
   | { eligible: false; reason: string };
 
@@ -248,7 +251,7 @@ export function mcpServerOf(tool: string): string | null {
 /**
  * Whether Dispatch may run `def` on another provider, and with which autonomy: only read tools →
  * read-only; edit tools or Bash (or no `tools:` list, meaning every tool) → worktree. Web tools
- * need `webSupported`; an MCP tool needs its server in `forwardableMcp` (the desktop browser,
+ * need `webSupported` (web forwarding on); an MCP tool needs its server in `forwardableMcp` (the desktop browser,
  * `Claude_Browser`, never); any other tool keeps the agent on Claude. Instructions over
  * {@link MAX_AGENT_BODY} keep it on Claude too.
  */
@@ -257,11 +260,12 @@ export function eligibility(def: AgentDefinition, opts: EligibilityOptions = {})
     return { eligible: false, reason: "instructions over 32 KB" };
   }
   if (def.tools === null)
-    return { eligible: true, autonomy: "worktree", mcpServers: [], web: false };
+    return { eligible: true, autonomy: "worktree", mcpServers: [], web: false, webFetch: false };
   const forwardable = new Set(opts.forwardableMcp ?? []);
   const servers = new Set<string>();
   let writes = false;
   let web = false;
+  let webFetch = false;
   for (const entry of def.tools) {
     const tool = entry.replace(/\(.*$/, "").trim();
     const server = mcpServerOf(tool);
@@ -276,10 +280,11 @@ export function eligibility(def: AgentDefinition, opts: EligibilityOptions = {})
       if (opts.webSupported !== true) {
         return {
           eligible: false,
-          reason: `uses ${tool}; the external agent cannot be given web access yet`,
+          reason: `uses ${tool}, and web forwarding is off (hosts.claude-code.forward_web)`,
         };
       }
       web = true;
+      if (tool === "WebFetch") webFetch = true;
     } else if (!READ_TOOLS.has(tool)) {
       return {
         eligible: false,
@@ -292,5 +297,6 @@ export function eligibility(def: AgentDefinition, opts: EligibilityOptions = {})
     autonomy: writes ? "worktree" : "read-only",
     mcpServers: [...servers].sort(),
     web,
+    webFetch,
   };
 }

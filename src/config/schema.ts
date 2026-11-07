@@ -346,6 +346,12 @@ export const GlobalConfigFileSchema = z
                 "SECURITY. Trust grant: forward the MCP servers an intercepted agent needs to the external agent that runs it (only servers whose env and header values are pure `$" +
                   "{VAR}` references; codex targets only). Asked by `dispatch setup`; default false. A repo or flag can only turn it off (`forward_mcp: false`).",
               ),
+            forward_web: z
+              .boolean()
+              .optional()
+              .describe(
+                "SECURITY. Give web access (codex web search, claude WebSearch/WebFetch) to the external agent that runs an intercepted agent whose `tools:` list WebSearch or WebFetch (default true; false keeps those agents on Claude). Never widens the shell sandbox network. A repo or flag can only turn it off (`forward_web: false`).",
+              ),
           })
           .strict()
           .optional()
@@ -384,6 +390,12 @@ const overlayShape = {
     .optional()
     .describe(
       "SECURITY. `false` turns MCP forwarding off here (global `hosts.claude-code.forward_mcp` turns it on; `true` cannot loosen it).",
+    ),
+  forward_web: z
+    .boolean()
+    .optional()
+    .describe(
+      "SECURITY. `false` turns web forwarding off here: agents that use WebSearch/WebFetch stay on Claude (global `hosts.claude-code.forward_web`, default true; `true` cannot loosen it).",
     ),
   ...securityKeys,
   ...ordinaryKeys,

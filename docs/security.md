@@ -340,7 +340,8 @@ Claude hard mode for custom agents (after v0.1.0) passes an agent's instructions
     malformed contents, and deletes the file once read. `gc` removes stale handoffs.
   - The agent's model, effort and autonomy are requests: routing, autonomy ceilings and every
     tighten-only security key still apply. Agents that need tools Dispatch cannot give the child
-    (desktop browser, web tools, non-forwardable MCP servers, unknown tools) are never delegated.
+    (desktop browser, non-forwardable MCP servers, unknown tools) are never delegated; web tools
+    only with `forward_web` on (T14).
   - `dispatch apply <runId>` applies only a run recorded from a handoff (0600 record under
     `~/.dispatch/handoff-runs/`, written by Dispatch itself) with `autoApply`, with
     `hosts.claude-code.auto_apply` not false in the global config, status `completed` and outcome
@@ -412,6 +413,43 @@ forwarded server can do (open issues, query a database, post messages), the chil
   agent. Literal secrets in `args` (e.g. `--token abc`) are not detected; keep secrets in `env`
   references. Doctor `claude-code.mcp-forwarding` lists, per repo, what would be forwarded.
 
+### T14. A delegated agent with web access is steered by web content or leaks repo data (A2, A4; after v0.1.0)
+
+Context: a custom agent whose `tools:` list `WebSearch` or `WebFetch` is delegated with web access
+(on by default, owner decision): codex gets its model-side web search (`web_search="cached"` for
+`WebSearch`, `"live"` for `WebFetch`), a claude instance gets the built-in `WebSearch`/`WebFetch`
+tools. Web pages are attacker-controlled text read by an unsupervised agent (prompt injection), and
+search queries or fetched URLs can carry repository content to third parties.
+
+- **Mitigation.**
+  - **Only what the agent declared.** Web access is given only to a handoff of an agent that lists
+    `WebSearch` or `WebFetch` itself; `WebSearch` alone gets the indexed (`cached`) codex mode, not
+    live fetching. Agents that also use the desktop browser (`mcp__Claude_Browser__*`) still stay
+    on Claude. General-purpose and `dispatch run` tasks get no web flag (argv unchanged).
+  - **Switch.** `hosts.claude-code.forward_web` (default true, no setup question; mentioned in the
+    setup trust-grant text) is global and tighten-only: a repo or flag `forward_web: false` turns
+    it off, `true` is ignored and reported as an error. Off → those agents stay on Claude; the
+    runner re-checks the merged value and returns the task to the host.
+  - **Shell network unchanged.** Codex's web tool runs on OpenAI's side; the live spike shows a
+    shell `curl` in the same run still has no network. Claude's web tools run in the claude
+    process; its sandbox settings and credential deny rules are unchanged. Dispatch never adds a
+    shell network override.
+  - **Same boundaries as any delegated run.** Read-only or worktree autonomy as the agent's tools
+    imply, the patch filter (T3), the untrusted-output marker (T10), and the auto-apply rules of
+    T12 (clean patch, no rejected path, no review needed) are unchanged.
+  - **Capable targets only.** The router disables instances that cannot give web access
+    (antigravity) before `decide`; none left → back to the host with the reason. Adapters refuse
+    a web run they cannot serve (fail closed).
+- **Proof.** `test/unit/web/access.test.ts` (golden codex and claude argv with and without web,
+  agy refusal, router hint, hook cache switch), `test/unit/runner-orchestrate.test.ts` "web
+  access", `test/unit/web-handoff-e2e.test.ts` `[UC2]` (hook → handoff → `run --handoff`, in
+  process and detached → fake codex), `test/unit/config/merge.test.ts` `[SEC-flags]`,
+  `test/unit/hosts/claude-code-agents.test.ts`. Live spikes: `docs/spikes/web-access.md`.
+- **Residual risk.** Web content can still steer the child within its autonomy (e.g. a worktree
+  agent writes injected content that auto-apply then applies, if the patch is otherwise clean),
+  and a query or fetched URL can disclose repository content to the search provider or a website.
+  Turn `forward_web` off for sensitive repositories.
+
 ## 5. Accepted risks and disclosures
 
 - **MCP forwarding is a trust grant** (T13): the external agent can use the forwarded servers'
@@ -428,6 +466,8 @@ forwarded server can do (open issues, query a database, post messages), the chil
   discloses it. Each instance's billing pool appears in `status`, and there are no technical
   workarounds.
 - **Network is unrestricted** for children (spec §9.5).
+- **Web access for delegated custom agents** (T14), on by default for agents that declare
+  `WebSearch`/`WebFetch`; `hosts.claude-code.forward_web: false` turns it off.
 - **Redaction is best-effort** (T6), and patches are not redacted.
 
 ## 6. Running the suite
