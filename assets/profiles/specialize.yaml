@@ -1,0 +1,13 @@
+# Built-in profile "specialize": preferred provider per task type, with quota fallback.
+# TODO(WP9): complete the shipped profiles.
+version: 1
+description: Task type -> preferred provider, falling back on quota.
+rules:
+  - id: specialize-tests
+    match: { task_type: [test] }
+    action: { type: fallback, instances: [codex, claude] }
+  - id: specialize-review
+    match: { task_type: [review] }
+    action: { type: fallback, instances: [claude, codex] }
+  - id: specialize-default
+    action: { type: fallback, instances: [codex, claude], strategy: most_remaining }

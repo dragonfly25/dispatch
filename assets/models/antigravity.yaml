@@ -1,0 +1,27 @@
+# Model table of the antigravity adapter (experimental, read-only).
+# TODO(WP9): placeholder values; verify model names, efforts and costs.
+version: 1
+models:
+  antigravity:
+    tiers:
+      fast:
+        {
+          model: gemini-3.8-flash-low,
+          effort: { low: low, medium: medium, high: high },
+          relative_cost: 1,
+        }
+      balanced:
+        {
+          model: gemini-3.8-flash,
+          effort: { low: low, medium: medium, high: high },
+          relative_cost: 2,
+        }
+      max:
+        {
+          model: gemini-3.8-pro,
+          effort: { low: low, medium: medium, high: high },
+          relative_cost: 5,
+        }
+    reverse:
+      - { pattern: "*flash*", tier: fast }
+      - { pattern: "*pro*", tier: max }

@@ -1,0 +1,6 @@
+# Built-in profile "off": no delegation; useful as a baseline and for debugging.
+version: 1
+description: Everything stays on the host.
+rules:
+  - id: off
+    action: { type: host }
