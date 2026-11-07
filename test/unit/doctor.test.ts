@@ -77,8 +77,34 @@ describe("doctor: checks", () => {
     expect(code).toBe(0);
     expect(out).toMatch(/^dispatch doctor\n\nsystem\n/);
     expect(out).toContain("\nclaude\n");
-    expect(out).toMatch(/warn\s+claude\.login: .*\n\s+fix: run `claude` once interactively/);
-    expect(out).toMatch(/Doctor OK: \d+ ok, \d+ warning\(s\), 0 failure\(s\)/);
+    // One compact line per check; the fix follows only warnings and failures.
+    expect(out).toMatch(
+      /\n {2}warn +claude\.login +\S.*\n(?: {6}.*\n)* {6}fix: run `claude` once interactively/,
+    );
+    expect(out).toMatch(/\n {2}ok +launcher +\S/);
+    expect(out).not.toMatch(/\n {2}ok .*\n {6}fix:/);
+    expect(out).toMatch(/Doctor OK: \d+ ok, \d+ warnings?, 0 failures\n$/);
+    expect(out).not.toContain("\x1b[");
+  });
+
+  it("--verbose also shows the details of ok checks; paths under HOME are shown as ~/", async () => {
+    h = doctorHarness();
+    const { out } = await h.run(["doctor", "--verbose"]);
+    expect(out).toMatch(/\n {2}ok +launcher +~\/\.dispatch\/bin\/dispatch/);
+    expect(out).not.toContain(`${h.home.home}/`);
+  });
+
+  it("on a terminal: symbols, colors and a ✔/⚠/✖ summary; --json stays byte-identical", async () => {
+    h = doctorHarness();
+    const { code, out } = await h.run(["doctor"], { decorate: true });
+    expect(code).toBe(0);
+    expect(out).toContain("\x1b[");
+    expect(out).toContain("✔");
+    expect(out).toMatch(/✔ \d+ ok.*·.*⚠ \d+ warnings?.*·.*✖ 0 failures/);
+    const plain = await h.run(["doctor", "--json"]);
+    const decorated = await h.run(["doctor", "--json"], { decorate: true });
+    expect(decorated.out).toBe(plain.out);
+    expect(decorated.out).not.toContain("\x1b[");
   });
 
   it("a missing binary fails that instance only, with a fix, and exits 4", async () => {
@@ -579,7 +605,7 @@ describe("doctor --live", () => {
       doctor: { interactive: true, ask: answer("y") },
     });
     expect(yes.code).toBe(0);
-    expect(yes.out).toMatch(/ok\s+live\.codex: codex: produced a patch adding only DISPATCH_OK/);
+    expect(yes.out).toMatch(/ok\s+live\.codex\s+codex: produced a patch adding only DISPATCH_OK/);
     expect(questions).toEqual(["Run it? [y/N] ", "Run it? [y/N] "]);
   }, 60_000);
 

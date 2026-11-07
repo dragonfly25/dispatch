@@ -59,7 +59,7 @@ function setup(o: Setup = {}) {
       features: ["hooks", "plugins", "apps", "memories"],
     });
   }
-  const run = async (args: string[], extraEnv: Record<string, string> = {}) => {
+  const run = async (args: string[], extraEnv: Record<string, string> = {}, decorate = false) => {
     const env = { ...base, ...extraEnv };
     let out = "";
     let err = "";
@@ -70,6 +70,7 @@ function setup(o: Setup = {}) {
       err: (t: string) => {
         err += t;
       },
+      ...(decorate ? { decorate: { out: true, err: true } } : {}),
     };
     const program = buildProgram(
       io,
@@ -109,6 +110,22 @@ describe("dispatch run", () => {
       input: { host: { self: string | null } };
     };
     expect(input.input.host.self).toBeNull();
+  });
+
+  it("[UC10] on a terminal: a progress spinner on stderr and a summary block; --json is untouched", async () => {
+    const { run } = setup();
+    const tty = await run(TASK, {}, true);
+    expect(tty.code).toBe(0);
+    expect(tty.err).toMatch(/routing · starting/);
+    expect(tty.err).toMatch(/codex · /);
+    expect(tty.err.endsWith("\r\x1b[K")).toBe(true);
+    expect(tty.out).toContain("✔");
+    expect(tty.out).toContain("applies: yes");
+    expect(tty.out).toContain("EXTERNAL AGENT OUTPUT (untrusted");
+    const json = await run([...TASK, "--json"], {}, true);
+    expect(json.err).toBe("");
+    expect(json.out).not.toContain("\x1b[");
+    expect(RunResultSchema.safeParse(JSON.parse(json.out)).success).toBe(true);
   });
 
   it("[SEC-flags] a config error (unknown profile) stops the run with exit 2 before spawning", async () => {

@@ -57,7 +57,12 @@ export interface DoctorHarness {
   /** Runs `dispatch <args>`; `opts.cwd` defaults to the temp HOME. */
   run(
     args: string[],
-    opts?: { cwd?: string; env?: Record<string, string>; doctor?: DoctorExtras },
+    opts?: {
+      cwd?: string;
+      env?: Record<string, string>;
+      doctor?: DoctorExtras;
+      decorate?: boolean;
+    },
   ): Promise<{ code: number; out: string; err: string }>;
   /** Runs `doctor --json ...` and parses the report. */
   report(
@@ -113,6 +118,7 @@ export function doctorHarness(
       err: (t: string) => {
         err += t;
       },
+      ...(o.decorate ? { decorate: { out: true, err: true } } : {}),
     };
     const allEnv = { ...env, ...o.env };
     const program = buildProgram(

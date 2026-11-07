@@ -67,7 +67,10 @@ export function opsHarness(opts: OpsOptions = {}) {
       }
       return seedStore;
     },
-    async run(args: string[], runOpts: { cwd?: string; env?: Record<string, string> } = {}) {
+    async run(
+      args: string[],
+      runOpts: { cwd?: string; env?: Record<string, string>; decorate?: boolean } = {},
+    ) {
       const env = { ...sb.env, ...runOpts.env };
       let out = "";
       let err = "";
@@ -78,6 +81,7 @@ export function opsHarness(opts: OpsOptions = {}) {
         err: (t: string) => {
           err += t;
         },
+        ...(runOpts.decorate ? { decorate: { out: true, err: true } } : {}),
       };
       const program = buildProgram(
         io,

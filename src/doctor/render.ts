@@ -1,28 +1,72 @@
 /** Text rendering of doctor lines. */
+import { columns, padVisible, plainUi, tildifyText, type Ui } from "../cli/ui.js";
 import { type DoctorLine, type DoctorReport, summarize } from "./types.js";
 
-const MARK = { ok: "ok  ", warn: "warn", fail: "FAIL" } as const;
+/** Presentation options of {@link renderLines}. */
+export interface RenderOptions {
+  /** Colors and symbols (default: plain text). */
+  ui?: Ui;
+  /** Show the detail and fix of every check, not only of warnings and failures. */
+  verbose?: boolean;
+  /** Home directory, shown as `~` in paths. */
+  home?: string | undefined;
+}
 
-/** Renders `lines` grouped by section (in order of first appearance), each with its fix. */
-export function renderLines(lines: readonly DoctorLine[]): string {
+const INDENT = "      ";
+
+/**
+ * Renders `lines` grouped by section (in order of first appearance): one compact line per check
+ * (symbol, id, first line of the message). The rest of the message and the fix follow only for
+ * warnings and failures, or for every check with `verbose`.
+ */
+export function renderLines(lines: readonly DoctorLine[], opts: RenderOptions = {}): string {
+  const ui = opts.ui ?? plainUi;
   const sections: string[] = [];
   for (const l of lines) if (!sections.includes(l.section)) sections.push(l.section);
   let out = "";
   for (const section of sections) {
-    out += `\n${section}\n`;
-    for (const l of lines.filter((x) => x.section === section)) {
-      const body = l.message.replaceAll("\n", "\n            ");
-      out += `  ${MARK[l.status]}  ${l.id}: ${body}\n`;
-      if (l.fix) out += `            fix: ${l.fix}\n`;
-    }
+    out += `\n${ui.bold(section)}\n`;
+    const group = lines.filter((x) => x.section === section);
+    const heads = columns(
+      group.map((l) => {
+        const [first = ""] = tildifyText(l.message, opts.home).split("\n");
+        return [
+          `  ${padVisible(ui.mark(l.status), ui.enabled ? 1 : 4)}`,
+          l.status === "ok" ? l.id : ui.tone(l.status, l.id),
+          first,
+        ];
+      }),
+    );
+    group.forEach((l, i) => {
+      out += `${heads[i]}\n`;
+      if (l.status === "ok" && !opts.verbose) return;
+      const rest = tildifyText(l.message, opts.home).split("\n").slice(1);
+      for (const d of rest) out += `${INDENT}${ui.dim(d)}\n`;
+      if (l.fix) out += `${INDENT}${ui.cyan("fix:")} ${tildifyText(l.fix, opts.home)}\n`;
+    });
   }
   return out;
 }
 
-/** The closing summary line. */
-export function renderSummary(lines: readonly DoctorLine[]): string {
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** The closing summary line: `✔ N ok · ⚠ N warnings · ✖ N failures`. */
+export function renderSummary(lines: readonly DoctorLine[], ui: Ui = plainUi): string {
   const s = summarize(lines);
-  return `\n${s.fail === 0 ? "Doctor OK" : "Doctor found problems"}: ${s.ok} ok, ${s.warn} warning(s), ${s.fail} failure(s)\n`;
+  if (ui.enabled) {
+    const parts = [
+      ui.tone("ok", `${ui.sym.ok} ${s.ok} ok`),
+      (s.warn > 0 ? (t: string) => ui.tone("warn", t) : ui.dim)(
+        `${ui.sym.warn} ${plural(s.warn, "warning")}`,
+      ),
+      (s.fail > 0 ? (t: string) => ui.tone("fail", t) : ui.dim)(
+        `${ui.sym.fail} ${plural(s.fail, "failure")}`,
+      ),
+    ];
+    return `\n${parts.join(ui.dim(" · "))}\n`;
+  }
+  const head = s.fail === 0 ? "Doctor OK" : "Doctor found problems";
+  return `\n${head}: ${s.ok} ok, ${plural(s.warn, "warning")}, ${plural(s.fail, "failure")}\n`;
 }
 
 /** Builds the `--json` report. */

@@ -45,7 +45,7 @@ describe("status", () => {
     );
     expect(r.out).toContain("unavailable until 2026-11-09 10:00 (in 2d) — AGY_ERROR: quota");
     expect(r.out).toMatch(
-      /5h +0% remaining +resets 2026-11-07 12:30 \(in 2h 30m\) {2}\[real\] {2}source fake-reader/,
+      /5h +\[-{10}\] +0% remaining +resets in 2h 30m \(2026-11-07 12:30\) +\[real\] +source fake-reader/,
     );
 
     const json = JSON.parse((await h.run(["status", "--json"], { env: HOST })).out);
@@ -68,7 +68,7 @@ describe("status", () => {
     expect(r.out).toContain("antigravity  (antigravity)  enabled  pool subscription  experimental");
     expect(r.out).toMatch(/Experimental: antigravity is enabled — experimental and read-only/);
     // nothing known yet: unknown windows, never invented numbers
-    expect(r.out).toMatch(/5h +unknown +reset unknown {2}\[unknown\]/);
+    expect(r.out).toMatch(/5h +\[\.{10}\] +unknown +reset unknown +\[unknown\]/);
   });
 
   it("without a host nothing is marked as the host; a disabled agy is listed but not read", async () => {
@@ -99,6 +99,23 @@ describe("status", () => {
     expect(json.repo).toEqual({ status: "untrusted", trusted: false });
   });
 
+  it("on a terminal: colored meters by threshold; --json stays byte-identical", async () => {
+    const h = opsHarness();
+    h.sb.global(THREE_PROVIDERS);
+    h.store.recordQuotaReading("codex", reading({ kind: "5h", usedPct: 97 }));
+    h.store.recordQuotaReading("claude", reading({ kind: "5h", usedPct: 10 }));
+    const r = await h.run(["status"], { env: HOST, decorate: true });
+    expect(r.code).toBe(0);
+    // codex: 3% remaining is under the default hard limit (5): red; claude 90%: green.
+    const esc = String.fromCharCode(27);
+    expect(r.out).toContain(`${esc}[31m${"░".repeat(10)}${esc}[39m`);
+    expect(r.out).toContain(`${esc}[32m${"█".repeat(9)}░${esc}[39m`);
+    expect(r.out).toContain("resets ");
+    const plain = await h.run(["status", "--json"], { env: HOST });
+    const decorated = await h.run(["status", "--json"], { env: HOST, decorate: true });
+    expect(decorated.out).toBe(plain.out);
+  });
+
   describe("[UC11] broken reading channels", () => {
     it("a failing channel shows stale, the last good reading and the error", async () => {
       const h = opsHarness({ readers: [failingReader("codex-app-server", "format changed")] });
@@ -110,7 +127,7 @@ describe("status", () => {
       );
       const r = await h.run(["status"], { env: HOST });
       expect(r.code).toBe(0);
-      expect(r.out).toMatch(/5h +45% remaining .*\[stale\]/);
+      expect(r.out).toMatch(/5h +\[#{5}-{5}\] +45% remaining .*\[stale\]/);
       expect(r.out).toContain(
         "reader codex-app-server: stale — last good reading 2026-11-07 09:00, channel error: format changed",
       );
@@ -148,13 +165,13 @@ describe("status", () => {
       expect(set.out).toBe("codex: 40% remaining (all windows) until 2026-11-07 12:00\n");
 
       const during = await h.run(["status"], { env: HOST });
-      expect(during.out).toMatch(/5h +40% remaining .*\[real\] {2}source manual/);
-      expect(during.out).toMatch(/weekly +40% remaining .*source manual/);
+      expect(during.out).toMatch(/5h +\[#{4}-{6}\] +40% remaining .*\[real\] +source manual/);
+      expect(during.out).toMatch(/weekly +\[#{4}-{6}\] +40% remaining .*source manual/);
 
       h.clock.advance(3 * HOUR);
       const after = await h.run(["status"], { env: HOST });
       expect(after.out).not.toContain("source manual");
-      expect(after.out).toMatch(/5h +unknown/);
+      expect(after.out).toMatch(/5h +\[\.{10}\] +unknown/);
     });
 
     it("--window limits the override to one window; a plain number works", async () => {
@@ -168,8 +185,9 @@ describe("status", () => {
         remainingPct: 75,
       });
       const out = (await h.run(["status"], { env: HOST })).out;
-      expect(out).toMatch(/7d +75% remaining .*source manual/);
-      expect(out).toMatch(/5h +unknown/);
+      expect(out).toMatch(/7d +\[#{8}-{2}\] +75% remaining .*source manual/);
+      expect(out).toMatch(/5h +\[\.{10}\] +unknown/);
+      expect(out).not.toContain("\x1b[");
     });
 
     it("rejects bad input with exit 2", async () => {

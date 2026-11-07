@@ -144,8 +144,8 @@ describe("[UC1] first setup on an existing repo", () => {
     expect(s.instances.map((i) => i.id)).toEqual(["claude", "codex", "antigravity"]);
     expect(s.instances.every((i) => i.enabled)).toBe(true);
     const text = w.dispatch(["status"]).stdout;
-    expect(text).toMatch(/^codex .*\n\s+5h +\d+% remaining/m);
-    expect(text).toMatch(/^antigravity .*\n\s+weekly:\S+ +\d+% remaining/m);
+    expect(text).toMatch(/^codex .*\n\s+5h +\[[#-]{10}\] +\d+% remaining/m);
+    expect(text).toMatch(/^antigravity .*\n\s+weekly:\S+ +\[[#-]{10}\] +\d+% remaining/m);
   });
 
   it("[UC1] install alone runs the host setup first when the user has no global setup yet", () => {

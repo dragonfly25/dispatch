@@ -28,6 +28,8 @@ export interface SetupPlan {
   absent: string[];
   /** Manifest entries no longer planned; `--refresh` removes them. */
   stale: ManifestEntry[];
+  /** `ops` by destination, in apply order: `dispatch` (the launcher), then each detected host id. */
+  groups: { host: string; ops: EditOp[] }[];
 }
 
 /** Absolute path of the launcher, `<dispatchHome>/bin/dispatch`. */
@@ -59,7 +61,8 @@ export function launcherOp(ctx: SetupContext): EditOp {
   };
 }
 
-function describeOp(op: EditOp): string {
+/** One-line description of `op`, as shown in the preview. */
+export function describeOp(op: EditOp): string {
   switch (op.kind) {
     case "new-file":
     case "rules-file":
@@ -76,7 +79,7 @@ function describeOp(op: EditOp): string {
 }
 
 /** Renders the human-readable preview: every change, then every trust grant verbatim. */
-export function renderPreview(plan: Omit<SetupPlan, "preview">): string {
+export function renderPreview(plan: Omit<SetupPlan, "preview" | "groups">): string {
   const lines = ["Dispatch setup will make these changes:"];
   for (const op of plan.ops) lines.push(`  - ${describeOp(op)}`);
   for (const e of plan.stale) lines.push(`  - remove the earlier Dispatch edit in ${e.file}`);
@@ -99,12 +102,15 @@ export function renderPreview(plan: Omit<SetupPlan, "preview">): string {
 export async function planSetup(ctx: SetupContext): Promise<SetupPlan> {
   const hostCtx = hostPlanContext(ctx);
   const ops: EditOp[] = [launcherOp(ctx)];
+  const groups: SetupPlan["groups"] = [{ host: "dispatch", ops: [...ops] }];
   const detected: string[] = [];
   const absent: string[] = [];
   for (const host of ctx.hosts) {
     if (await host.detect(hostCtx)) {
       detected.push(host.id);
-      ops.push(...host.plan(hostCtx));
+      const hostOps = host.plan(hostCtx);
+      ops.push(...hostOps);
+      groups.push({ host: host.id, ops: hostOps });
     } else {
       absent.push(host.id);
     }
@@ -112,7 +118,7 @@ export async function planSetup(ctx: SetupContext): Promise<SetupPlan> {
   const manifest = readManifest(ctx.dispatchHome);
   const stale = manifest.entries.filter((e) => !ops.some((op) => sameOp(e, op)));
   const plan = { ops, detected, absent, stale };
-  return { ...plan, preview: renderPreview(plan) };
+  return { ...plan, groups, preview: renderPreview(plan) };
 }
 
 /** Options of {@link applySetup}. */
