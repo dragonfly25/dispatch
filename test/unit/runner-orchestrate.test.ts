@@ -18,7 +18,12 @@ import type { RoutingConfig, Rule } from "../../src/core/routing.js";
 import { isSecretLike, readOnlyOverride } from "../../src/runner/attempt.js";
 import { acquireLease, isProcessAlive, SELF_PID_START } from "../../src/runner/lease.js";
 import { ProbeCache, trapTermination } from "../../src/runner/lifecycle.js";
-import { executeTask, MAX_SUMMARY_CHARS, type RunnerDeps } from "../../src/runner/orchestrate.js";
+import {
+  executeTask,
+  MAX_SUMMARY_CHARS,
+  type RunnerDeps,
+  reportedPatch,
+} from "../../src/runner/orchestrate.js";
 import { ProcessSpawner } from "../../src/runner/proc.js";
 import type { SqliteStateStore } from "../../src/state/store.js";
 import { probeResult } from "../fixtures/contracts.js";
@@ -513,5 +518,31 @@ describe("runner leases", () => {
     expect(isSecretLike("sk-abc")).toBe(true);
     expect(isSecretLike("/Users/x/.dispatch")).toBe(false);
     expect(isSecretLike("12345")).toBe(false);
+  });
+});
+
+describe("reportedPatch [SEC-patch]", () => {
+  const info = { path: "/r/patch.diff", diffstat: "", applies: true, needsReview: false };
+  const result = (empty: boolean, rejectedPaths: string[]) => ({
+    patch: { ...info, rejectedPaths, ...(empty ? {} : { diffstat: " a | 1 +\n" }) },
+    empty,
+    files: [],
+    rejected: [],
+    findings: [],
+  });
+
+  it("reports an all-rejected change set as an empty, non-applicable patch with the rejected paths", () => {
+    expect(reportedPatch(result(true, [".git/hooks/x", "link"]))).toEqual({
+      ...info,
+      diffstat: "",
+      applies: false,
+      rejectedPaths: [".git/hooks/x", "link"],
+    });
+  });
+
+  it("is null without a patch or without any change, and the real patch otherwise", () => {
+    expect(reportedPatch(null)).toBeNull();
+    expect(reportedPatch(result(true, []))).toBeNull();
+    expect(reportedPatch(result(false, ["link"]))?.diffstat).toBe(" a | 1 +\n");
   });
 });

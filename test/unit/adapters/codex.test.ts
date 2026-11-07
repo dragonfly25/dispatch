@@ -608,62 +608,57 @@ Options:
 
 describe("codex probe", () => {
   it("parses version, flags, features and login via the fake CLI [UC13]", async () => {
-    await withFakes(
-      { codex: [{ scenario: "fail", stdout: HELP, stderr: "", exitCode: 0 }] },
-      async ({ binDir, env, readLog }) => {
-        const deps: AdapterDeps = {
-          spawner: testSpawner,
-          clock: new FakeClock(),
-          resolveBinary: async () => join(binDir, "codex"),
-        };
-        const alt = { ...instance, configDir: "/tmp/codex-alt-home" };
-        const res = await probeCodex(alt, deps, {
-          ...env,
-          HOME: "/tmp/no-home",
-          SECRET_TOKEN: "x",
-        });
-        expect(res).toMatchObject({
-          binaryPath: join(binDir, "codex"),
-          version: "0.167.0",
-          features: [
-            "hooks",
-            "plugins",
-            "multi_agent",
-            "multi_agent_v2",
-            "apps",
-            "unified_exec",
-            "memories",
-          ],
-          loggedIn: true,
-          outsideCliRange: false,
-        });
-        expect(res.realpath).toMatch(/test\/fakes\/bin\/codex$/);
-        for (const f of [
-          "--json",
-          "--ephemeral",
-          "--ignore-user-config",
-          "--strict-config",
-          "--disable",
-          "-C",
-          "-o",
-          "-s",
-        ])
-          expect(res.flags).toContain(f);
-        const calls = readLog({ cli: "codex" });
-        expect(calls.map((c) => c.args.join(" "))).toEqual([
-          "--version",
-          "exec --help",
-          "features list",
-          "login status",
-        ]);
-        expect(calls.every((c) => c.env.CODEX_HOME === "/tmp/codex-alt-home")).toBe(true);
-        expect(calls.every((c) => c.env.SECRET_TOKEN === undefined)).toBe(true);
-        // The probed result feeds buildInvocation directly.
-        expect(adapter.buildInvocation(args({ probe: res })).argv).toEqual(
-          golden("workspace-write"),
-        );
-      },
-    );
+    await withFakes({ "codex:help": { stdout: HELP } }, async ({ binDir, env, readLog }) => {
+      const deps: AdapterDeps = {
+        spawner: testSpawner,
+        clock: new FakeClock(),
+        resolveBinary: async () => join(binDir, "codex"),
+      };
+      const alt = { ...instance, configDir: "/tmp/codex-alt-home" };
+      const res = await probeCodex(alt, deps, {
+        ...env,
+        HOME: "/tmp/no-home",
+        SECRET_TOKEN: "x",
+      });
+      expect(res).toMatchObject({
+        binaryPath: join(binDir, "codex"),
+        version: "0.167.0",
+        features: [
+          "hooks",
+          "plugins",
+          "multi_agent",
+          "multi_agent_v2",
+          "apps",
+          "unified_exec",
+          "memories",
+        ],
+        loggedIn: true,
+        outsideCliRange: false,
+      });
+      expect(res.realpath).toMatch(/test\/fakes\/bin\/codex$/);
+      for (const f of [
+        "--json",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--strict-config",
+        "--disable",
+        "-C",
+        "-o",
+        "-s",
+      ])
+        expect(res.flags).toContain(f);
+      const calls = readLog({ cli: "codex" });
+      expect(calls.map((c) => c.args.join(" "))).toEqual([
+        "--version",
+        "exec --help",
+        "features list",
+        "login status",
+      ]);
+      expect(calls.every((c) => c.env.CODEX_HOME === "/tmp/codex-alt-home")).toBe(true);
+      expect(calls.every((c) => c.env.SECRET_TOKEN === undefined)).toBe(true);
+      // The probed result feeds buildInvocation directly.
+      expect(adapter.buildInvocation(args({ probe: res })).argv).toEqual(golden("workspace-write"));
+    });
   });
 
   it("reports logged-out from the fake CLI", async () => {

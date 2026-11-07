@@ -18,6 +18,7 @@ import {
   type DecisionInput,
   EXTERNAL_AGENT_MARKER,
   type HostContext,
+  type PatchInfo,
   type QuotaProvider,
   type RunResult,
   type SessionHistoryEntry,
@@ -293,9 +294,21 @@ function toHost(outcome: RunResult["outcome"], summary: string) {
   } as const;
 }
 
+/**
+ * The patch reported to the host: the real one; or, when every change was rejected by the filter,
+ * an empty one (no file, `diffstat` "", `applies: false`: there is nothing to apply) that still
+ * lists `rejectedPaths`, so the host sees what was dropped (spec §9 rule 6). No change at all: null.
+ */
+export function reportedPatch(result: AttemptReport["patch"]): PatchInfo | null {
+  if (!result) return null;
+  if (!result.empty) return result.patch;
+  if (result.patch.rejectedPaths.length === 0) return null;
+  return { ...result.patch, diffstat: "", applies: false };
+}
+
 function completed(report: AttemptReport) {
   const out = report.outcome as NonNullable<AttemptReport["outcome"]>;
-  const patch = report.patch && !report.patch.empty ? report.patch.patch : null;
+  const patch = reportedPatch(report.patch);
   return {
     status: "completed",
     outcome: out.outcome,

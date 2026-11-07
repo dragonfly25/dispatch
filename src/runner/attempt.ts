@@ -3,7 +3,7 @@
  * probe → child env → invocation → spawn (events streamed to the store and the run log) →
  * finalize → quota bookkeeping → patch → cleanup (lease released, worktree disposed unless kept).
  */
-import { mkdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   AdapterOutcome,
@@ -216,6 +216,8 @@ export async function runAttempt(
     if (inv.outputFile) {
       const text = await readFile(inv.outputFile, "utf8").catch(() => undefined);
       if (text !== undefined) ctx.scratch.outputFileContent = text;
+      // The child wrote it unredacted; its text lives on only in the redacted result (AC7).
+      await rm(inv.outputFile, { force: true }).catch(() => {});
     }
     let outcome = readOnlyOverride(adapter.finalize({ ...res, durationMs }, ctx), autonomy);
     if (rc.signal.aborted && !res.timedOut) {
