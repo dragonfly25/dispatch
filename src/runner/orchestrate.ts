@@ -75,6 +75,12 @@ export interface RunnerDeps {
   /** The environment Dispatch itself runs in (source of the child allow-list and depth). */
   env: Readonly<Record<string, string | undefined>>;
   host: HostDetection;
+  /**
+   * Instance id of the host session (null: outside any host), as resolved from the environment by
+   * the composition root (UC12: `CLAUDE_CONFIG_DIR` selects the account). When absent, the default
+   * instance of the detected host's adapter is assumed.
+   */
+  hostSelf?: string | null;
   /** Default: `$DISPATCH_HOME` or `~/.dispatch` from `env`. */
   dispatchHome?: string;
   /** Receives env values withheld from children, so the store redactor masks them too. */
@@ -110,6 +116,7 @@ const HOST_ADAPTER: Record<string, string> = {
 };
 
 function selfInstance(deps: RunnerDeps): string | null {
+  if (deps.hostSelf !== undefined) return deps.hostSelf;
   const adapter = deps.host.host ? HOST_ADAPTER[deps.host.host] : undefined;
   if (!adapter) return null;
   const all = deps.config.execution.instances.filter((i) => i.adapter === adapter);

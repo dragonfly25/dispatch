@@ -94,3 +94,22 @@ jobs:
           actual="$("$prefix/bin/dispatch" --version)"
           echo "expected=$expected actual=$actual"
           test "$actual" = "$expected"
+
+  # UC1-UC14 and AC1-AC7 by tag (plan section 3 "CI"): runs the whole vitest suite once more with
+  # the JSON reporter and prints the pass/fail table in the job summary. Fails on any FAIL row;
+  # rows whose tests are still `todo` (waiting for a work package or a real account) are PENDING.
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - name: Configure git identity (tests create repos and worktrees)
+        run: |
+          git config --global user.name "Dispatch CI"
+          git config --global user.email "ci@dispatch.invalid"
+          git config --global init.defaultBranch main
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm acceptance
