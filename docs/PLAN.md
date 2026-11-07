@@ -490,3 +490,36 @@ Token-saving rules:
 - `setup` + `uninstall --global` leave the Codex host files byte-identical.
 - STATUS.md and the final report are written.
 - `v0.1.0` is tagged.
+
+## Amendments after WP1 spike (2026-11-07)
+
+Source: [`docs/spikes/`](spikes/README.md). The contracts were frozen in [ADR 0002](adr/0002-wp1-contract-freeze.md). Where these amendments conflict with the sections above, the amendments win.
+
+**UC3 (Codex hard mode).** UC3 uses **`deny_redirect`**: a PreToolUse hook denies the spawn, and its reason tells the model to run `<abs launcher> run --detach --json '<task>'` and then `wait`. Verified end-to-end.
+- `proxy_subagent` (`updatedInput`) is dropped. On multi-agent V2, which current models use, the spawn `message` is encrypted, so the hook cannot read it, and a rewritten plaintext message fails with `invalid_encrypted_content`.
+- The hook matcher is `spawn_agent|collaborationspawn_agent|Agent`, because V2 hook `tool_name` is `collaborationspawn_agent`. The `[UC3-B]` test is removed.
+
+**Codex host `wait` default:** 280 s, not 300. Unified exec yields after at most 30 s, then polls for up to 300 s.
+
+**Codex child invocation additions:**
+- `--disable apps --disable memories -c agents.enabled=false`. Note that `--disable multi_agent` does not disable V2 tools.
+- Side-effect guard `-c 'projects={"<wt>"={trust_level="untrusted"},"<repo-root>"={trust_level="untrusted"}}'`. Without it, `codex exec` persists `trust_level="trusted"` into `~/.codex/config.toml`, and for a linked worktree it does so for the **main repo root**.
+- `probe` validates feature names with `codex features list`.
+
+**Antigravity:**
+- Drop `--mode plan`. It is a `/plan` prompt prefix and has no effect together with `--disable-slash-commands`.
+- Pass the prompt as `-p=<prompt>`. stdin is ignored, and `-p -` is taken as a literal prompt. The adapter declares `promptChannel: "argv"`, and the argv entry is redacted in logs.
+- Read-only is enforced by headless auto-deny (`permission_mode: request-review`). A run that ends `status: SUCCESS` with non-empty `denied_actions` maps to `failed`.
+- User hooks and plugins cannot be disabled in the child. `doctor` discloses this. `DISPATCH_DEPTH` keeps Dispatch's own hooks inert, and the patch filter also rejects `.agents/`.
+
+**Claude:**
+- The child `--settings` adds `sandbox.failIfUnavailable: true`, giving fail-closed behaviour at startup. Permission rules use `//abs` paths, and `sandbox.filesystem.denyRead` uses plain absolute paths. All of this was verified to apply under `--safe-mode`.
+- `-p` SessionStart has no `model` field, so the Claude host model is normally unknown, and the `unspecified_model = balanced` default is confirmed.
+
+**Launcher and hosts:**
+- `dispatch run|wait` fails fast (exit 3, with call-form guidance) when `CODEX_SANDBOX` is set, because that means the Codex rule did not match. Rule-compatible call form: absolute launcher path, single-quoted task, no `cd`, pipes, `$`, backticks, redirects or heredocs.
+- Host self-detection is env-only: `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` for Claude, `CODEX_THREAD_ID` / `CODEX_VERSION` for Codex.
+- The Claude desktop app bundles its own Claude Code (`CLAUDE_CODE_EXECPATH`, e.g. 2.1.317), which can differ from the `claude` on PATH. Version checks for the host use the env, not the PATH binary.
+- GUI-launched hosts other than the Claude desktop app may give hooks only `/usr/bin:/bin:/usr/sbin:/sbin`, so hook commands use absolute node and hook paths.
+
+**Contracts:** see ADR 0002. `Adapter.probe` and `readQuota` take an injected `AdapterDeps { spawner, clock, resolveBinary }`, since only `src/runner/` spawns processes.

@@ -17,6 +17,9 @@ import type {
   Sandbox,
   SandboxCreateOptions,
   SandboxHandle,
+  Spawner,
+  SpawnRequest,
+  SpawnResult,
   StateStore,
 } from "../../src/core/contracts.js";
 
@@ -120,5 +123,30 @@ export class FakeSandbox implements Sandbox {
   async dispose(path: string, keep: boolean): Promise<void> {
     if (keep) this.kept.push(path);
     else await rm(path, { recursive: true, force: true });
+  }
+}
+
+/** One scripted child: lines emitted through `onLine`, then the result. */
+export interface ScriptedSpawn {
+  stdout?: string[];
+  stderr?: string[];
+  result?: Partial<SpawnResult>;
+}
+
+/**
+ * Spawner that never starts a process: it records each request and replays scripted output in
+ * call order (the last script repeats). Adapters receive it through `AdapterDeps`.
+ */
+export class ScriptedSpawner implements Spawner {
+  readonly requests: SpawnRequest[] = [];
+
+  constructor(private readonly scripts: ScriptedSpawn[] = [{}]) {}
+
+  async spawn(req: SpawnRequest): Promise<SpawnResult> {
+    this.requests.push(req);
+    const script = this.scripts[Math.min(this.requests.length - 1, this.scripts.length - 1)] ?? {};
+    for (const line of script.stdout ?? []) req.onLine?.("stdout", line);
+    for (const line of script.stderr ?? []) req.onLine?.("stderr", line);
+    return { exitCode: 0, signal: null, timedOut: false, ...script.result };
   }
 }

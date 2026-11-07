@@ -2,8 +2,8 @@
  * Core contracts for Dispatch.
  *
  * Everything exported from this file is FROZEN once merged (see docs/adr/0001-frozen-contracts.md):
- * changing a schema, type or port requires a new ADR. Items tagged `@provisional — frozen by WP1`
- * may still change until the WP1 live spike freezes them.
+ * changing a schema, type or port requires a new ADR. The adapter and host-integration contracts
+ * were frozen by WP1 (docs/adr/0002-wp1-contract-freeze.md).
  *
  * Conventions:
  * - Every data contract is a zod schema (`FooSchema`) plus its inferred type (`Foo`).
@@ -221,9 +221,12 @@ export type Decision = z.infer<typeof DecisionSchema>;
 
 /** Provider-neutral progress event parsed from a child CLI's output. */
 export const NormalizedEventSchema = z.object({
-  kind: z.enum(["reading", "editing", "running", "thinking", "done", "error"]),
+  /** `denied`: the child CLI refused a tool action (permission rule, sandbox, headless auto-deny). */
+  kind: z.enum(["reading", "editing", "running", "thinking", "denied", "done", "error"]),
   ts: IsoUtc,
   detail: z.string().optional(),
+  /** Worktree-relative path for reading/editing events. */
+  path: z.string().optional(),
 });
 export type NormalizedEvent = z.infer<typeof NormalizedEventSchema>;
 
@@ -238,6 +241,21 @@ export const UsageSchema = z.object({
 });
 export type Usage = z.infer<typeof UsageSchema>;
 
+/** Which evidence classified a run as `quota_exhausted` (see docs/spikes/*.md). */
+export const QuotaSignalSchema = z.object({
+  source: z.enum([
+    "claude.rate_limit_event.rejected",
+    "claude.assistant.error",
+    "claude.api_error_status_429",
+    "claude.text",
+    "codex.turn_failed.usage_limit",
+    "agy.agy_error.quota",
+  ]),
+  /** The raw message or field value that matched. */
+  raw: z.string(),
+});
+export type QuotaSignal = z.infer<typeof QuotaSignalSchema>;
+
 /** What an adapter reports once its child process has ended. */
 export const AdapterOutcomeSchema = z.object({
   outcome: OutcomeSchema,
@@ -246,6 +264,13 @@ export const AdapterOutcomeSchema = z.object({
   /** When quota is exhausted, the provider's announced reset time, if known. */
   resetAt: IsoUtc.optional(),
   nativeError: z.string().optional(),
+  /**
+   * Tool actions the child CLI denied (agy `denied_actions`, claude `permission_denials`).
+   * agy reports `SUCCESS` even when it denied the only useful action, so adapters map a run with
+   * denied actions and no output to `failed`.
+   */
+  deniedActions: z.array(z.string()),
+  quotaSignal: QuotaSignalSchema.optional(),
   durationMs: z.number().nonnegative(),
 });
 export type AdapterOutcome = z.infer<typeof AdapterOutcomeSchema>;
@@ -423,101 +448,218 @@ export interface Sandbox {
 }
 
 // ---------------------------------------------------------------------------
-// Provisional contracts (frozen by WP1)
+// Adapter contracts (frozen by WP1, see docs/adr/0002-wp1-contract-freeze.md)
 // ---------------------------------------------------------------------------
 
-/** @provisional — frozen by WP1 */
+/** How the task prompt reaches the child CLI. agy ignores stdin, so it takes `-p=<prompt>`. */
+export const PromptChannelSchema = z.enum(["stdin", "argv"]);
+export type PromptChannel = z.infer<typeof PromptChannelSchema>;
+
+/** What a child CLI can be isolated from, as verified by the WP1 spike (`doctor` prints it). */
+export const AdapterIsolationSchema = z.object({
+  /** claude `--safe-mode` / codex `--disable hooks`: disabled. agy: not_disableable. */
+  userHooks: z.enum(["disabled", "not_disableable"]),
+  /** claude `--safe-mode` still loads built-in plugins: builtin_only. */
+  userPlugins: z.enum(["disabled", "builtin_only", "not_disableable"]),
+  userMcp: z.enum(["disabled", "not_disableable"]),
+  /** codex: disabled via the untrusted-project override. agy: `.agents/` still loads. */
+  projectConfig: z.enum(["disabled", "not_disableable"]),
+});
+export type AdapterIsolation = z.infer<typeof AdapterIsolationSchema>;
+
 export const AdapterCapabilitiesSchema = z.object({
+  /** Adapter id: "claude" | "codex" | "antigravity" | "fake" | ... */
   id: NonEmpty,
+  /** Adapter version (semver). */
   version: NonEmpty,
-  /** Semver range of the CLI this adapter supports. */
+  /** Semver range of the CLI this adapter supports (has recorded fixtures for). */
   cliRange: NonEmpty,
   streaming: z.boolean(),
+  /** Autonomy levels the adapter can enforce (antigravity: read-only only). */
   autonomy: z.array(AutonomySchema),
-  quotaChannel: z.enum(["passive", "reader", "none"]),
+  /** passive = parsed from the run's own stream; reader = out-of-band `readQuota()`. */
+  quotaChannel: z.enum(["passive", "reader", "passive+reader", "none"]),
   pool: PoolSchema,
   experimental: z.boolean(),
+  promptChannel: PromptChannelSchema,
+  isolation: AdapterIsolationSchema,
+  /** Who enforces the filesystem boundary for the child's shell commands. */
+  sandbox: z.enum(["os", "permission-only"]),
+  /** Network available to the child's shell commands (all three CLIs: none by default). */
+  childNetwork: z.enum(["none", "allowlist", "open"]),
 });
-/** @provisional — frozen by WP1 */
 export type AdapterCapabilities = z.infer<typeof AdapterCapabilitiesSchema>;
 
-/** @provisional — frozen by WP1 */
+/** A fully built child command. The runner spawns it; adapters never spawn processes. */
 export const InvocationSchema = z.object({
+  /** Absolute, resolved binary path (never a bare name). */
   binary: NonEmpty,
   argv: z.array(z.string()),
+  /** Complete child env, built from the allow-list; nothing is inherited. */
   env: z.record(z.string(), z.string()),
+  /** The worktree. Load-bearing for agy, which has no cwd flag. */
   cwd: NonEmpty,
-  stdin: z.string(),
+  /** Prompt bytes when `promptChannel` is "stdin"; null when the prompt is in argv. */
+  stdin: z.string().nullable(),
+  /** File the CLI writes its final message to (codex `-o`), read by `finalize()`. */
+  outputFile: NonEmpty.optional(),
+  /** argv indexes holding the prompt or settings JSON; redacted before logging or storing. */
+  redactArgvIndexes: z.array(z.number().int().nonnegative()),
+  /**
+   * Named guards against known CLI side effects, asserted by golden-argv tests, e.g.
+   * "codex-project-trust-untrusted", "codex-agents-disabled", "claude-safe-mode".
+   */
+  sideEffectGuards: z.array(NonEmpty),
 });
-/** @provisional — frozen by WP1 */
 export type Invocation = z.infer<typeof InvocationSchema>;
 
-/** Result of probing an installed CLI. @provisional — frozen by WP1 */
+/** Result of probing an installed CLI. */
 export interface ProbeResult {
   binaryPath: string | null;
+  /** realpath of `binaryPath` (Homebrew Caskroom and versioned dirs differ from the symlink). */
+  realpath: string | null;
   version: string | null;
+  /** Flags seen in `--help`. */
   flags: string[];
+  /** codex: `codex features list` names (unknown `--disable` names fail closed); others: []. */
+  features: string[];
   loggedIn: boolean | null;
+  /** True when `version` is outside `caps.cliRange` (doctor warns; runs are still allowed). */
+  outsideCliRange: boolean;
 }
 
-/** Arguments of {@link Adapter.buildInvocation}. @provisional — frozen by WP1 */
+/**
+ * Side-effecting dependencies injected into adapters. Adapters must not import
+ * `child_process` (only src/runner may spawn), so probes and quota readers go through `spawner`.
+ */
+export interface AdapterDeps {
+  spawner: Spawner;
+  clock: Clock;
+  /** Binary resolution (config `binary:` → PATH → well-known dirs); null when not found. */
+  resolveBinary(name: string, instance: ProviderInstance): Promise<string | null>;
+}
+
+/** Arguments of {@link Adapter.buildInvocation}. */
 export interface BuildInvocationArgs {
   task: Task;
   target: DecisionTarget;
   autonomy: Autonomy;
   worktree: string;
+  /** Main repository root (parent of the git common dir); codex needs it for the trust guard. */
+  repoRoot: string;
+  /** Per-run directory for `outputFile` and logs. */
+  runDir: string;
   instance: ProviderInstance;
   probe: ProbeResult;
+  /** Allow-listed base env computed by the runner (PATH, HOME, ..., DISPATCH_DEPTH). */
+  baseEnv: Readonly<Record<string, string>>;
 }
 
-/** Per-run mutable scratch space shared by parseLine/finalize. @provisional — frozen by WP1 */
+/** Per-run state shared by parseLine/finalize. */
 export interface AdapterRunContext {
   readonly runId: string;
+  /** Used to make absolute paths in events (codex `file_change`) worktree-relative. */
+  readonly worktree: string;
   scratch: Record<string, unknown>;
 }
 
-/** @provisional — frozen by WP1 */
+/** A provider CLI adapter. Pure apart from the injected deps. */
 export interface Adapter {
   readonly caps: AdapterCapabilities;
-  probe(instance: ProviderInstance): Promise<ProbeResult>;
+  probe(instance: ProviderInstance, deps: AdapterDeps): Promise<ProbeResult>;
   buildInvocation(args: BuildInvocationArgs): Invocation;
-  parseLine(line: string, ctx: AdapterRunContext): NormalizedEvent[];
+  parseLine(stream: "stdout" | "stderr", line: string, ctx: AdapterRunContext): NormalizedEvent[];
   finalize(result: SpawnResult & { durationMs: number }, ctx: AdapterRunContext): AdapterOutcome;
-  readQuota?(instance: ProviderInstance): Promise<QuotaWindow[]>;
+  readQuota?(instance: ProviderInstance, deps: AdapterDeps): Promise<QuotaWindow[]>;
 }
+
+// ---------------------------------------------------------------------------
+// Host integration contracts (frozen by WP1)
+// ---------------------------------------------------------------------------
 
 /**
  * One idempotent edit to a host file. `signature` identifies Dispatch's entry so it can be found
  * and removed byte-exactly. For `cli-command`, `file` is the binary and `content` the JSON argv.
- * @provisional — frozen by WP1
  */
 export const EditOpSchema = z.object({
+  /** Absolute path (or the binary for cli-command). Always user/local scope. */
   file: NonEmpty,
   kind: z.enum(["json-entry", "text-block", "new-file", "rules-file", "cli-command"]),
   signature: NonEmpty,
   content: z.string(),
+  /** Octal mode for new-file/rules-file, e.g. "0644" (the launcher is "0755"). */
+  mode: z
+    .string()
+    .regex(/^0[0-7]{3}$/)
+    .optional(),
+  /** sha256 of the content Dispatch wrote (new-file/rules-file), checked before uninstall. */
+  sha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  /** Non-null when the op grants the host extra authority; `setup` shows it verbatim. */
+  trustGrant: z.string().nullable(),
 });
-/** @provisional — frozen by WP1 */
 export type EditOp = z.infer<typeof EditOpSchema>;
 
-/** Context passed to host integrations. @provisional — frozen by WP1 */
+/** Context passed to host integrations. All paths are absolute. */
 export interface HostPlanContext {
   home: string;
+  /** Embedded in the Codex rule, skill and agent text. */
   launcherPath: string;
+  /** Hook commands never rely on PATH. */
+  nodePath: string;
   hookPath: string;
 }
 
-/** Response of a hook handler: what to print and how to exit. @provisional — frozen by WP1 */
+/**
+ * How a host's native sub-agent spawn is handled in hard mode.
+ * - none: soft mode only (Claude Code in v0.1).
+ * - deny_redirect: PreToolUse denies the spawn; the reason tells the model to run
+ *   `<launcher> run --detach` and then `wait` (UC3; proxying is not viable on Codex multi-agent V2).
+ */
+export const SubagentStrategySchema = z.enum(["none", "deny_redirect"]);
+export type SubagentStrategy = z.infer<typeof SubagentStrategySchema>;
+
+/** Hook stdin as sent by Claude Code and Codex (common fields; the rest passes through). */
+export interface HookInput {
+  hook_event_name: string;
+  session_id: string;
+  cwd: string;
+  /** Present in Codex SessionStart/PreToolUse; absent in Claude `-p` SessionStart. */
+  model?: string;
+  /** Codex multi-agent V2 spawn: "collaborationspawn_agent". */
+  tool_name?: string;
+  /** Codex V2 spawn: `{ task_name, message }` where `message` is encrypted. */
+  tool_input?: unknown;
+  [key: string]: unknown;
+}
+
+/** Response of a hook handler: what to print and how to exit. */
 export interface HookResponse {
+  /** JSON `hookSpecificOutput` (permissionDecision, permissionDecisionReason, additionalContext). */
   stdout?: string;
   exitCode: number;
 }
 
-/** @provisional — frozen by WP1 */
+/** Host self-detection result, from the environment only (never from the PATH binary). */
+export interface DetectedHost {
+  host: string;
+  version: string | null;
+}
+
+/** A host CLI that Dispatch integrates with (user/local scope only). */
 export interface HostIntegration {
-  readonly id: string;
+  readonly id: "claude-code" | "codex";
+  readonly subagentStrategy: SubagentStrategy;
+  /** PreToolUse matcher when the strategy is not "none" (codex: `spawn_agent|collaborationspawn_agent|Agent`). */
+  readonly subagentMatcher: string | null;
+  /** Default `wait --timeout` in seconds for calls from this host (Claude 100, Codex 280). */
+  readonly waitTimeoutSec: number;
+  /** `CLAUDECODE` / `CODEX_THREAD_ID` based detection; null when this host is not the caller. */
+  detectSelf(env: Readonly<Record<string, string | undefined>>): DetectedHost | null;
   detect(ctx: HostPlanContext): Promise<boolean>;
   plan(ctx: HostPlanContext): EditOp[];
-  /** Keyed by hook event name (e.g. "SessionStart"). */
-  hookHandlers: Record<string, (input: unknown) => Promise<HookResponse>>;
+  /** Keyed by hook event name (e.g. "SessionStart", "PreToolUse"). */
+  hookHandlers: Record<string, (input: HookInput) => Promise<HookResponse>>;
 }
