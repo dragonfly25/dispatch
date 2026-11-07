@@ -95,9 +95,9 @@ export function codexPolicyText(cache: HookCache, launcher: string): string {
   return [
     `Dispatch is active in this repository (profile: ${cache.policy.profile}).`,
     summary,
-    "When to delegate: only self-contained coding tasks of the types named in the policy above, " +
-      "and only when the user asks to delegate or the policy says so. Work the policy pins to " +
-      "the host stays in this session.",
+    "When to delegate: tasks of the types the policy above routes to a provider are delegated " +
+      "through Dispatch instead of being done in this session, unless the user says otherwise. " +
+      "Work the policy keeps on or pins to the host stays in this session.",
     "How (see the `dispatch` skill): run " +
       `\`${l} run --detach --json --task '<task>' [--task-type T] [--path P]...\` ${CALL_FORM}, ` +
       waitText(l),

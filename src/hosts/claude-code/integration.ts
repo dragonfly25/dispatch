@@ -1,10 +1,13 @@
 /**
- * Claude Code host integration (plan §2 "Host integration", soft mode only): a user-scope plugin
- * installed from a local marketplace that Dispatch renders into `~/.dispatch/hosts/claude-code/`.
+ * Claude Code host integration (plan §2 "Host integration"): a user-scope plugin installed from a
+ * local marketplace that Dispatch renders into `~/.dispatch/hosts/claude-code/`.
  *
- * The plugin holds the `dispatch` sub-agent and a SessionStart hook that injects the policy.
- * There is no PreToolUse hook and no auto-allow: `doctor` prints the permission rules for the
- * user to add (see `./doctor.ts`). Setup runs two `claude plugin …` commands and records enough
+ * The plugin holds the `dispatch` sub-agent, a SessionStart hook that injects the policy and a
+ * PreToolUse hook on the `Agent` tool (hard mode, see `./hook.ts`). Claude Code reads a directory
+ * marketplace plugin from that folder ("Read from" in `claude plugin list`), not from its
+ * per-version cache copy, so `setup --refresh` re-rendering the files reaches every new session
+ * without a reinstall. There is no auto-allow: `doctor` prints the permission rules for the user
+ * to add (see `./doctor.ts`). Setup runs two `claude plugin …` commands and records enough
  * to undo them exactly, including the leftovers the CLI keeps after uninstall
  * (docs/spikes/hosts-prototype.md §1).
  */
@@ -67,6 +70,8 @@ export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostInte
 
   const host: HostIntegration = {
     id: "claude-code",
+    // The frozen contract has no value for the `updatedInput` rewrite (it is neither "none" nor
+    // "deny_redirect"); the PreToolUse matcher lives in the plugin's hooks.json.
     subagentStrategy: "none",
     subagentMatcher: null,
     waitTimeoutSec: CLAUDE_WAIT_TIMEOUT_SEC,
@@ -154,7 +159,7 @@ export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostInte
               ],
             },
           },
-          "installs the Dispatch plugin (a sub-agent and a SessionStart hook) for every Claude Code session of this user",
+          "installs the Dispatch plugin (a sub-agent, a SessionStart hook, and a PreToolUse hook that redirects general-purpose sub-agents to Dispatch in trusted repos) for every Claude Code session of this user",
         ),
       ];
     },

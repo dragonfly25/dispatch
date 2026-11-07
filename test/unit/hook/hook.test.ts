@@ -110,6 +110,22 @@ describe("hook cache", () => {
     expect(() => writeHookCache(join(t.dispatchHome, HOOK_CACHE_FILE, "x"), cache)).toThrow();
   });
 
+  it("format 1 stays compatible: Claude hard-mode fields are optional but typed [UC2]", () => {
+    const t = tempHome();
+    h = t;
+    const hard = {
+      ...cache,
+      policy: { ...cache.policy, claudeHard: true, claudeIntercept: ["general-purpose", "*"] },
+    };
+    writeHookCache(t.dispatchHome, hard);
+    expect(readHookCache(t.dispatchHome)).toEqual(hard);
+    for (const bad of [{ claudeHard: "yes" }, { claudeIntercept: "*" }, { claudeIntercept: [1] }]) {
+      const file = join(t.dispatchHome, HOOK_CACHE_FILE);
+      writeFileSync(file, JSON.stringify({ ...cache, policy: { ...cache.policy, ...bad } }));
+      expect(readHookCache(t.dispatchHome)).toBeNull();
+    }
+  });
+
   it("finds the most specific trusted repo and the Dispatch home", () => {
     expect(trustedRepoFor(cache, "/w/repo/sub/x")?.root).toBe("/w/repo/sub");
     expect(trustedRepoFor(cache, "/w/repo")?.root).toBe("/w/repo");

@@ -314,6 +314,25 @@ export const GlobalConfigFileSchema = z
           .strict()
           .optional()
           .describe("Codex host integration."),
+        "claude-code": z
+          .object({
+            hard: z
+              .boolean()
+              .optional()
+              .describe(
+                "Rewrite intercepted Claude Code sub-agent calls (Agent tool) to the `dispatch:dispatch` sub-agent in trusted repos whose policy delegates (default true); false keeps only the SessionStart context.",
+              ),
+            intercept: z
+              .array(z.string().min(1).max(100))
+              .max(50)
+              .optional()
+              .describe(
+                'Sub-agent types the hard mode redirects (default ["general-purpose"]; a call without a type counts as general-purpose). `"*"` means every type; `dispatch:dispatch` is never redirected.',
+              ),
+          })
+          .strict()
+          .optional()
+          .describe("Claude Code host integration."),
       })
       .strict()
       .optional()

@@ -54,7 +54,7 @@ describe("claude-code SessionStart handler [UC2][UC9]", () => {
 
       Delegate reviews and tests to codex.
 
-      When to delegate: only self-contained coding tasks of the types named in the policy above, and only when the user asks to delegate or the policy says so. Work the policy pins to the host stays in this session.
+      When to delegate: tasks of the types the policy above routes to a provider are delegated through the \`dispatch:dispatch\` sub-agent instead of being done in this session, unless the user says otherwise. Work the policy keeps on or pins to the host stays in this session.
 
       How: call the \`dispatch:dispatch\` sub-agent (Agent tool, subagent_type "dispatch:dispatch") with a complete, self-contained task. Without the sub-agent, use the Bash tool: \`<DH>/bin/dispatch run --detach --json --task '<task>' [--task-type T] [--path P]...\`, then repeat \`<DH>/bin/dispatch wait <runId> --json --timeout 100\` while its exit code is 75. Never start a second run for the same task.
 
@@ -72,7 +72,7 @@ describe("claude-code SessionStart handler [UC2][UC9]", () => {
     try {
       const res = await hookHandlers.SessionStart?.({ ...input, cwd: sub });
       expect(res?.stdout).toContain("additionalContext");
-      expect(Object.keys(hookHandlers)).toEqual(["SessionStart"]);
+      expect(Object.keys(hookHandlers)).toEqual(["SessionStart", "PreToolUse"]);
     } finally {
       if (old === undefined) delete process.env.DISPATCH_HOME;
       else process.env.DISPATCH_HOME = old;

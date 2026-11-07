@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { EditOp, HostIntegration } from "../../../src/core/contracts.js";
+import { sha256 } from "../../../src/hosts/_framework/fsutil.js";
 import {
   applySetup,
   planSetup,
@@ -9,6 +10,7 @@ import {
   type SetupContext,
   uninstallGlobal,
 } from "../../../src/hosts/_framework/index.js";
+import { CLAUDE_AGENT_MATCHER } from "../../../src/hosts/claude-code/hook.js";
 import {
   claudeConfigDir,
   claudeInstanceOf,
@@ -79,7 +81,7 @@ describe("claude-code plan and setup [UC1]", () => {
         `  - run ${claudeBin()} plugin install dispatch@dispatch-local -s user --json -y`,
         "",
         "Trust grants (they give a host extra authority; read them carefully):",
-        `  - ${claudeBin()}: installs the Dispatch plugin (a sub-agent and a SessionStart hook) for every Claude Code session of this user`,
+        `  - ${claudeBin()}: installs the Dispatch plugin (a sub-agent, a SessionStart hook, and a PreToolUse hook that redirects general-purpose sub-agents to Dispatch in trusted repos) for every Claude Code session of this user`,
         "",
         "Hosts detected: claude-code",
         "",
@@ -109,7 +111,15 @@ describe("claude-code plan and setup [UC1]", () => {
     expect(command).toContain(
       "exec '/opt/node/bin/node' '/opt/d/hook.mjs' claude-code SessionStart",
     );
-    expect(Object.keys(hooks.hooks)).toEqual(["SessionStart"]); // soft mode: no PreToolUse
+    expect(Object.keys(hooks.hooks)).toEqual(["SessionStart", "PreToolUse"]);
+    const pre = hooks.hooks.PreToolUse[0];
+    expect(pre.matcher).toBe(CLAUDE_AGENT_MATCHER); // [UC2] hard mode
+    expect(pre.hooks[0]).toEqual({
+      type: "command",
+      command: command.replace(/SessionStart$/, "PreToolUse"),
+      timeout: 5,
+    });
+    expect(command.startsWith('[ -n "$DISPATCH_DEPTH" ] && exit 0;')).toBe(true);
     expect(
       JSON.parse(readFileSync(join(bundle(), ".claude-plugin", "marketplace.json"), "utf8")).name,
     ).toBe("dispatch-local");
@@ -166,6 +176,52 @@ describe("claude-code plan and setup [UC1]", () => {
       expect(existsSync(h.dispatchHome)).toBe(false);
     },
   );
+
+  it("refresh of a v0.1.0 install adds the PreToolUse hook in place, no reinstall; uninstall still restores [UC2][UC14][AC2]", async () => {
+    h = tempHome();
+    mkdirSync(join(h.home, ".claude"));
+    const settings = join(h.home, ".claude", "settings.json");
+    const original = '{\n  "model": "opus"\n}\n';
+    writeFileSync(settings, original);
+    const runner = fakeClaudeRunner(h.home);
+    const integration = host();
+    // A v0.1.0 install: the same plan, but hooks.json with SessionStart only.
+    const old = await planSetup(ctx([integration]));
+    const hooksFile = join(bundle(), "plugins", "dispatch", "hooks", "hooks.json");
+    old.ops = old.ops.map((op) => {
+      if (op.file !== hooksFile) return op;
+      const parsed = JSON.parse(op.content);
+      delete parsed.hooks.PreToolUse;
+      const content = `${JSON.stringify(parsed, null, 2)}\n`;
+      return { ...op, content, sha256: sha256(content) };
+    });
+    await applySetup(old, { dispatchHome: h.dispatchHome, confirm: true, runner });
+    expect(Object.keys(JSON.parse(readFileSync(hooksFile, "utf8")).hooks)).toEqual([
+      "SessionStart",
+    ]);
+
+    const plan = await planSetup(ctx([integration]));
+    expect(plan.stale).toEqual([]);
+    const refreshed = await applySetup(plan, {
+      dispatchHome: h.dispatchHome,
+      confirm: true,
+      runner,
+      refresh: true,
+    });
+    expect(refreshed.applied).toEqual([hooksFile]);
+    expect(Object.keys(JSON.parse(readFileSync(hooksFile, "utf8")).hooks)).toEqual([
+      "SessionStart",
+      "PreToolUse",
+    ]);
+    // Claude reads a directory marketplace plugin from its folder: no plugin reinstall.
+    expect(runner.calls).toHaveLength(2);
+
+    const un = await uninstallGlobal({ dispatchHome: h.dispatchHome, runner });
+    expect(un.warnings).toEqual([]);
+    expect(readFileSync(settings, "utf8")).toBe(original);
+    expect(readdirSync(join(h.home, ".claude"))).toEqual(["settings.json"]);
+    expect(existsSync(h.dispatchHome)).toBe(false);
+  });
 
   it("with no settings.json beforehand, no Dispatch key and no plugin leftovers remain", async () => {
     h = tempHome();
@@ -321,13 +377,13 @@ describe("claude-code self detection and instances [UC12]", () => {
 });
 
 describe("claude-code integration shape", () => {
-  it("is soft: no sub-agent strategy, wait 100 s, SessionStart handler only", () => {
+  it("no contract sub-agent strategy (the rewrite lives in hooks.json), wait 100 s, both handlers", () => {
     h = tempHome();
     const integration = host({}, false);
     expect(integration.id).toBe("claude-code");
     expect(integration.subagentStrategy).toBe("none");
     expect(integration.subagentMatcher).toBeNull();
     expect(integration.waitTimeoutSec).toBe(100);
-    expect(Object.keys(integration.hookHandlers)).toEqual(["SessionStart"]);
+    expect(Object.keys(integration.hookHandlers)).toEqual(["SessionStart", "PreToolUse"]);
   });
 });

@@ -32,6 +32,17 @@ export interface PolicySummary {
    * (`deny_redirect`); otherwise the spawn proceeds. Absent in caches written before WP27: false.
    */
   hardInterception?: boolean;
+  /**
+   * Claude Code hard mode (`hosts.claude-code.hard`, default true): with `hardInterception`, the
+   * Claude PreToolUse hook rewrites intercepted `Agent` calls to the `dispatch:dispatch` sub-agent.
+   * Absent in caches written before Claude hard mode: false (soft only).
+   */
+  claudeHard?: boolean;
+  /**
+   * Sub-agent types the Claude hook intercepts (`hosts.claude-code.intercept`); `"*"` means every
+   * type. Absent: `["general-purpose"]`.
+   */
+  claudeIntercept?: string[];
   /** One short paragraph for the host model (`additionalContext`). */
   summary: string;
 }
@@ -72,6 +83,10 @@ function isCache(v: unknown): v is HookCache {
     typeof p.profile === "string" &&
     typeof p.hardMode === "boolean" &&
     (p.hardInterception === undefined || typeof p.hardInterception === "boolean") &&
+    (p.claudeHard === undefined || typeof p.claudeHard === "boolean") &&
+    (p.claudeIntercept === undefined ||
+      (Array.isArray(p.claudeIntercept) &&
+        p.claudeIntercept.every((t) => typeof t === "string"))) &&
     typeof p.summary === "string"
   );
 }

@@ -48,6 +48,18 @@ const preToolUse = (cwd: string) =>
     session_id: "s1",
     cwd,
   });
+const claudeAgent = (cwd: string) =>
+  JSON.stringify({
+    hook_event_name: "PreToolUse",
+    tool_name: "Agent",
+    tool_input: {
+      description: "tests",
+      prompt: "write the tests",
+      subagent_type: "general-purpose",
+    },
+    session_id: "s1",
+    cwd,
+  });
 
 describe("[UC9] collaborator without Dispatch", () => {
   it("[UC9][AC5] a fresh clone of a repo with .dispatch/ is silent for Claude Code and Codex hooks", () => {
@@ -59,8 +71,9 @@ describe("[UC9] collaborator without Dispatch", () => {
     owner.repo.git("add", ".dispatch");
     owner.repo.git("commit", "-q", "-m", "Share the Dispatch policy");
     const plugin = join(owner.home.dispatchHome, "hosts", "claude-code", "plugins", "dispatch");
-    const claudeCommand = JSON.parse(readFileSync(join(plugin, "hooks", "hooks.json"), "utf8"))
-      .hooks.SessionStart[0].hooks[0].command as string;
+    const claudeHooks = JSON.parse(readFileSync(join(plugin, "hooks", "hooks.json"), "utf8")).hooks;
+    const claudeCommand = claudeHooks.SessionStart[0].hooks[0].command as string;
+    const claudePreCommand = claudeHooks.PreToolUse[0].hooks[0].command as string;
 
     // Contrast: on the owner's machine the same command does speak.
     const ownerRun = guiHook(
@@ -70,6 +83,13 @@ describe("[UC9] collaborator without Dispatch", () => {
       owner.home.home,
     );
     expect(ownerRun.stdout).toContain("additionalContext");
+    const ownerPre = guiHook(
+      claudePreCommand,
+      owner.repo.dir,
+      claudeAgent(owner.repo.dir),
+      owner.home.home,
+    );
+    expect(ownerPre.stdout).toContain('"subagent_type":"dispatch:dispatch"');
 
     // The colleague: a clone, an empty HOME, no dispatch anywhere.
     const work = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-uc9-")));
@@ -87,10 +107,11 @@ describe("[UC9] collaborator without Dispatch", () => {
 
     const hookPath = bundles().hook;
     const missing = join(emptyHome, ".dispatch", "lib", "hook.mjs");
-    const commands = [claudeCommand];
+    const commands = [claudeCommand, claudePreCommand];
     for (const path of [hookPath, missing]) {
       for (const [host, event] of [
         ["claude-code", "SessionStart"],
+        ["claude-code", "PreToolUse"],
         ["codex", "SessionStart"],
         ["codex", "PreToolUse"],
       ] as const) {
@@ -100,7 +121,13 @@ describe("[UC9] collaborator without Dispatch", () => {
       }
     }
     for (const command of commands) {
-      for (const input of [sessionStart(clone), preToolUse(clone), "", "not json {{"]) {
+      for (const input of [
+        sessionStart(clone),
+        preToolUse(clone),
+        claudeAgent(clone),
+        "",
+        "not json {{",
+      ]) {
         for (const home of [emptyHome, null]) {
           const r = guiHook(command, clone, input, home);
           expect({ code: r.status, out: r.stdout, err: r.stderr }, command).toEqual({

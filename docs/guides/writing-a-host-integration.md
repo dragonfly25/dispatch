@@ -10,7 +10,7 @@ and `src/hosts/codex/`; their templates are already in `assets/hosts/`):
 
 | Host id | Mode | What `setup` installs | Hook events |
 | --- | --- | --- | --- |
-| `claude-code` | soft (`subagentStrategy: "none"`) | A user-scope plugin from a local marketplace (agent `dispatch:dispatch` + a hook), via `claude plugin ...` | `SessionStart` |
+| `claude-code` | hard by rewrite (`subagentStrategy: "none"`, see below) | A user-scope plugin from a local marketplace (agent `dispatch:dispatch` + hooks), via `claude plugin ...` | `SessionStart`, `PreToolUse` (`Agent\|Task`) |
 | `codex` | hard (`subagentStrategy: "deny_redirect"`) | A skill, entries in `~/.codex/hooks.json`, and `~/.codex/rules/dispatch.rules` (a trust grant) | `SessionStart`, `PreToolUse` |
 
 Read first: [`docs/PLAN.md`](../PLAN.md) ("Host integration" and the amendments),
@@ -75,7 +75,7 @@ interface HostIntegration {
 | Member | Rules |
 | --- | --- |
 | `id` | A closed union in `src/core/contracts.ts` (frozen by [ADR 0002](../adr/0002-wp1-contract-freeze.md)). A third host first needs a new ADR that extends the union (and `DetectedHost` in `src/platform/host.ts`, which already recognises Antigravity without integrating it). |
-| `subagentStrategy` | `none`: soft mode, the host decides when to call the Dispatch agent or skill. `deny_redirect`: a `PreToolUse` hook denies the host's native sub-agent spawn and the denial reason tells the model to run `<launcher> run --detach --json --task '<task>'` and then `wait`. There is deliberately no "proxy the sub-agent" variant: on Codex multi-agent V2 the spawn message is encrypted, so a hook cannot read or rewrite it. |
+| `subagentStrategy` | `none`: soft mode, the host decides when to call the Dispatch agent or skill. `deny_redirect`: a `PreToolUse` hook denies the host's native sub-agent spawn and the denial reason tells the model to run `<launcher> run --detach --json --task '<task>'` and then `wait`. There is no "proxy the sub-agent" value: on Codex multi-agent V2 the spawn message is encrypted, so a hook cannot read or rewrite it. Claude Code can: its `PreToolUse` hook on `Agent` answers `permissionDecision: "allow"` with an `updatedInput` (the complete tool input) whose `subagent_type` is `dispatch:dispatch`. The frozen enum has no value for that, so the Claude integration keeps `"none"` and its matcher lives in the plugin's `hooks.json`. |
 | `subagentMatcher` | The `PreToolUse` matcher when the strategy is not `none` (Codex: `spawn_agent\|collaborationspawn_agent\|Agent`, because on V2 the hook sees `collaborationspawn_agent`); otherwise `null`. |
 | `waitTimeoutSec` | Default `wait --timeout` for calls from this host, in seconds. Must be shorter than the host's shell tool timeout so the call returns (exit 75, "still running") instead of being killed. Claude: 100 (Bash default 120 s). Codex: 280 (unified exec yields after at most 30 s, then polls up to 300 s). It becomes `{{WAIT_TIMEOUT}}` in your templates. `wait` is read-only and safe to run concurrently, because some models start duplicates. |
 | `detectSelf(env)` | Identify the *calling* host from the environment only (`CLAUDECODE=1`, `CODEX_THREAD_ID`), never from the binary on PATH: the desktop app bundles its own CLI version. Return `{ host, version }` or `null`. The result decides which instance is "self" and is never chosen as a delegation target. |

@@ -275,4 +275,26 @@ describe("Codex hard-mode fields [UC3]", () => {
     expect(buildHookCache(ctx).policy.hardMode).toBe(false);
     ctx.close();
   });
+
+  it("claudeHard and claudeIntercept follow hosts.claude-code (defaults true, general-purpose) [UC2]", () => {
+    home = tempHome();
+    mkdirSync(home.dispatchHome, { recursive: true });
+    const config = join(home.dispatchHome, "config.yaml");
+    writeFileSync(config, "version: 1\n");
+    const ctx = loadAppContext({ cwd: process.cwd(), env: home.env });
+    expect(buildHookCache(ctx).policy).toMatchObject({
+      claudeHard: true,
+      claudeIntercept: ["general-purpose"],
+    });
+    writeFileSync(
+      config,
+      'version: 1\nhosts:\n  claude-code:\n    hard: false\n    intercept: ["*", "Explore"]\n',
+    );
+    expect(buildHookCache(ctx).policy).toMatchObject({
+      claudeHard: false,
+      claudeIntercept: ["*", "Explore"],
+      hardMode: true,
+    });
+    ctx.close();
+  });
 });

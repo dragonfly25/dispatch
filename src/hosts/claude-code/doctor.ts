@@ -6,6 +6,7 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
+import { readHookCache } from "../../hook/cache.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { createCommandRunner } from "../../runner/command.js";
 import type {
@@ -14,6 +15,7 @@ import type {
   DoctorContext,
   DoctorResult,
 } from "../_framework/index.js";
+import { CLAUDE_AGENT_MATCHER, interceptList } from "./hook.js";
 import { claudeConfigDir, MARKETPLACE, PLUGIN_ID } from "./integration.js";
 
 /** Injectable dependencies of the checks. */
@@ -233,7 +235,85 @@ function permissionCheck(deps: ClaudeDoctorDeps): DoctorCheck {
   };
 }
 
+/** True when the rendered hooks.json has the Dispatch PreToolUse entry on the Agent tool. */
+function hasAgentHook(hooksFile: string): boolean {
+  const v = JSON.parse(readFileSync(hooksFile, "utf8")) as {
+    hooks?: { PreToolUse?: { matcher?: unknown; hooks?: { command?: unknown }[] }[] };
+  };
+  return (v.hooks?.PreToolUse ?? []).some(
+    (e) =>
+      e.matcher === CLAUDE_AGENT_MATCHER &&
+      (e.hooks ?? []).some(
+        (x) => typeof x.command === "string" && x.command.endsWith(" claude-code PreToolUse"),
+      ),
+  );
+}
+
+/**
+ * `claude-code.hard-mode` (UC2): the plugin has the PreToolUse hook, and whether hard mode is on
+ * (`hosts.claude-code.hard`) and which sub-agent types it redirects, as the hook cache says.
+ */
+function hardModeCheck(deps: ClaudeDoctorDeps): DoctorCheck {
+  return {
+    id: "claude-code.hard-mode",
+    run(ctx) {
+      if (absent(ctx, deps)) return NOT_FOUND;
+      const hooksFile = join(
+        ctx.dispatchHome,
+        "hosts",
+        "claude-code",
+        "plugins",
+        "dispatch",
+        "hooks",
+        "hooks.json",
+      );
+      if (!existsSync(hooksFile)) {
+        return { status: "warn", message: "the plugin hooks are not installed", fix: SETUP_FIX };
+      }
+      let hooked: boolean;
+      try {
+        hooked = hasAgentHook(hooksFile);
+      } catch {
+        hooked = false;
+      }
+      if (!hooked) {
+        return {
+          status: "warn",
+          message:
+            "the plugin has no PreToolUse hook on the Agent tool (installed before hard mode), so sub-agents are never redirected",
+          fix: REFRESH_FIX,
+        };
+      }
+      const cache = readHookCache(ctx.dispatchHome);
+      if (cache === null || cache.policy.claudeHard === undefined) {
+        return {
+          status: "warn",
+          message: "the hook cache does not say whether Claude hard mode is on",
+          fix: REFRESH_FIX,
+        };
+      }
+      if (!cache.policy.claudeHard) {
+        return {
+          status: "ok",
+          message:
+            "hard mode is off (hosts.claude-code.hard: false): only the SessionStart policy context",
+        };
+      }
+      const list = interceptList(cache);
+      const types = list.includes("*") ? "every sub-agent type" : list.join(", ");
+      const idle =
+        cache.policy.hardInterception === true
+          ? ""
+          : "; the active policy delegates nothing, so nothing is redirected now";
+      return {
+        status: "ok",
+        message: `hard mode is on: Agent calls of ${types} are redirected to dispatch:dispatch in trusted repos${idle}`,
+      };
+    },
+  };
+}
+
 /** The Claude Code doctor checks. */
 export function claudeDoctorChecks(deps: ClaudeDoctorDeps = {}): DoctorCheck[] {
-  return [pluginCheck(deps), filesCheck(deps), permissionCheck(deps)];
+  return [pluginCheck(deps), filesCheck(deps), permissionCheck(deps), hardModeCheck(deps)];
 }
