@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`[UC8] status --compare on a seeded set of recorded decisions > renders the per-profile table (snapshot) 1`] = `
+"Dispatch status --compare (all recorded decisions)
+Real decisions: 20. All figures are ESTIMATED from recorded decision snapshots.
+
+profile   tasks  delegated  host  reject  fallback  fell-through  rel.cost
+balance*     20         16     3       1        16             4        48
+preserve     20         16     3       1         0           n/a        60
+
+Per instance (planned delegations, estimated relative cost):
+  balance: codex x16 (cost 48)
+  preserve: claude-alt x4 (cost 12), codex x16 (cost 48)
+
+* = profile that was active for some of these decisions (the real routing)
+n/a = profile never ran for real, so fall-throughs cannot be observed
+Host consumption: not observable
+"
+`;
