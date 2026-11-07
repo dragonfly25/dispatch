@@ -3,8 +3,19 @@
  * (e.g. for better-sqlite3) without touching the store or the migrations.
  */
 import { chmodSync, closeSync, mkdirSync, openSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+
+/**
+ * `node:sqlite` is loaded on first use, not at import time: it prints an ExperimentalWarning when
+ * it loads, and commands that never open the database (or the light hook entry) must not pay it.
+ */
+let sqlite: typeof import("node:sqlite") | undefined;
+function loadSqlite(): typeof import("node:sqlite") {
+  sqlite ??= createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite");
+  return sqlite;
+}
 
 /** A bindable SQL parameter. */
 export type SqlValue = string | number | bigint | null | Uint8Array;
@@ -100,7 +111,7 @@ export function openDb(path: string): DbPort {
     closeSync(openSync(path, "a", 0o600));
     chmodSync(path, 0o600);
   }
-  const db = new DatabaseSync(path, { timeout: 5000 });
+  const db = new (loadSqlite().DatabaseSync)(path, { timeout: 5000 });
   for (const pragma of PRAGMAS) db.exec(pragma);
   return new NodeSqliteDb(db);
 }

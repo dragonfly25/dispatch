@@ -16,6 +16,8 @@ const shared: Options = {
   splitting: false,
   sourcemap: false,
   dts: false,
+  // tsup strips "node:" by default; `node:sqlite` only exists WITH the prefix.
+  removeNodeProtocol: false,
 };
 
 export default defineConfig([

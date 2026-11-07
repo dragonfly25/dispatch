@@ -5,28 +5,26 @@ import { DispatchError } from "../core/errors.js";
 import { CODEX_SANDBOX_MESSAGE, codexSandboxActive } from "../platform/host.js";
 import { currentInstallPaths } from "../platform/launcher.js";
 import { assertSupportedPlatform } from "../platform/platform.js";
+import { type CliDeps, registerReadCommands } from "./commands/index.js";
+import { type CliIo, processIo } from "./io.js";
 import { type RepoCommandDeps, registerRepoCommands } from "./repo-commands.js";
 import { defaultSetupDeps, registerSetupCommands, type SetupCommandDeps } from "./setup.js";
 
-/** Output sinks, injectable for tests. */
-export interface CliIo {
-  out(text: string): void;
-  err(text: string): void;
-}
-
-const processIo: CliIo = {
-  out: (text) => process.stdout.write(text),
-  err: (text) => process.stderr.write(text),
-};
+export type { CliIo } from "./io.js";
 
 /** Package version, read from package.json at build time. */
 export const VERSION: string = pkg.version;
 
-/** Builds the commander program. Subcommands are registered here by later work packages. */
+/**
+ * Builds the commander program. `setupDeps` overrides the setup commands' collaborators and
+ * `repoDeps` those of `install`/`uninstall`, and `readDeps` carries the process facts the read
+ * commands use (cwd, environment, clock, spawner); tests inject their own. Later work packages register more commands here.
+ */
 export function buildProgram(
   io: CliIo = processIo,
   setupDeps: Partial<SetupCommandDeps> = {},
   repoDeps: Partial<RepoCommandDeps> = {},
+  readDeps: Omit<CliDeps, "io"> = { cwd: process.cwd(), env: process.env },
 ): Command {
   const program = new Command()
     .name("dispatch")
@@ -47,6 +45,7 @@ export function buildProgram(
   // real setup when the global config is missing.
   const repo = registerRepoCommands(program, io, repoDeps, fullSetup);
   registerSetupCommands(program, io, { repoUninstall: repo.uninstall, ...fullSetup });
+  registerReadCommands(program, { ...readDeps, io });
   return program;
 }
 
