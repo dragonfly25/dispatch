@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { Command } from "commander";
+import { refreshHookCacheSafely } from "../app/hook-cache.js";
 import { globalConfigPath, type PathEnv } from "../config/paths.js";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
@@ -105,6 +106,9 @@ export function registerRepoCommands(
 ): RepoCommandHandles {
   const deps: RepoCommandDeps = { ...defaultDeps(setup), ...overrides };
   const say = (line: string): void => io.out(line);
+  /** Rewrites the hook cache for the policy now in effect in `cwd` (best effort). */
+  const refresh = (cwd: string): void =>
+    refreshHookCacheSafely({ cwd, env: deps.env }, (m) => io.err(`warning: ${m}\n`));
 
   /**
    * A confirm function, or undefined when the flags say not to ask. Without a terminal it fails
@@ -162,6 +166,7 @@ export function registerRepoCommands(
         confirm,
       });
       if (result.status === "aborted") return;
+      refresh(cwd);
       say(
         `\nInstalled: ${result.created.length} file(s) in .dispatch/${result.trusted ? " (trusted)" : ""}.\n` +
           "Next steps:\n" +
@@ -180,6 +185,7 @@ export function registerRepoCommands(
         force: opts.force,
         confirm: confirmFor(opts.yes),
       });
+      refresh(deps.cwd());
     },
   };
 }

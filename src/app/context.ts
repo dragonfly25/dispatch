@@ -31,6 +31,7 @@ import { defaultReaders } from "../quota/readers/index.js";
 import { ROUTER_VERSION } from "../router/index.js";
 import { ProcessSpawner } from "../runner/proc.js";
 import { SqliteStateStore } from "../state/store.js";
+import { forceProvider } from "./force-provider.js";
 
 /** Process environment (or a test double). */
 export type AppEnv = Readonly<Record<string, string | undefined>>;
@@ -52,10 +53,16 @@ export interface LoadAppContextOptions {
   newId?: () => string;
   /** Quota readers per adapter; overrides the default set (tests pass an empty registry). */
   quotaReaders?: QuotaReaderRegistry;
-  /** Spawner for the default quota readers (agy `/usage`); default: a `ProcessSpawner`. */
+  /** Spawner for the quota readers and the runner; default: a `ProcessSpawner`. */
   spawner?: Spawner;
   /** Override of the built-in assets directory (tests). */
   assetsDir?: string;
+  /**
+   * `--provider <instance>`: a flag-level pin that routes every task to this instance first
+   * (see {@link forceProvider}). `undefined` or `"auto"` leaves routing alone.
+   * @throws DispatchError (exit 2) for an unknown or disabled instance.
+   */
+  provider?: string | undefined;
 }
 
 /** Everything a command needs. Create with {@link loadAppContext}; call `close()` when done. */
@@ -71,8 +78,12 @@ export interface AppContext {
   assetsDir: string;
   /** `<dispatchHome>/state/dispatch.db`. */
   dbPath: string;
-  /** Opened on first access. */
+  /** Opened on first access (redacts {@link AppContext.secrets} from everything it stores). */
   readonly store: SqliteStateStore;
+  /** Process spawner shared by the quota readers and the runner. */
+  readonly spawner: Spawner;
+  /** Env values withheld from children; the store masks them too. Grows while a run starts. */
+  readonly secrets: string[];
   /** Created on first access (opens the store). */
   readonly quota: DefaultQuotaProvider;
   /** The quota readers in use (default: claude, codex and agy readers). */
@@ -85,12 +96,15 @@ export interface AppContext {
 /** Loads the effective configuration and wires the collaborators. Throws `config.*` errors. */
 export function loadAppContext(opts: LoadAppContextOptions): AppContext {
   const clock = opts.clock ?? systemClock;
-  const config = loadEffectiveConfig({
+  let config = loadEffectiveConfig({
     cwd: opts.cwd,
     env: opts.env,
     ...(opts.flags === undefined ? {} : { flags: opts.flags }),
     ...(opts.assetsDir === undefined ? {} : { assetsDir: opts.assetsDir }),
   });
+  if (opts.provider !== undefined && opts.provider !== "auto") {
+    config = forceProvider(config, opts.provider);
+  }
   const host = resolveHost(opts.env, config.execution.instances);
   const home = dispatchHome(opts.env);
   const dbPath = join(home, "state", "dispatch.db");
@@ -98,6 +112,8 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
   let store: SqliteStateStore | undefined;
   let quota: DefaultQuotaProvider | undefined;
   let readers: QuotaReaderRegistry | undefined;
+  const secrets: string[] = [];
+  const spawner = opts.spawner ?? new ProcessSpawner();
   const ctx: AppContext = {
     cwd: opts.cwd,
     env: opts.env,
@@ -107,8 +123,10 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
     dispatchHome: home,
     assetsDir: opts.assetsDir ?? builtInAssetsDir(),
     dbPath,
+    spawner,
+    secrets,
     get store() {
-      store ??= SqliteStateStore.open(dbPath, { clock });
+      store ??= SqliteStateStore.open(dbPath, { clock, secrets: () => secrets });
       return store;
     },
     get readers() {
@@ -116,10 +134,10 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
         opts.quotaReaders ??
         defaultReaders({
           clock,
-          spawner: opts.spawner ?? new ProcessSpawner(),
+          spawner,
           store: ctx.store,
           env: opts.env,
-          reliability: { cacheMinutes: config.execution.quota.cacheMinutes },
+          reliability: { cacheMinutes: ctx.config.execution.quota.cacheMinutes },
           onObservation: (o) => ctx.quota.recordObservation(o),
         });
       return readers;
@@ -129,10 +147,10 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
         store: ctx.store,
         clock,
         readers: ctx.readers,
-        disabledReaders: disabledReaders(config, ctx.readers),
-        reliability: { cacheMinutes: config.execution.quota.cacheMinutes },
-        instancePlans: instancePlans(config),
-        relativeCost: relativeCost(config),
+        disabledReaders: disabledReaders(ctx.config, ctx.readers),
+        reliability: { cacheMinutes: ctx.config.execution.quota.cacheMinutes },
+        instancePlans: instancePlans(ctx.config),
+        relativeCost: relativeCost(ctx.config),
         hostInstanceId: host.self,
       });
       return quota;
@@ -152,7 +170,7 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
  * Reader ids switched off by `quota.readers.<key>.enabled: false`, where `<key>` is a reader id
  * or an instance id (which disables every reader of that instance's adapter).
  */
-function disabledReaders(config: EffectiveConfig, registry: QuotaReaderRegistry): string[] {
+export function disabledReaders(config: EffectiveConfig, registry: QuotaReaderRegistry): string[] {
   const switches = config.execution.quota.readers;
   const off = (key: string) => switches[key]?.enabled === false;
   const byInstance = config.execution.instances
@@ -311,7 +329,10 @@ export interface DecisionInputOptions {
 }
 
 /** Quota snapshot for the router; a broken store or reader degrades to "unknown", never throws. */
-async function snapshotOrUnknown(ctx: AppContext, host: string | null): Promise<QuotaSnapshot> {
+export async function snapshotOrUnknown(
+  ctx: AppContext,
+  host: string | null,
+): Promise<QuotaSnapshot> {
   // Only enabled instances are read: a disabled provider (e.g. Antigravity, off by default for
   // ToS reasons) must never have its CLI spawned, not even for a quota-free read.
   const all = ctx.config.execution.instances;

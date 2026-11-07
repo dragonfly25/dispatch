@@ -61,7 +61,7 @@ export interface RunnerSandbox {
   dispose(path: string, keep: boolean): Promise<void>;
 }
 
-/** Injected dependencies of {@link executeTask} (built by `createRunnerDeps` or a test). */
+/** Injected dependencies of {@link executeTask} (built by `runnerDeps` (src/app/runner.ts) or a test). */
 export interface RunnerDeps {
   config: Pick<EffectiveConfig, "routing" | "execution">;
   store: RunnerStore;

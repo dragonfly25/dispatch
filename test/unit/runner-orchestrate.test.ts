@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { disabledReaders, loadAppContext } from "../../src/app/context.js";
+import { runnerDeps } from "../../src/app/runner.js";
 import type { ExecutionConfig } from "../../src/config/load.js";
 import type {
   ProbeResult,
@@ -14,7 +16,6 @@ import type {
 import { RunResultSchema } from "../../src/core/contracts.js";
 import type { RoutingConfig, Rule } from "../../src/core/routing.js";
 import { isSecretLike, readOnlyOverride } from "../../src/runner/attempt.js";
-import { createRunnerDeps, disabledReaderIds } from "../../src/runner/deps.js";
 import { acquireLease, isProcessAlive, SELF_PID_START } from "../../src/runner/lease.js";
 import { ProbeCache, trapTermination } from "../../src/runner/lifecycle.js";
 import { executeTask, MAX_SUMMARY_CHARS, type RunnerDeps } from "../../src/runner/orchestrate.js";
@@ -119,12 +120,14 @@ function setup(o: SetupOptions = {}) {
   });
   probes.set("claude", "claude", probe("claude"));
   probes.set("codex", "codex", probe("codex"));
-  const deps = createRunnerDeps({
-    config: { routing: routing(o.action ?? CODEX, o.routing), execution: execution(o.exec) },
-    env,
-    overrides: { probes, ...o.overrides },
-  });
-  closers.push(deps.close);
+  const ctx = loadAppContext({ cwd: repo.dir, env });
+  ctx.config = {
+    ...ctx.config,
+    routing: routing(o.action ?? CODEX, o.routing),
+    execution: execution(o.exec),
+  };
+  const deps = runnerDeps(ctx, { probes, ...o.overrides });
+  closers.push(() => ctx.close());
   const run = (t: Partial<Task> = {}) =>
     executeTask(deps, task(t), { repoPath: repo?.dir ?? "", signals: null, leaseWaitMs: 0 });
   return { deps, env, run, repo, home, fakes };
@@ -277,10 +280,12 @@ describe("executeTask", () => {
   it("[AC4] delegates with every quota reader disabled", async () => {
     const readers = { claude: { enabled: false }, codex: { enabled: false } };
     const exec = execution({ quota: { cacheMinutes: 5, readers } });
-    expect(disabledReaderIds({ routing: makeConfig(), execution: exec })).toEqual([
+    const ctx = loadAppContext({ cwd: process.cwd(), env: tempHome().env });
+    expect(disabledReaders({ ...ctx.config, execution: exec }, ctx.readers)).toEqual([
       "claude-passive",
       "codex-app-server",
     ]);
+    ctx.close();
     const { run } = setup({
       exec: { quota: { cacheMinutes: 5, readers } },
       scenarios: { codex: [{ scenario: "success_edit", file: "b.txt", content: "b\n" }] },

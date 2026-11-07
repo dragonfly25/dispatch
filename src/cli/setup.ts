@@ -4,6 +4,7 @@
  */
 import { createInterface } from "node:readline/promises";
 import { type Command, Option } from "commander";
+import { refreshHookCacheSafely } from "../app/hook-cache.js";
 import { dispatchHome } from "../config/paths.js";
 import { ExitCode, type HostIntegration } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
@@ -105,6 +106,7 @@ export async function runSetup(
     return;
   }
   for (const w of summary.warnings) io.err(`warning: ${w}\n`);
+  refreshHookCacheSafely({ cwd: process.cwd(), env: deps.env }, (m) => io.err(`warning: ${m}\n`));
   io.out(
     `Setup done: ${summary.applied.length} applied, ${summary.unchanged.length} unchanged, ${summary.removed.length} removed.\n`,
   );
@@ -152,6 +154,12 @@ export function registerSetupCommands(program: Command, io: SetupIo, deps: Setup
           runner: deps.runner(home),
         });
         for (const w of summary.warnings) io.err(`warning: ${w}\n`);
+        // With the home gone there is nothing to cache (and no hook left to read it).
+        if (!summary.homeRemoved) {
+          refreshHookCacheSafely({ cwd: process.cwd(), env: deps.env }, (m) =>
+            io.err(`warning: ${m}\n`),
+          );
+        }
         io.out(
           `Removed ${summary.reverted.length} Dispatch edit(s)${summary.homeRemoved ? ` and ${dHome}` : ""}.\n`,
         );

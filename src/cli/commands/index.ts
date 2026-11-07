@@ -5,6 +5,7 @@ import { registerGc } from "./gc.js";
 import { registerLogs } from "./logs.js";
 import { registerProfiles } from "./profiles.js";
 import { registerProviders } from "./providers.js";
+import { registerRun } from "./run.js";
 import type { CliDeps } from "./shared.js";
 import { registerStatus } from "./status.js";
 import { registerTrust } from "./trust.js";
@@ -13,8 +14,9 @@ import { registerValidate } from "./validate.js";
 
 export type { CliDeps } from "./shared.js";
 
-/** `explain`, `validate`, `profiles`, `use`, `providers`, `trust`, `status`, `logs`, `gc`. */
+/** `explain`, `validate`, `profiles`, `use`, `providers`, `trust`, `status`, `logs`, `gc`, and `run`. */
 export function registerReadCommands(program: Command, deps: CliDeps): void {
+  registerRun(program, deps);
   registerExplain(program, deps);
   registerValidate(program, deps);
   registerProfiles(program, deps);

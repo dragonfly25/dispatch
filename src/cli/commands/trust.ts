@@ -2,7 +2,7 @@
 import type { Command } from "commander";
 import { trustRepo } from "../../config/index.js";
 import { systemClock } from "../../core/clock.js";
-import { type CliDeps, printJson } from "./shared.js";
+import { type CliDeps, printJson, refreshCache } from "./shared.js";
 
 /** Registers `trust`. Prints the repo identity, the policy hash and every file covered. */
 export function registerTrust(program: Command, deps: CliDeps): void {
@@ -16,6 +16,7 @@ export function registerTrust(program: Command, deps: CliDeps): void {
         env: deps.env,
         now: (deps.clock ?? systemClock).now(),
       });
+      refreshCache(deps);
       const files = Object.entries(entry.files)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([path, sha256]) => ({ path, sha256 }));
