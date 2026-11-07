@@ -351,7 +351,10 @@ export function removeKeyIfEmpty(file: string, key: string): boolean {
   const value = getNodeValue(node);
   if (value === null || typeof value !== "object" || Object.keys(value).length > 0) return false;
   const edits = modify(text, [key], undefined, { formattingOptions: detectFormatting(text) });
-  atomicWrite(file, applyEdits(text, edits));
+  let next = applyEdits(text, edits);
+  // Removing the last property would leave "{\n}"; a file that held only our keys was "{}".
+  if (/^\s*\{\s*\}\s*$/.test(next)) next = text.endsWith("\n") ? "{}\n" : "{}";
+  atomicWrite(file, next);
   return true;
 }
 

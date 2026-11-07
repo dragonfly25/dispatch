@@ -3,6 +3,8 @@
  * each here, plus their doctor checks; their hook handlers go in `src/hook/handlers.ts`.
  */
 import { manifestCheck, registry } from "./_framework/index.js";
+import { claudeDoctorChecks } from "./claude-code/doctor.js";
+import { claudeCodeIntegration } from "./claude-code/integration.js";
 
 let done = false;
 
@@ -10,6 +12,8 @@ let done = false;
 export function builtinRegistry(): typeof registry {
   if (!done) {
     registry.registerDoctorCheck(manifestCheck);
+    registry.registerHost(claudeCodeIntegration);
+    for (const check of claudeDoctorChecks()) registry.registerDoctorCheck(check);
     done = true;
   }
   return registry;
