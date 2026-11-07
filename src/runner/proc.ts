@@ -191,7 +191,7 @@ export class ProcessSpawner implements Spawner {
         const deadline = clock.monotonicMs() + graceMs;
         while (signalGroup(pgid, 0) && clock.monotonicMs() < deadline) await sleep(POLL_MS);
         if (signalGroup(pgid, "SIGKILL")) {
-          for (let i = 0; i < 80 && signalGroup(pgid, 0); i++) await sleep(POLL_MS);
+          for (let i = 0; i < 200 && signalGroup(pgid, 0); i++) await sleep(POLL_MS);
         }
       })();
       return terminating;

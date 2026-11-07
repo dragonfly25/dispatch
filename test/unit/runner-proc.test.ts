@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,24 @@ import { isAlive, sleep, waitFor } from "./fakes-helpers.js";
 
 const NODE = process.execPath;
 const BASE_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
+
+/**
+ * Asserts that `pid` is gone. kill(pid, 0) still succeeds for a killed process that has not been
+ * reaped yet (a grandchild is reaped by launchd/init a moment after its parent died, which can
+ * take long on a loaded macOS runner), so poll with a bound instead of checking once.
+ */
+async function expectDead(pid: number): Promise<void> {
+  const deadline = performance.now() + 15_000;
+  while (isAlive(pid)) {
+    if (performance.now() > deadline) {
+      const state = spawnSync("ps", ["-o", "pid,ppid,pgid,stat,command", "-p", String(pid)], {
+        encoding: "utf8",
+      }).stdout;
+      throw new Error(`process ${pid} is still alive after the group was killed:\n${state}`);
+    }
+    await sleep(50);
+  }
+}
 
 /** Waits until the hang_ignore_term fake reported its grandchild pid. */
 const grandchildLogged = (ctx: FakesContext) =>
@@ -268,8 +286,8 @@ describe("ProcessSpawner: fake CLIs", () => {
         const grandchild = entry?.grandchildPid as number;
         expect(entry?.pgid).toBe(child);
         expect(grandchild).toBeGreaterThan(0);
-        expect(isAlive(child)).toBe(false);
-        expect(isAlive(grandchild)).toBe(false);
+        await expectDead(child);
+        await expectDead(grandchild);
         expect(() => process.kill(grandchild, 0)).toThrow();
       },
     );
@@ -309,8 +327,8 @@ describe("ProcessSpawner: fake CLIs", () => {
         const { result } = await run;
         expect(result.timedOut).toBe(false);
         expect(result.signal).toBe("SIGKILL");
-        expect(isAlive(entry.pid)).toBe(false);
-        expect(isAlive(entry.grandchildPid as number)).toBe(false);
+        await expectDead(entry.pid);
+        await expectDead(entry.grandchildPid as number);
       },
     );
   });
@@ -346,7 +364,7 @@ describe("ProcessSpawner: stray processes and timeouts", () => {
     expect(r.result.exitCode).toBe(0);
     const stray = Number(r.stdout[0]);
     expect(stray).toBeGreaterThan(0);
-    expect(isAlive(stray)).toBe(false);
+    await expectDead(stray);
   });
 
   it("does not wait forever for a detached escapee that holds the pipes", async () => {
@@ -435,8 +453,8 @@ describe("ProcessSpawner: parent signals", () => {
           const { result } = await run;
           expect(result.timedOut).toBe(false);
           expect(result.signal).toBe("SIGKILL");
-          expect(isAlive(entry.pid)).toBe(false);
-          expect(isAlive(entry.grandchildPid as number)).toBe(false);
+          await expectDead(entry.pid);
+          await expectDead(entry.grandchildPid as number);
         } finally {
           process.off("SIGTERM", noop);
         }
@@ -511,8 +529,8 @@ describe("ProcessSpawner: parent signal in a real helper process [UC13]", () => 
           // shell-style exit code too: a runtime that exits instead of dying by the signal reports it.
           const signo = sig === "SIGINT" ? 2 : 15;
           expect(ended.signal === sig || ended.code === 128 + signo).toBe(true);
-          expect(isAlive(child)).toBe(false);
-          expect(isAlive(grandchild)).toBe(false);
+          await expectDead(child);
+          await expectDead(grandchild);
         },
       );
     },
