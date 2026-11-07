@@ -226,3 +226,26 @@ describe("setup plan preview", () => {
     ]);
   });
 });
+
+describe("doctor copy-paste lines keep absolute paths", () => {
+  it("fix and continuation lines are not tildified", async () => {
+    const { renderLines } = await import("../../src/doctor/render.js");
+    const home = "/home/u";
+    const rule = "Bash(/home/u/.dispatch/bin/dispatch run:*)";
+    const text = renderLines(
+      [
+        {
+          section: "host",
+          id: "x.rule",
+          status: "warn",
+          message: `add:\n  ${rule}`,
+          fix: `add ${rule}`,
+        },
+      ],
+      { home, verbose: false },
+    );
+    expect(text).toContain(`  ${rule}`);
+    expect(text).toContain(`fix: add ${rule}`);
+    expect(text).not.toContain("Bash(~/");
+  });
+});

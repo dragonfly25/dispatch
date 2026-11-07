@@ -40,9 +40,11 @@ export function renderLines(lines: readonly DoctorLine[], opts: RenderOptions = 
     group.forEach((l, i) => {
       out += `${heads[i]}\n`;
       if (l.status === "ok" && !opts.verbose) return;
-      const rest = tildifyText(l.message, opts.home).split("\n").slice(1);
+      // Continuation lines and fixes are often meant to be copied (permission rules, commands with
+      // absolute launcher paths), so they keep the exact paths: `~` would not match at runtime.
+      const rest = l.message.split("\n").slice(1);
       for (const d of rest) out += `${INDENT}${ui.dim(d)}\n`;
-      if (l.fix) out += `${INDENT}${ui.cyan("fix:")} ${tildifyText(l.fix, opts.home)}\n`;
+      if (l.fix) out += `${INDENT}${ui.cyan("fix:")} ${l.fix}\n`;
     });
   }
   return out;
