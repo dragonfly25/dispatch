@@ -259,6 +259,11 @@ export const GlobalConfigFileSchema = z
       .describe("Provider instances by id, merged over the built-in claude/codex/antigravity."),
     ...securityKeys,
     ...ordinaryKeys,
+    retention_days: z
+      .number()
+      .positive()
+      .optional()
+      .describe("How long `dispatch gc` keeps finished runs and their history (default 30)."),
     quota: z
       .object({
         cache_minutes: z

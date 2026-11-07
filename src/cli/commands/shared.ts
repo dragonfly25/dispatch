@@ -19,6 +19,24 @@ export interface CliDeps {
   spawner?: Spawner;
   /** Quota readers override (tests pass an empty registry so no CLI is ever spawned). */
   quotaReaders?: QuotaReaderRegistry;
+  /** Pause used by `logs --follow` between polls (tests inject a fake). */
+  sleep?: (ms: number) => Promise<void>;
+  /** Whether the process `pid` exists, for lease reaping in `gc` (tests inject a fake). */
+  isAlive?: (pid: number) => boolean;
+}
+
+/** Default {@link CliDeps.sleep}. */
+export const realSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Default {@link CliDeps.isAlive}: signal 0 (a process we may not signal still exists). */
+export function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 /** Loads the app context, runs `fn` and always closes the context. */

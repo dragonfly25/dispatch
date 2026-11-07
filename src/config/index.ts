@@ -1,5 +1,10 @@
 /** Public API of the config module (WP4). */
-export { DEFAULT_PRESET, DEFAULT_PROFILE, DEFAULT_UNSPECIFIED_MODEL } from "./defaults.js";
+export {
+  DEFAULT_PRESET,
+  DEFAULT_PROFILE,
+  DEFAULT_RETENTION_DAYS,
+  DEFAULT_UNSPECIFIED_MODEL,
+} from "./defaults.js";
 export {
   type EffectiveConfig,
   type ExecutionConfig,
