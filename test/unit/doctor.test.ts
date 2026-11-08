@@ -14,6 +14,7 @@ import {
   type DoctorHarness,
   doctorHarness,
   ENABLE_AGY,
+  HELP,
   helpScenario,
   lineOf,
 } from "./doctor.helpers.js";
@@ -163,6 +164,19 @@ describe("doctor: checks", () => {
     expect(lineOf(report, "codex.version").status).toBe("warn");
     expect(lineOf(report, "claude.flags")).toMatchObject({ status: "fail" });
     expect(lineOf(report, "claude.flags").message).toContain("--safe-mode");
+  });
+
+  it("antigravity flags are read from a --help printed on stderr; a missing flag still fails", async () => {
+    h = doctorHarness({ agy: [{ scenario: "fail", stdout: "", stderr: HELP.agy, exitCode: 0 }] });
+    h.config(ENABLE_AGY);
+    expect(lineOf((await h.report()).report, "antigravity.flags").status).toBe("ok");
+    h.cleanup();
+    const noSandbox = HELP.agy.replace("  --sandbox\n", "");
+    h = doctorHarness({ agy: [{ scenario: "fail", stdout: "", stderr: noSandbox, exitCode: 0 }] });
+    h.config(ENABLE_AGY);
+    const flags = lineOf((await h.report()).report, "antigravity.flags");
+    expect(flags).toMatchObject({ status: "fail" });
+    expect(flags.message).toContain("--sandbox");
   });
 
   it("an empty --help is a failure for claude and a warning for codex", async () => {
