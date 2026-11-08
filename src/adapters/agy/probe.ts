@@ -117,7 +117,9 @@ export async function probeAgy(
     // keep the unresolved path
   }
   const version = parseAgyVersion((await capture(deps, binaryPath, ["--version"], 15_000)).lines);
-  const flags = parseAgyFlags((await capture(deps, binaryPath, ["--help"], 15_000)).lines);
+  // agy 1.5.3 prints its whole `--help` on stderr, so flags are read from both streams.
+  const help = await capture(deps, binaryPath, ["--help"], 15_000);
+  const flags = parseAgyFlags([...help.lines, ...help.stderr]);
   const usage = await capture(deps, binaryPath, ["-p=/usage", "--output-format", "json"], 30_000);
   return {
     binaryPath,

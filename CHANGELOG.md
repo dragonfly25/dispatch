@@ -69,6 +69,11 @@ All notable changes to this project are documented here. The format follows
 - The SessionStart policy text (Claude Code and Codex) now says that task types the policy routes to a
   provider are delegated through Dispatch unless the user says otherwise.
 
+### Fixed
+- Antigravity probe: `agy --help` flags are read from stderr as well as stdout. agy 1.5.3 prints its
+  whole help on stderr, so `dispatch doctor` warned "`--help` listed no flags" and the required
+  isolation flags were never verified.
+
 ## [0.1.0] — 2026-11-07
 
 First public version. Implements the functional spec (`docs/spec.md`) with the deviations recorded in

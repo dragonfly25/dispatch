@@ -603,6 +603,18 @@ describe("agy probe (scripted spawner)", () => {
     }
   });
 
+  it("reads --help flags from stderr (agy 1.5.3 prints its help there) and from stdout", async () => {
+    const helpFile = join(FIXTURES, "../../agy-help-1.5.3.stderr.txt");
+    const help153 = readFileSync(helpFile, "utf8").split("\n");
+    const onStderr = new ScriptedSpawner([{ stdout: ["1.5.3"] }, { stderr: help153 }, {}]);
+    const p = await adapter.probe(instance, deps(onStderr));
+    expect(p.flags).toEqual(
+      expect.arrayContaining([...REQUIRED_FLAGS, "--mode", "--settings", "--print"]),
+    );
+    const onStdout = new ScriptedSpawner([{ stdout: ["1.5.3"] }, { stdout: help153 }, {}]);
+    expect((await adapter.probe(instance, deps(onStdout))).flags).toEqual(p.flags);
+  });
+
   it("[UC4] flags an auto-updated version outside the range", async () => {
     for (const v of ["1.6.0", "1.4.9"]) {
       const spawner = new ScriptedSpawner([{ stdout: [`agy ${v}`] }, { stdout: HELP }, {}]);
@@ -676,6 +688,13 @@ describe("agy probe (fake CLI)", () => {
       expect(p).toMatchObject({ version: "1.5.2", loggedIn: true, outsideCliRange: false });
       expect(p.flags).toContain("--disable-slash-commands");
       expect(ctx.readLog({ cli: "agy" }).map((i) => i.key)).toEqual(["version", "help", "usage"]);
+    });
+  });
+
+  it("parses the help flags of a fake agy that writes --help to stderr", async () => {
+    await withFakes({ "agy:help": { stdout: "", stderr: `${HELP.join("\n")}\n` } }, async (ctx) => {
+      const p = await adapter.probe(instance, deps(processSpawner, join(ctx.binDir, "agy")));
+      expect(p.flags).toEqual(expect.arrayContaining([...REQUIRED_FLAGS]));
     });
   });
 
