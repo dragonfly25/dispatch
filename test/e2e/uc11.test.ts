@@ -61,7 +61,10 @@ describe("[UC11] a provider's quota channel breaks", () => {
     expect(quota?.message).toContain("format changed");
     expect(quota?.message).toContain("Routing continues on estimates");
     expect(checks.find((c) => c.id === "codex.login")?.status).toBe("ok");
-    expect(checks.find((c) => c.id === "claude.binary")?.status).toBe("ok");
+    // Native Windows reports claude as unsupported instead of probing its binary (by design).
+    if (process.platform !== "win32") {
+      expect(checks.find((c) => c.id === "claude.binary")?.status).toBe("ok");
+    }
 
     // status: stale, with the last good reading and the channel error; no crash (exit 0).
     const sj = w.dispatch(["status", "--json"]);

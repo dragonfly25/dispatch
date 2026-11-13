@@ -1,4 +1,4 @@
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import type {
   AdapterRunContext,
   NormalizedEvent,
@@ -86,11 +86,14 @@ function eventTs(o: Obj): string {
   return t && !Number.isNaN(Date.parse(t)) ? new Date(t).toISOString() : nowIso();
 }
 
-/** Worktree-relative path when `p` is inside the worktree, otherwise `p` unchanged. */
+/**
+ * Worktree-relative path when `p` is inside the worktree (`/`-separated on every OS, like the
+ * codex adapter), otherwise `p` unchanged.
+ */
 export function relPath(worktree: string, p: string): string {
   if (!isAbsolute(p)) return p;
   const r = relative(worktree, p);
-  return r === "" ? "." : r.startsWith("..") || isAbsolute(r) ? p : r;
+  return r === "" ? "." : r.startsWith("..") || isAbsolute(r) ? p : r.split(sep).join("/");
 }
 
 function setSignal(st: ClaudeRunState, source: QuotaSignal["source"], raw: string): void {

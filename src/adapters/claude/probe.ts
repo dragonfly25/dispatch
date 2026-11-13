@@ -1,6 +1,8 @@
 import { realpathSync } from "node:fs";
-import { dirname } from "node:path";
+import path from "node:path";
 import type { AdapterDeps, ProbeResult, ProviderInstance } from "../../core/contracts.js";
+import { envGet, isWindows, type OsPlatform } from "../../platform/os.js";
+import { probeEnv } from "../platform.js";
 
 const PROBE_TIMEOUT_MS = 15_000;
 const FLAG = /(?:^|[\s,[(])(--[A-Za-z][A-Za-z0-9-]*)/g;
@@ -52,6 +54,29 @@ export function satisfiesRange(version: string, range: string): boolean {
   });
 }
 
+/**
+ * Environment of the probe commands: `PATH` is the binary's directory plus the system dirs
+ * (POSIX `/usr/bin:/bin`; Windows `%SystemRoot%\\System32` and `%SystemRoot%`, plus the Windows
+ * base variables a process needs to start). Nothing else is inherited.
+ */
+export function claudeProbeEnv(
+  binaryPath: string,
+  configDir: string | undefined,
+  source: Readonly<Record<string, string | undefined>> = process.env,
+  platform: OsPlatform = process.platform,
+): Record<string, string> {
+  let env: Record<string, string>;
+  if (isWindows(platform)) {
+    const root = envGet(source, "SYSTEMROOT", platform) ?? "C:\\Windows";
+    env = probeEnv(source, [], platform);
+    env.PATH = [path.win32.dirname(binaryPath), path.win32.join(root, "System32"), root].join(";");
+  } else {
+    env = { PATH: `${path.posix.dirname(binaryPath)}:/usr/bin:/bin` };
+  }
+  if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
+  return env;
+}
+
 async function capture(
   deps: AdapterDeps,
   binary: string,
@@ -64,7 +89,7 @@ async function capture(
       binary,
       argv,
       env,
-      cwd: dirname(binary),
+      cwd: path.dirname(binary),
       stdin: "",
       timeoutMs: PROBE_TIMEOUT_MS,
       onLine: (stream, line) => {
@@ -86,6 +111,8 @@ export async function probeClaude(
   instance: ProviderInstance,
   deps: AdapterDeps,
   cliRange: string,
+  source: Readonly<Record<string, string | undefined>> = process.env,
+  platform: OsPlatform = process.platform,
 ): Promise<ProbeResult> {
   const binaryPath = await deps.resolveBinary("claude", instance);
   const empty: ProbeResult = {
@@ -104,8 +131,7 @@ export async function probeClaude(
   } catch {
     realpath = null;
   }
-  const env: Record<string, string> = { PATH: `${dirname(binaryPath)}:/usr/bin:/bin` };
-  if (instance.configDir) env.CLAUDE_CONFIG_DIR = instance.configDir;
+  const env = claudeProbeEnv(binaryPath, instance.configDir, source, platform);
   const versionText = await capture(deps, binaryPath, ["--version"], env);
   const helpText = await capture(deps, binaryPath, ["--help"], env);
   const version = versionText ? parseClaudeVersion(versionText) : null;

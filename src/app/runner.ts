@@ -40,7 +40,11 @@ export function runnerDeps(ctx: AppContext, overrides: Partial<RunnerDeps> = {})
     sandbox: new WorktreeSandbox(),
     adapters,
     resolveBinary: async (name, instance) =>
-      resolveBinary(name, { configured: instance.binary, env: ctx.env })?.path ?? null,
+      resolveBinary(name, {
+        configured: instance.binary,
+        env: ctx.env,
+        platform: process.platform,
+      })?.path ?? null,
     env: ctx.env,
     host: ctx.host.detection,
     hostSelf: ctx.host.self,

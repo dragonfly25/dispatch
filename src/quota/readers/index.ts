@@ -1,5 +1,5 @@
 /** The built-in quota readers, registered under the adapter ids they serve. */
-import type { Clock, QuotaObservation, Spawner } from "../../core/contracts.js";
+import type { Clock, ProviderInstance, QuotaObservation, Spawner } from "../../core/contracts.js";
 import type { QuotaStore } from "../provider.js";
 import { QuotaReaderRegistry } from "../reader.js";
 import type { ReliabilityConfig } from "../reliability.js";
@@ -30,6 +30,15 @@ export interface DefaultReadersOptions {
   reliability?: Partial<ReliabilityConfig>;
   /** Wire to `QuotaProvider.recordObservation` so Codex exhaustion becomes an unavailability signal. */
   onObservation?: (observation: QuotaObservation) => void | Promise<void>;
+  /**
+   * Resolves an instance's CLI to an absolute path (config `binary:` -> PATH -> well-known dirs),
+   * as the adapters do; null when not found. Without it, or on null, the readers spawn
+   * `instance.binary ?? <name>`.
+   */
+  resolveBinary?: (
+    name: string,
+    instance: ProviderInstance,
+  ) => string | null | Promise<string | null>;
   /** Haiku fallback of the claude-usage reader (config `quota.readers.claude-usage.llm_fallback`, default true). */
   claudeLlmFallback?: boolean;
 }
@@ -42,6 +51,14 @@ export interface DefaultReadersOptions {
 export function defaultReaders(options: DefaultReadersOptions): QuotaReaderRegistry {
   const { clock, spawner, store, version, env, reliability, onObservation } = options;
   const llmFallback = options.claudeLlmFallback !== false;
+  const resolver = (name: string) => {
+    const resolve = options.resolveBinary;
+    if (!resolve) return {};
+    return {
+      resolveBinary: async (instance: ProviderInstance) =>
+        (await resolve(name, instance)) ?? instance.binary ?? name,
+    };
+  };
   return new QuotaReaderRegistry()
     .register(
       "claude",
@@ -49,7 +66,13 @@ export function defaultReaders(options: DefaultReadersOptions): QuotaReaderRegis
     )
     .register(
       "claude",
-      new ClaudeUsageReader({ spawner, clock, llmFallback, ...(env ? { env } : {}) }),
+      new ClaudeUsageReader({
+        spawner,
+        clock,
+        llmFallback,
+        ...(env ? { env } : {}),
+        ...resolver("claude"),
+      }),
     )
     .register(
       "codex",
@@ -58,7 +81,11 @@ export function defaultReaders(options: DefaultReadersOptions): QuotaReaderRegis
         ...(version ? { version } : {}),
         ...(env ? { env } : {}),
         ...(onObservation ? { onObservation } : {}),
+        ...resolver("codex"),
       }),
     )
-    .register("antigravity", new AgyUsageReader({ spawner, clock, ...(env ? { env } : {}) }));
+    .register(
+      "antigravity",
+      new AgyUsageReader({ spawner, clock, ...(env ? { env } : {}), ...resolver("agy") }),
+    );
 }

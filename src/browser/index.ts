@@ -10,6 +10,10 @@
  *   `--user-data-dir=<TMPDIR>/playwright_chromiumdev_profile-*` over a pipe, deleted on close.
  * - The server writes an empty registry dir under `$HOME/Library/Caches/ms-playwright/b` (from
  *   `os.homedir()`, ignoring PLAYWRIGHT_BROWSERS_PATH): its HOME is pointed at the attempt dir.
+ *   On Windows `os.homedir()` reads USERPROFILE (not HOME) and Playwright's registry lives under
+ *   `%LOCALAPPDATA%\ms-playwright` (falling back to `<homedir>\AppData\Local`), so the codex
+ *   adapter points USERPROFILE (and should point LOCALAPPDATA) at the attempt dir too
+ *   (not verified on Windows).
  * - `browser_run_code_unsafe` (arbitrary code in the server process, outside every sandbox) is a
  *   core tool with no flag to turn it off: codex's per-server `enabled_tools` allowlist hides it.
  * - `--allowed-origins` blocks other origins (`ERR_BLOCKED_BY_CLIENT`) and `file://` is blocked by
@@ -20,7 +24,7 @@
  * superset), the codex adapter reads `browser`.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import type { BuildInvocationWithNetwork } from "../sandbox/network.js";
@@ -144,13 +148,41 @@ export function installStatus(dir: string, fs: BrowserFs = realBrowserFs): Insta
   return { ok: true, version, cliPath };
 }
 
-/** Where Google Chrome is installed per platform (the stable channel Playwright's `chrome` uses). */
-export function chromeCandidates(platform: string, home: string | undefined): string[] {
+type Env = Readonly<Record<string, string | undefined>>;
+
+/** Windows base directories Chrome installs under, in Playwright's lookup order. */
+const WINDOWS_CHROME_ROOTS = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)"] as const;
+
+/** A Windows env value by case-insensitive name (Windows env names ignore case). */
+function winEnv(env: Env, key: string): string | undefined {
+  const hit = Object.entries(env).find(([k, v]) => k.toUpperCase() === key && v);
+  return hit?.[1];
+}
+
+/**
+ * Where Google Chrome is installed per platform (the stable channel Playwright's `chrome` uses).
+ * Windows: `<root>\Google\Chrome\Application\chrome.exe` under `%LOCALAPPDATA%` (per-user
+ * install), `%ProgramFiles%` and `%ProgramFiles(x86)%`; only absolute roots from `env` count.
+ */
+export function chromeCandidates(
+  platform: string,
+  home: string | undefined,
+  env: Env = process.env,
+): string[] {
   if (platform === "darwin") {
-    const app = join("Google Chrome.app", "Contents", "MacOS", "Google Chrome");
-    return [join("/Applications", app), ...(home ? [join(home, "Applications", app)] : [])];
+    // macOS paths whatever the host running this (tests inject the platform).
+    const app = posix.join("Google Chrome.app", "Contents", "MacOS", "Google Chrome");
+    return [
+      posix.join("/Applications", app),
+      ...(home ? [posix.join(home, "Applications", app)] : []),
+    ];
   }
   if (platform === "linux") return ["/opt/google/chrome/chrome"];
+  if (platform === "win32") {
+    return WINDOWS_CHROME_ROOTS.map((k) => winEnv(env, k))
+      .filter((root): root is string => root !== undefined && win32.isAbsolute(root))
+      .map((root) => win32.join(root, "Google", "Chrome", "Application", "chrome.exe"));
+  }
   return [];
 }
 
@@ -159,8 +191,9 @@ export function findChrome(
   platform: string,
   home: string | undefined,
   fs: Pick<BrowserFs, "exists"> = realBrowserFs,
+  env: Env = process.env,
 ): string | null {
-  return chromeCandidates(platform, home).find((p) => fs.exists(p)) ?? null;
+  return chromeCandidates(platform, home, env).find((p) => fs.exists(p)) ?? null;
 }
 
 /** Inputs of {@link browserReadiness}. */
@@ -171,6 +204,8 @@ export interface ReadinessInput {
   platform: string;
   home: string | undefined;
   fs?: BrowserFs;
+  /** Environment for the Windows install roots; default `process.env`. */
+  env?: Env;
 }
 
 /** Whether delegated agents can get the isolated browser on this machine. */
@@ -186,7 +221,7 @@ export function browserReadiness(input: ReadinessInput): Readiness {
   const fs = input.fs ?? realBrowserFs;
   const st = installStatus(browserToolsDir(input.dispatchHome), fs);
   if (!st.ok) return { ready: false, reason: `the isolated browser is ${st.reason}` };
-  const chrome = findChrome(input.platform, input.home, fs);
+  const chrome = findChrome(input.platform, input.home, fs, input.env);
   if (chrome === null) return { ready: false, reason: "Google Chrome is not installed" };
   return { ready: true, cliPath: st.cliPath, chrome, version: st.version };
 }

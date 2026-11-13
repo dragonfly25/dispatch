@@ -30,7 +30,8 @@ describe("fake CLIs: logging and scenario selection [AC1]", () => {
         expect(entry?.stdin).toHaveLength(4096);
         expect(entry?.stdinBytes).toBe(6000);
         expect(typeof entry?.pid).toBe("number");
-        expect(typeof entry?.pgid).toBe("number");
+        // Windows has no process groups: the fake reports null there.
+        expect(typeof entry?.pgid).toBe(process.platform === "win32" ? "object" : "number");
         expect(entry?.exitCode).toBe(0);
         expect(Date.parse(entry?.endedAt ?? "")).toBeGreaterThanOrEqual(
           Date.parse(entry?.startedAt ?? ""),
@@ -143,30 +144,38 @@ describe("fake CLIs: run scenarios [AC1]", () => {
     );
   });
 
-  it("[AC1] slow emits one event per delay and records SIGTERM as exit 143", async () => {
-    await withFakes(
-      {
-        claude: [
-          { scenario: "slow", delayMs: 120, events: [{ type: "a" }, { type: "b" }, { type: "c" }] },
-        ],
-      },
-      async (ctx) => {
-        const t0 = Date.now();
-        const r = await runFake(ctx, "claude", ["-p"]);
-        expect(Date.now() - t0).toBeGreaterThanOrEqual(340);
-        expect(jsonLines(r.stdout)).toEqual([{ type: "a" }, { type: "b" }, { type: "c" }]);
+  // Windows: child.kill() is TerminateProcess, so the fake never sees SIGTERM.
+  it.skipIf(process.platform === "win32")(
+    "[AC1] slow emits one event per delay and records SIGTERM as exit 143",
+    async () => {
+      await withFakes(
+        {
+          claude: [
+            {
+              scenario: "slow",
+              delayMs: 120,
+              events: [{ type: "a" }, { type: "b" }, { type: "c" }],
+            },
+          ],
+        },
+        async (ctx) => {
+          const t0 = Date.now();
+          const r = await runFake(ctx, "claude", ["-p"]);
+          expect(Date.now() - t0).toBeGreaterThanOrEqual(340);
+          expect(jsonLines(r.stdout)).toEqual([{ type: "a" }, { type: "b" }, { type: "c" }]);
 
-        const { child, done } = startFake(ctx, "claude", ["-p"]);
-        await waitFor(() => ctx.readLog({ cli: "claude" })[1]?.pid);
-        child.kill("SIGTERM");
-        const killed = await done;
-        expect(killed.code).toBe(143);
-        const second = ctx.readLog({ cli: "claude" })[1];
-        expect(second?.exitCode).toBe(143);
-        expect(second?.signalReceived).toBe("SIGTERM");
-      },
-    );
-  });
+          const { child, done } = startFake(ctx, "claude", ["-p"]);
+          await waitFor(() => ctx.readLog({ cli: "claude" })[1]?.pid);
+          child.kill("SIGTERM");
+          const killed = await done;
+          expect(killed.code).toBe(143);
+          const second = ctx.readLog({ cli: "claude" })[1];
+          expect(second?.exitCode).toBe(143);
+          expect(second?.signalReceived).toBe("SIGTERM");
+        },
+      );
+    },
+  );
 
   it("[AC1] quota_exhausted replays each CLI's synthetic quota fixture", async () => {
     await withFakes(
@@ -232,38 +241,43 @@ describe("fake CLIs: run scenarios [AC1]", () => {
         expect(jsonLines(r.stdout)).toHaveLength(2);
         expect(r.stderr).toMatch(/Segmentation fault/);
         const k = await runFake(ctx, "codex", ["exec", "-"]);
-        expect(k.signal).toBe("SIGKILL");
+        // Windows has no signal deaths: a self-kill is reported as an exit code.
+        if (process.platform !== "win32") expect(k.signal).toBe("SIGKILL");
       },
     );
   });
 
-  it("[AC1] hang_ignore_term survives SIGTERM, leaves a grandchild in the group, and dies with the group on SIGKILL", async () => {
-    await withFakes(
-      { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 20000 }] },
-      async (ctx) => {
-        const { child, done } = startFake(ctx, "claude", ["-p"], { detached: true });
-        const entry = await waitFor(() => {
-          const e = ctx.readLog()[0];
-          return e?.grandchildPid ? e : undefined;
-        });
-        const grandchild = entry.grandchildPid as number;
-        expect(entry.pgid).toBe(child.pid);
-        expect(isAlive(grandchild)).toBe(true);
+  // POSIX-only: process groups and signals sent to them (process.kill(-pgid)).
+  it.skipIf(process.platform === "win32")(
+    "[AC1] hang_ignore_term survives SIGTERM, leaves a grandchild in the group, and dies with the group on SIGKILL",
+    async () => {
+      await withFakes(
+        { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 20000 }] },
+        async (ctx) => {
+          const { child, done } = startFake(ctx, "claude", ["-p"], { detached: true });
+          const entry = await waitFor(() => {
+            const e = ctx.readLog()[0];
+            return e?.grandchildPid ? e : undefined;
+          });
+          const grandchild = entry.grandchildPid as number;
+          expect(entry.pgid).toBe(child.pid);
+          expect(isAlive(grandchild)).toBe(true);
 
-        process.kill(-(child.pid as number), "SIGTERM");
-        await waitFor(() => ctx.readLog()[0]?.sigtermCount === 1);
-        await sleep(250);
-        expect(isAlive(child.pid as number)).toBe(true);
-        expect(isAlive(grandchild)).toBe(true);
+          process.kill(-(child.pid as number), "SIGTERM");
+          await waitFor(() => ctx.readLog()[0]?.sigtermCount === 1);
+          await sleep(250);
+          expect(isAlive(child.pid as number)).toBe(true);
+          expect(isAlive(grandchild)).toBe(true);
 
-        process.kill(-(child.pid as number), "SIGKILL");
-        const r = await done;
-        expect(r.signal).toBe("SIGKILL");
-        await waitFor(() => !isAlive(grandchild));
-        expect(ctx.readLog()[0]?.endedAt).toBeUndefined(); // SIGKILL leaves no end record
-      },
-    );
-  });
+          process.kill(-(child.pid as number), "SIGKILL");
+          const r = await done;
+          expect(r.signal).toBe("SIGKILL");
+          await waitFor(() => !isAlive(grandchild));
+          expect(ctx.readLog()[0]?.endedAt).toBeUndefined(); // SIGKILL leaves no end record
+        },
+      );
+    },
+  );
 
   it("[AC1] recurse runs the dispatch command and records its exit code and output", async () => {
     await withFakes(
@@ -356,22 +370,26 @@ describe("fake CLIs: run scenarios [AC1]", () => {
     });
   });
 
-  it("[AC1] symlink plants link -> /etc/passwd and link2 -> ../..", async () => {
-    await withFakes(
-      { agy: [{ scenario: "symlink" }, { scenario: "symlink", links: { custom: "/tmp" } }] },
-      async (ctx) => {
-        const repo = tempRepo();
-        await runFake(ctx, "agy", ["-p=x"], { cwd: repo.dir });
-        expect(lstatSync(join(repo.dir, "link")).isSymbolicLink()).toBe(true);
-        expect(readlinkSync(join(repo.dir, "link"))).toBe("/etc/passwd");
-        expect(readlinkSync(join(repo.dir, "link2"))).toBe("../..");
-        expect(ctx.readLog()[0]?.symlink).toHaveLength(2);
-        await runFake(ctx, "agy", ["-p=x"], { cwd: repo.dir });
-        expect(readlinkSync(join(repo.dir, "custom"))).toBe("/tmp");
-        repo.cleanup();
-      },
-    );
-  });
+  // Windows: symlinks need privileges and their targets are rewritten with backslashes.
+  it.skipIf(process.platform === "win32")(
+    "[AC1] symlink plants link -> /etc/passwd and link2 -> ../..",
+    async () => {
+      await withFakes(
+        { agy: [{ scenario: "symlink" }, { scenario: "symlink", links: { custom: "/tmp" } }] },
+        async (ctx) => {
+          const repo = tempRepo();
+          await runFake(ctx, "agy", ["-p=x"], { cwd: repo.dir });
+          expect(lstatSync(join(repo.dir, "link")).isSymbolicLink()).toBe(true);
+          expect(readlinkSync(join(repo.dir, "link"))).toBe("/etc/passwd");
+          expect(readlinkSync(join(repo.dir, "link2"))).toBe("../..");
+          expect(ctx.readLog()[0]?.symlink).toHaveLength(2);
+          await runFake(ctx, "agy", ["-p=x"], { cwd: repo.dir });
+          expect(readlinkSync(join(repo.dir, "custom"))).toBe("/tmp");
+          repo.cleanup();
+        },
+      );
+    },
+  );
 
   it("[AC1] leak_secret prints fake tokens and the CANARY_SECRET value to stdout and stderr", async () => {
     await withFakes(

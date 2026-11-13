@@ -27,7 +27,7 @@
     ]
   },
   "scripts": {
-    "build": "rm -rf dist && tsup",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome format --write .",

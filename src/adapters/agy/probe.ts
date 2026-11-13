@@ -6,17 +6,26 @@ import type {
   ProbeResult,
   ProviderInstance,
 } from "../../core/contracts.js";
+import { isWindows, type OsPlatform } from "../../platform/os.js";
+import { probeEnv } from "../platform.js";
 import { satisfiesRange } from "./version.js";
 
 const PASS_ENV = ["PATH", "HOME", "USER", "LANG", "TMPDIR", "SHELL"];
 const AUTH_ERROR = /not logged in|log ?in|authenticat|unauthori[sz]ed|credential|sign ?in/i;
 
-/** Allow-listed env for probe commands (no `ANTIGRAVITY_*`, no secrets); `TERM=dumb`. */
-function probeEnv(source: NodeJS.ProcessEnv): Record<string, string> {
+/**
+ * Allow-listed env for probe commands (no `ANTIGRAVITY_*`, no secrets); `TERM=dumb`. Windows
+ * adds the Windows base variables, looked up case-insensitively.
+ */
+export function agyProbeEnv(
+  source: Readonly<Record<string, string | undefined>>,
+  platform: OsPlatform = process.platform,
+): Record<string, string> {
   const env: Record<string, string> = { TERM: "dumb" };
   for (const [k, v] of Object.entries(source)) {
     if (v !== undefined && (PASS_ENV.includes(k) || k.startsWith("LC_"))) env[k] = v;
   }
+  if (isWindows(platform)) Object.assign(env, probeEnv(source, PASS_ENV, platform));
   return env;
 }
 
@@ -39,7 +48,7 @@ async function capture(
     const r = await deps.spawner.spawn({
       binary,
       argv,
-      env: probeEnv(process.env),
+      env: agyProbeEnv(process.env),
       cwd: tmpdir(),
       timeoutMs,
       onLine: (stream, line) => (stream === "stdout" ? lines : stderr).push(line),

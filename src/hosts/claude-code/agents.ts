@@ -8,6 +8,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { envGet, homeDir, type OsPlatform } from "../../platform/os.js";
 
 /** Largest agent file read (bytes); a bigger file is ignored. */
 export const MAX_AGENT_FILE = 64 * 1024;
@@ -195,17 +196,19 @@ export function listAgents(dirs: AgentDirs): AgentFile[] {
   return out;
 }
 
-/** The agent directories for a repo root and environment. */
+/**
+ * The agent directories for a repo root and environment. User agents live in an absolute
+ * `CLAUDE_CONFIG_DIR`, else `<home>/.claude` ({@link homeDir}: `USERPROFILE` on Windows, where
+ * variable names are case-insensitive).
+ */
 export function agentDirs(
   repoRoot: string | null,
   env: Readonly<Record<string, string | undefined>>,
+  platform: OsPlatform = process.platform,
 ): AgentDirs {
-  const configDir =
-    env.CLAUDE_CONFIG_DIR && isAbsolute(env.CLAUDE_CONFIG_DIR)
-      ? env.CLAUDE_CONFIG_DIR
-      : env.HOME
-        ? join(env.HOME, ".claude")
-        : null;
+  const custom = envGet(env, "CLAUDE_CONFIG_DIR", platform);
+  const home = homeDir(env, platform);
+  const configDir = custom && isAbsolute(custom) ? custom : home ? join(home, ".claude") : null;
   return {
     project: repoRoot === null ? null : join(repoRoot, ".claude", "agents"),
     user: configDir === null ? null : join(configDir, "agents"),

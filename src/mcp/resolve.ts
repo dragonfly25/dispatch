@@ -14,8 +14,9 @@
  * Dispatch's own environment at run time (never on disk, in argv, state or logs).
  */
 import { readFileSync, realpathSync } from "node:fs";
-import { join } from "node:path";
 import { BROWSER_SERVER_NAME } from "../browser/index.js";
+import { pathApi, pathKey } from "../config/pathkey.js";
+import { envGet, homeDir, isWindows, type OsPlatform } from "../platform/os.js";
 
 /** Transport of an MCP server. */
 export type McpTransport = "stdio" | "http" | "sse";
@@ -101,9 +102,12 @@ export const REASONS = {
 } as const;
 
 /** Path of Claude Code's global config file (`.claude.json`). */
-export function claudeJsonPath(env: Env): string | null {
-  if (env.CLAUDE_CONFIG_DIR) return join(env.CLAUDE_CONFIG_DIR, ".claude.json");
-  return env.HOME ? join(env.HOME, ".claude.json") : null;
+export function claudeJsonPath(env: Env, platform: OsPlatform = process.platform): string | null {
+  const { join } = pathApi(platform);
+  const configDir = envGet(env, "CLAUDE_CONFIG_DIR", platform);
+  if (configDir) return join(configDir, ".claude.json");
+  const home = homeDir(env, platform);
+  return home ? join(home, ".claude.json") : null;
 }
 
 function parseJson(text: string | null): Record<string, unknown> | null {
@@ -135,13 +139,27 @@ function projectKeys(repoRoot: string): string[] {
   return keys;
 }
 
-/** `projects[<repo root>]` of `.claude.json`, or an empty object. */
-function projectEntry(claudeJson: Record<string, unknown> | null, repoRoot: string) {
+/**
+ * `projects[<repo root>]` of `.claude.json`, or an empty object. On Windows a key matches when it
+ * names the same path ignoring case and `/` vs `\\` (Claude Code may record `C:/repo`).
+ */
+function projectEntry(
+  claudeJson: Record<string, unknown> | null,
+  repoRoot: string,
+  platform: OsPlatform,
+) {
   const projects = claudeJson?.projects;
   if (!isObject(projects)) return {};
-  for (const k of projectKeys(repoRoot)) {
+  const keys = projectKeys(repoRoot);
+  for (const k of keys) {
     const e = projects[k];
     if (isObject(e)) return e;
+  }
+  if (isWindows(platform)) {
+    const wanted = new Set(keys.map((k) => pathKey(k, platform)));
+    for (const [k, e] of Object.entries(projects)) {
+      if (wanted.has(pathKey(k, platform)) && isObject(e)) return e;
+    }
   }
   return {};
 }
@@ -221,6 +239,8 @@ export function describeServer(name: string, scope: McpScope, raw: unknown): Mcp
 export interface ListOptions {
   /** Test seam: reads a file (default: `readFileSync`, null on error). */
   read?: ReadText;
+  /** Platform whose path rules apply (default `process.platform`). */
+  platform?: OsPlatform;
 }
 
 /**
@@ -234,14 +254,18 @@ export function listMcpServers(
   opts: ListOptions = {},
 ): McpServer[] {
   const read = opts.read ?? defaultRead;
-  const jsonPath = claudeJsonPath(env);
+  const platform = opts.platform ?? process.platform;
+  const jsonPath = claudeJsonPath(env, platform);
   const claudeJson = jsonPath ? parseJson(read(jsonPath)) : null;
-  const entry = repoRoot === null ? {} : projectEntry(claudeJson, repoRoot);
-  const configDir = env.CLAUDE_CONFIG_DIR ?? (env.HOME ? join(env.HOME, ".claude") : null);
-  const userSettings = configDir ? parseJson(read(join(configDir, "settings.json"))) : null;
-  const local = repoRoot === null ? null : read(join(repoRoot, ".claude", "settings.local.json"));
+  const entry = repoRoot === null ? {} : projectEntry(claudeJson, repoRoot, platform);
+  const home = homeDir(env, platform);
+  const pjoin = pathApi(platform).join;
+  const configDir =
+    envGet(env, "CLAUDE_CONFIG_DIR", platform) ?? (home ? pjoin(home, ".claude") : null);
+  const userSettings = configDir ? parseJson(read(pjoin(configDir, "settings.json"))) : null;
+  const local = repoRoot === null ? null : read(pjoin(repoRoot, ".claude", "settings.local.json"));
   const approved = approvals(entry, userSettings, parseJson(local));
-  const project = repoRoot === null ? null : parseJson(read(join(repoRoot, ".mcp.json")));
+  const project = repoRoot === null ? null : parseJson(read(pjoin(repoRoot, ".mcp.json")));
 
   const found = new Map<string, McpServer>();
   const add = (scope: McpScope, servers: unknown) => {

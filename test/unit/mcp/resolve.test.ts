@@ -169,9 +169,11 @@ describe("listMcpServers", () => {
 
   it("reads $CLAUDE_CONFIG_DIR/.claude.json when the variable is set", () => {
     const env = { HOME, CLAUDE_CONFIG_DIR: "/cfg/alt" };
-    expect(claudeJsonPath(env)).toBe("/cfg/alt/.claude.json");
+    const alt = join("/cfg/alt", ".claude.json"); // the host's separator, like the product
+    expect(claudeJsonPath(env)).toBe(alt);
+    expect(claudeJsonPath(env, "linux")).toBe("/cfg/alt/.claude.json");
     expect(claudeJsonPath({})).toBeNull();
-    const read = files({ "/cfg/alt/.claude.json": { mcpServers: { alt: { command: "a" } } } });
+    const read = files({ [alt]: { mcpServers: { alt: { command: "a" } } } });
     expect(forwardableNames(ROOT, env, { read })).toEqual(["alt"]);
     expect(listMcpServers(ROOT, {}, { read })).toEqual([]);
   });

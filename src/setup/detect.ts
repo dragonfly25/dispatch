@@ -28,7 +28,8 @@ export function createDetector(
   env: Readonly<Record<string, string | undefined>>,
   spawner: Spawner = new ProcessSpawner(),
   /** Test seam: where a binary lives; default PATH and the well-known directories. */
-  find: (name: string) => string | null = (name) => resolveBinary(name, { env })?.path ?? null,
+  find: (name: string) => string | null = (name) =>
+    resolveBinary(name, { env, platform: process.platform })?.path ?? null,
 ): Detector {
   return async (ids) => {
     const out: DetectedCli[] = [];

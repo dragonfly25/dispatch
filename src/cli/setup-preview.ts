@@ -4,6 +4,7 @@
  * the exact grant text), then which hosts were found.
  */
 import { describeOp, type SetupPlan } from "../hosts/_framework/index.js";
+import type { OsPlatform } from "../platform/os.js";
 import { plainUi, tildify, tildifyText, type Ui } from "./ui.js";
 
 /** Display name of a plan group. */
@@ -23,6 +24,15 @@ const GRANT_SUMMARY: Record<string, string> = {
     "Codex may run the Dispatch launcher outside its sandbox, and runs the Dispatch hooks once you approve them with /hooks.",
 };
 
+/** Codex summary when the plan installs no rules file (Windows): hooks only. */
+const CODEX_HOOKS_ONLY_SUMMARY = "Codex runs the Dispatch hooks once you approve them with /hooks.";
+
+/** The one-line summary of a host's grants (Codex without a rules file grants hooks only). */
+function grantSummary(host: string, files: readonly string[]): string | undefined {
+  if (host === "codex" && !files.some((f) => f.endsWith(".rules"))) return CODEX_HOOKS_ONLY_SUMMARY;
+  return GRANT_SUMMARY[host];
+}
+
 /** The global config setup is about to write. */
 export interface ConfigPreview {
   path: string;
@@ -38,30 +48,34 @@ export interface PlanPreview {
   grants: string;
 }
 
-/** Renders the preview of `plan` (and of the global config `change`, if any). */
+/**
+ * Renders the preview of `plan` (and of the global config `change`, if any). `platform` (default
+ * `process.platform`) selects the `~` path rules.
+ */
 export function renderPlanPreview(
   plan: Pick<SetupPlan, "groups" | "stale" | "detected" | "absent">,
   change: ConfigPreview | null,
-  opts: { ui?: Ui; home?: string | undefined } = {},
+  opts: { ui?: Ui; home?: string | undefined; platform?: OsPlatform } = {},
 ): PlanPreview {
   const ui = opts.ui ?? plainUi;
   const home = opts.home;
+  const platform = opts.platform ?? process.platform;
+  const tilde = (path: string) => tildify(path, home, platform);
+  const tildeText = (text: string) => tildifyText(text, home, platform);
   const label = (host: string) => ui.bold(GROUP_LABEL[host] ?? host);
   const lines = ["Dispatch setup will make these changes:"];
   for (const g of plan.groups) {
     lines.push("", label(g.host));
     if (g.host === "dispatch" && change) {
-      lines.push(`  ${ui.green("+")} Global config: ${change.mode} ${tildify(change.path, home)}`);
+      lines.push(`  ${ui.green("+")} Global config: ${change.mode} ${tilde(change.path)}`);
       for (const l of change.lines) lines.push(`      ${ui.dim(l)}`);
     }
-    for (const op of g.ops) lines.push(`  ${ui.green("+")} ${tildifyText(describeOp(op), home)}`);
+    for (const op of g.ops) lines.push(`  ${ui.green("+")} ${tildeText(describeOp(op))}`);
   }
   if (plan.stale.length > 0) {
     lines.push("", ui.bold("No longer planned"));
     for (const e of plan.stale) {
-      lines.push(
-        `  ${ui.yellow("-")} remove the earlier Dispatch edit in ${tildify(e.file, home)}`,
-      );
+      lines.push(`  ${ui.yellow("-")} remove the earlier Dispatch edit in ${tilde(e.file)}`);
     }
   }
   lines.push("");
@@ -78,11 +92,13 @@ export function renderPlanPreview(
   for (const g of plan.groups) {
     const granting = g.ops.filter((op) => op.trustGrant !== null);
     if (granting.length === 0) continue;
-    grants.push(`${lead}${ui.bold(GRANT_SUMMARY[g.host] ?? `${label(g.host)}:`)}`);
+    const summary = grantSummary(
+      g.host,
+      granting.map((op) => op.file),
+    );
+    grants.push(`${lead}${ui.bold(summary ?? `${label(g.host)}:`)}`);
     for (const op of granting) {
-      grants.push(
-        ui.dim(`    ${tildify(op.file, home)}: ${tildifyText(op.trustGrant ?? "", home)}`),
-      );
+      grants.push(ui.dim(`    ${tilde(op.file)}: ${tildeText(op.trustGrant ?? "")}`));
     }
   }
   return {

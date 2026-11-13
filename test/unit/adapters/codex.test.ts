@@ -30,11 +30,14 @@ import {
   type SpawnResult,
 } from "../../../src/core/contracts.js";
 import { DispatchError } from "../../../src/core/errors.js";
+import { toSpawnCommand } from "../../../src/platform/spawnable.js";
 import { probeResult, task } from "../../fixtures/contracts.js";
 import { FakeClock, ScriptedSpawner } from "../../stubs/index.js";
 import { withFakes } from "../../support/index.js";
 
 const adapter = createCodexAdapter();
+/** Builds the POSIX argv on any host (Windows adds its sandbox override; codex-windows tests cover it). */
+const posix = createCodexAdapter({ platform: "linux" });
 const FIXTURES = join(import.meta.dirname, "..", "..", "fixtures", "codex", "0.167.0");
 const WT = "/work/repo/.dispatch/wt/run1";
 const ROOT = "/work/repo";
@@ -128,7 +131,7 @@ describe("codex buildInvocation", () => {
     ["worktree", "workspace-write"],
     ["read-only", "read-only"],
   ] as const)("golden argv for %s autonomy [UC2] [SEC-trust]", (autonomy, sandbox) => {
-    const inv = adapter.buildInvocation(args({ autonomy }));
+    const inv = posix.buildInvocation(args({ autonomy }));
     expect(InvocationSchema.parse(inv)).toEqual(inv);
     expect(inv.argv).toEqual(golden(sandbox));
     expect(inv.binary).toBe("/opt/homebrew/bin/codex");
@@ -152,7 +155,7 @@ describe("codex buildInvocation", () => {
         fc.subarray(["apps", "memories", "multi_agent"]),
         (wt, root, autonomy, extra) => {
           const probe = { ...probeResult, features: ["hooks", "plugins", ...extra] };
-          const inv = adapter.buildInvocation(
+          const inv = posix.buildInvocation(
             args({ worktree: wt, repoRoot: root, autonomy, probe }),
           );
           const a = inv.argv;
@@ -194,9 +197,9 @@ describe("codex buildInvocation", () => {
   });
 
   it("sets CODEX_HOME only for an instance with a config dir [UC12]", () => {
-    const plain = adapter.buildInvocation(args());
+    const plain = posix.buildInvocation(args());
     expect(plain.env).toEqual({ PATH: "/usr/bin:/bin", HOME: "/home/u", DISPATCH_DEPTH: "1" });
-    const alt = adapter.buildInvocation(
+    const alt = posix.buildInvocation(
       args({ instance: { ...instance, id: "codex-alt", configDir: "/home/u/.codex-alt" } }),
     );
     expect(alt.env.CODEX_HOME).toBe("/home/u/.codex-alt");
@@ -204,7 +207,7 @@ describe("codex buildInvocation", () => {
   });
 
   it("puts the wrapped prompt on stdin [UC2]", () => {
-    const inv = adapter.buildInvocation(args());
+    const inv = posix.buildInvocation(args());
     expect(inv.stdin).toBe(wrapPrompt(task.prompt));
     expect(inv.stdin).toContain("Do not run `dispatch`");
     expect(inv.stdin?.endsWith(task.prompt)).toBe(true);
@@ -213,7 +216,7 @@ describe("codex buildInvocation", () => {
 
   it("omits optional --disable names the CLI does not list", () => {
     const probe = { ...probeResult, features: ["hooks", "plugins"] };
-    const inv = adapter.buildInvocation(args({ probe }));
+    const inv = posix.buildInvocation(args({ probe }));
     expect(inv.argv.filter((_x, i) => inv.argv[i - 1] === "--disable")).toEqual([
       "hooks",
       "plugins",
@@ -244,9 +247,9 @@ describe("codex buildInvocation", () => {
       "adapter.codex.invalid_target",
     ],
   ])("fails closed on %s [SEC-trust]", (_name, a, code) => {
-    expect(() => adapter.buildInvocation(a)).toThrow(DispatchError);
+    expect(() => posix.buildInvocation(a)).toThrow(DispatchError);
     try {
-      adapter.buildInvocation(a);
+      posix.buildInvocation(a);
     } catch (err) {
       expect((err as DispatchError).code).toBe(code);
     }
@@ -575,7 +578,9 @@ const testSpawner: Spawner & { requests: SpawnRequest[] } = {
   spawn(req) {
     this.requests.push(req);
     return new Promise((resolve, reject) => {
-      const child = spawn(req.binary, [...req.argv], { cwd: req.cwd, env: req.env });
+      // Windows: the fake is an npm cmd-shim, unwrapped to `node <script>` like production does.
+      const { command, args: argv } = toSpawnCommand(req.binary, req.argv);
+      const child = spawn(command, argv, { cwd: req.cwd, env: req.env });
       const pipe = (stream: "stdout" | "stderr") =>
         createInterface({ input: child[stream] }).on("line", (l) => req.onLine?.(stream, l));
       pipe("stdout");
@@ -608,11 +613,11 @@ Options:
 
 describe("codex probe", () => {
   it("parses version, flags, features and login via the fake CLI [UC13]", async () => {
-    await withFakes({ "codex:help": { stdout: HELP } }, async ({ binDir, env, readLog }) => {
+    await withFakes({ "codex:help": { stdout: HELP } }, async ({ bin, env, readLog }) => {
       const deps: AdapterDeps = {
         spawner: testSpawner,
         clock: new FakeClock(),
-        resolveBinary: async () => join(binDir, "codex"),
+        resolveBinary: async () => bin("codex"),
       };
       const alt = { ...instance, configDir: "/tmp/codex-alt-home" };
       const res = await probeCodex(alt, deps, {
@@ -621,7 +626,7 @@ describe("codex probe", () => {
         SECRET_TOKEN: "x",
       });
       expect(res).toMatchObject({
-        binaryPath: join(binDir, "codex"),
+        binaryPath: bin("codex"),
         version: "0.167.0",
         features: [
           "hooks",
@@ -635,7 +640,10 @@ describe("codex probe", () => {
         loggedIn: true,
         outsideCliRange: false,
       });
-      expect(res.realpath).toMatch(/test\/fakes\/bin\/codex$/);
+      // POSIX: a symlink into test/fakes/bin; Windows: a copy of the cmd-shim in the temp bin dir.
+      expect(res.realpath).toMatch(
+        process.platform === "win32" ? /codex\.cmd$/i : /test\/fakes\/bin\/codex$/,
+      );
       for (const f of [
         "--json",
         "--ephemeral",
@@ -657,16 +665,16 @@ describe("codex probe", () => {
       expect(calls.every((c) => c.env.CODEX_HOME === "/tmp/codex-alt-home")).toBe(true);
       expect(calls.every((c) => c.env.SECRET_TOKEN === undefined)).toBe(true);
       // The probed result feeds buildInvocation directly.
-      expect(adapter.buildInvocation(args({ probe: res })).argv).toEqual(golden("workspace-write"));
+      expect(posix.buildInvocation(args({ probe: res })).argv).toEqual(golden("workspace-write"));
     });
   });
 
   it("reports logged-out from the fake CLI", async () => {
-    await withFakes({ "codex:login": { loggedIn: false } }, async ({ binDir }) => {
+    await withFakes({ "codex:login": { loggedIn: false } }, async ({ bin }) => {
       const deps: AdapterDeps = {
         spawner: testSpawner,
         clock: new FakeClock(),
-        resolveBinary: async () => join(binDir, "codex"),
+        resolveBinary: async () => bin("codex"),
       };
       expect((await adapter.probe(instance, deps)).loggedIn).toBe(false);
     });
@@ -710,7 +718,7 @@ describe("codex probe", () => {
       loggedIn: null,
       realpath: null,
     });
-    expect(() => adapter.buildInvocation(args({ probe: res }))).toThrow(/hooks, plugins/);
+    expect(() => posix.buildInvocation(args({ probe: res }))).toThrow(/hooks, plugins/);
   });
 
   it("survives a spawner that throws", async () => {
@@ -746,8 +754,8 @@ describe("codex invocation against the fake CLI", () => {
   it("runs the built invocation and classifies its stream [UC2] [UC4]", async () => {
     await withFakes(
       { codex: [{ scenario: "quota_exhausted" }] },
-      async ({ binDir, env, readLog }) => {
-        const probe = { ...probeResult, binaryPath: join(binDir, "codex") };
+      async ({ bin, binDir, env, readLog }) => {
+        const probe = { ...probeResult, binaryPath: bin("codex") };
         const inv: Invocation = adapter.buildInvocation(
           args({ probe, worktree: binDir, repoRoot: binDir, baseEnv: env }),
         );

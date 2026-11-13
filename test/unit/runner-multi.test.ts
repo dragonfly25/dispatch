@@ -1,12 +1,13 @@
 /** WP23 runner multi, in process: fanout (UC7), wait/cancel logic, idempotency keys, exit codes. */
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadAppContext } from "../../src/app/context.js";
 import { runnerDeps } from "../../src/app/runner.js";
 import { renderRunResult } from "../../src/cli/commands/run.js";
 import { renderRun } from "../../src/cli/commands/runs.js";
+import { buildProgram, runCli } from "../../src/cli/program.js";
 import type { ExecutionConfig } from "../../src/config/load.js";
 import { systemClock } from "../../src/core/clock.js";
 import {
@@ -18,7 +19,7 @@ import {
 } from "../../src/core/contracts.js";
 import { DispatchError } from "../../src/core/errors.js";
 import type { RoutingConfig, Rule } from "../../src/core/routing.js";
-import { CANCELLED, idempotencyKey } from "../../src/runner/detach.js";
+import { CANCEL_FILE, CANCELLED, idempotencyKey } from "../../src/runner/detach.js";
 import { fanoutChildId } from "../../src/runner/fanout.js";
 import { SELF_PID_START } from "../../src/runner/lease.js";
 import { ProbeCache } from "../../src/runner/lifecycle.js";
@@ -28,6 +29,7 @@ import {
   cancelRun,
   defaultWaitSeconds,
   findRunDir,
+  locateRunDir,
   SUPERVISOR_LOST,
   supervisorAlive,
   type WaitDeps,
@@ -38,6 +40,7 @@ import { probeResult } from "../fixtures/contracts.js";
 import { FakeClock } from "../stubs/index.js";
 import {
   createFakes,
+  type FakeCli,
   type FakeScenarioMap,
   type FakesContext,
   snapshotTree,
@@ -58,9 +61,24 @@ const instance = (id: string, adapter: string) => ({
   envPassthrough: [] as string[],
 });
 
+/**
+ * Native Windows never routes to claude (its OS sandbox does not exist there, by design): the
+ * fanout's first target is a second codex instance there.
+ */
+const WIN = process.platform === "win32";
+const FIRST = WIN
+  ? ({ id: "codex-b", adapter: "codex", cli: "codex" } as const)
+  : ({ id: "claude", adapter: "claude", cli: "claude" } as const);
+// Worktree runs with real git and node children take several seconds each on Windows runners.
+if (WIN) vi.setConfig({ testTimeout: 60_000 });
+
 const execution = (): ExecutionConfig => ({
   autonomy: "worktree",
-  instances: [instance("claude", "claude"), instance("codex", "codex")],
+  instances: [
+    instance("claude", "claude"),
+    instance("codex", "codex"),
+    ...(WIN ? [instance(FIRST.id, FIRST.adapter)] : []),
+  ],
   concurrency: { perProvider: 1, total: 4 },
   maxDepth: 1,
   network: "off",
@@ -72,13 +90,16 @@ const execution = (): ExecutionConfig => ({
 function routing(action: Rule["action"]): RoutingConfig {
   const base = makeConfig();
   return makeConfig({
-    instances: base.instances.filter((i) => i.id === "claude" || i.id === "codex"),
+    instances: [
+      ...base.instances.filter((i) => i.id === "claude" || i.id === "codex"),
+      ...base.instances.filter((i) => WIN && i.id === "codex").map((i) => ({ ...i, id: FIRST.id })),
+    ],
     activeProfile: "test",
     profiles: { ...base.profiles, test: { rules: [{ id: "r", match: {}, action }] } },
   });
 }
 
-const FANOUT: Rule["action"] = { type: "fanout", instances: ["claude", "codex"] };
+const FANOUT: Rule["action"] = { type: "fanout", instances: [FIRST.id, "codex"] };
 
 const task = (over: Partial<Task> = {}): Task => ({
   id: "t1",
@@ -106,14 +127,15 @@ function setup(scenarios: FakeScenarioMap, leaseWaitMs = 0) {
   home = tempHome();
   repo = tempRepo({ files: { "math.js": "function add(a, b) {\n  return a + b;\n}\n" } });
   const probes = new ProbeCache();
-  const probe = (cli: string): ProbeResult => ({
+  const probe = (cli: FakeCli): ProbeResult => ({
     ...probeResult,
-    binaryPath: join(fakes?.binDir ?? "", cli),
+    binaryPath: fakes?.bin(cli) ?? "",
     flags: ["--safe-mode"],
     features: ["hooks", "plugins", "apps", "memories"],
   });
   probes.set("claude", "claude", probe("claude"));
   probes.set("codex", "codex", probe("codex"));
+  if (WIN) probes.set("codex", FIRST.id, probe("codex"));
   const ctx = loadAppContext({ cwd: repo.dir, env: { ...fakes.env, ...home.env } });
   ctx.config = { ...ctx.config, routing: routing(FANOUT), execution: execution() };
   const deps = runnerDeps(ctx, { probes });
@@ -126,10 +148,15 @@ function setup(scenarios: FakeScenarioMap, leaseWaitMs = 0) {
 
 describe("[UC7] fanout (second opinion)", () => {
   it("[UC7] runs both providers concurrently in separate worktrees and returns both results", async () => {
-    const { run, repo, fakes, store } = setup({
-      claude: [{ scenario: "success_edit", file: "a.txt", content: "from claude\n" }],
-      codex: [{ scenario: "success_edit", file: "b.txt", content: "from codex\n" }],
-    });
+    // On Windows both targets are codex and the call order is a race: both make the same edit.
+    const { run, repo, fakes, store } = setup(
+      WIN
+        ? { codex: [{ scenario: "success_edit", file: "a.txt", content: "from agent\n" }] }
+        : {
+            claude: [{ scenario: "success_edit", file: "a.txt", content: "from claude\n" }],
+            codex: [{ scenario: "success_edit", file: "b.txt", content: "from codex\n" }],
+          },
+    );
     const before = snapshotTree(repo.dir);
     const r = await run();
     expect(RunResultSchema.safeParse(r).success).toBe(true);
@@ -137,10 +164,14 @@ describe("[UC7] fanout (second opinion)", () => {
     expect(r.results).toHaveLength(2);
     const [a, b] = r.results as RunResult[];
     expect(a?.runId).toBe(fanoutChildId(r.runId, 0));
-    expect(a?.externalAgent).toMatchObject({ instance: "claude", marker: "EXTERNAL_AGENT_OUTPUT" });
+    expect(a?.externalAgent).toMatchObject({ instance: FIRST.id, marker: "EXTERNAL_AGENT_OUTPUT" });
     expect(b?.externalAgent).toMatchObject({ instance: "codex", marker: "EXTERNAL_AGENT_OUTPUT" });
-    expect(readFileSync(a?.patch?.path ?? "", "utf8")).toContain("+from claude");
-    expect(readFileSync(b?.patch?.path ?? "", "utf8")).toContain("+from codex");
+    expect(readFileSync(a?.patch?.path ?? "", "utf8")).toContain(
+      WIN ? "+from agent" : "+from claude",
+    );
+    expect(readFileSync(b?.patch?.path ?? "", "utf8")).toContain(
+      WIN ? "+from agent" : "+from codex",
+    );
     expect(a?.patch?.path).not.toBe(b?.patch?.path);
     // Two different worktrees, neither the working copy, which is untouched.
     const cwds = fakes.readLog({ kind: "run" }).map((e) => e.cwd);
@@ -156,7 +187,7 @@ describe("[UC7] fanout (second opinion)", () => {
 
   it("[UC7] the two agents overlap in time", async () => {
     const slow = { scenario: "slow" as const, delayMs: 150 };
-    const { run, fakes } = setup({ claude: [slow], codex: [slow] });
+    const { run, fakes } = setup({ [FIRST.cli]: [slow], codex: [slow] });
     const r = await run();
     expect(r.results?.map((c) => c.outcome)).toEqual(["success", "success"]);
     const [x, y] = fakes.readLog({ kind: "run" });
@@ -165,29 +196,34 @@ describe("[UC7] fanout (second opinion)", () => {
   });
 
   it("[UC7] one success is enough; all failures return the task to the host with both results", async () => {
-    const mixed = setup({
-      claude: [{ scenario: "quota_exhausted" }],
-      codex: [{ scenario: "success_edit", file: "b.txt", content: "x\n" }],
-    });
-    const r = await mixed.run();
-    expect(r).toMatchObject({ status: "completed", outcome: "success" });
-    expect(r.results?.map((c) => c.outcome)).toEqual(["quota_exhausted", "success"]);
-    for (const c of closers.splice(0)) c();
-    fakes?.dispose();
-    home?.cleanup();
-    repo?.cleanup();
+    // Distinct outcomes per target need two different CLIs (on Windows both are codex, racing).
+    if (!WIN) {
+      const mixed = setup({
+        claude: [{ scenario: "quota_exhausted" }],
+        codex: [{ scenario: "success_edit", file: "b.txt", content: "x\n" }],
+      });
+      const r = await mixed.run();
+      expect(r).toMatchObject({ status: "completed", outcome: "success" });
+      expect(r.results?.map((c) => c.outcome)).toEqual(["quota_exhausted", "success"]);
+      for (const c of closers.splice(0)) c();
+      fakes?.dispose();
+      home?.cleanup();
+      repo?.cleanup();
+    }
 
-    const bad = setup({ claude: [{ scenario: "fail" }], codex: [{ scenario: "fail" }] });
+    const bad = setup({ [FIRST.cli]: [{ scenario: "fail" }], codex: [{ scenario: "fail" }] });
     const r2 = await bad.run();
     expect(r2).toMatchObject({ status: "returned_to_host", outcome: "failed" });
-    expect(r2.summary).toMatch(/no fanout target succeeded: claude: failed; codex: failed/);
+    expect(r2.summary).toMatch(
+      new RegExp(`no fanout target succeeded: ${FIRST.id}: failed; codex: failed`),
+    );
     expect(r2.results).toHaveLength(2);
   });
 
   it("[UC7] respects per-instance concurrency: a full instance is skipped, the other runs", async () => {
     const { run, store } = setup({
-      claude: [{ scenario: "success_edit", file: "a.txt", content: "a\n" }],
-      codex: [{ scenario: "success_edit", file: "b.txt", content: "b\n" }],
+      [FIRST.cli]: [{ scenario: "success_edit", file: "a.txt", content: "a\n" }],
+      ...(WIN ? {} : { codex: [{ scenario: "success_edit", file: "b.txt", content: "b\n" }] }),
     });
     const busy = store.acquireLease("codex", "other-run", {
       pid: process.pid,
@@ -319,6 +355,7 @@ describe("cancel", () => {
     let alive = true;
     const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
     const r = await cancelRun(deps, "c3", {
+      platform: "linux", // the signal path; the Windows one is covered in runner-tree.test.ts
       graceMs: 30,
       kill: (pid, sig) => {
         sent.push(`${pid}:${sig}`);
@@ -334,6 +371,7 @@ describe("cancel", () => {
     await running(store, "c4", 4343);
     const deps: WaitDeps = { store, clock: systemClock, isAlive: () => true, pollMs: 5 };
     const r = await cancelRun(deps, "c4", {
+      platform: "linux",
       kill: () => {
         void store.updateRun("c4", {
           status: "completed",
@@ -342,6 +380,150 @@ describe("cancel", () => {
       },
     });
     expect(r.summary).toBe("cancelled by supervisor");
+  });
+});
+
+describe("cancel locates the run directory independently of the cwd", () => {
+  const tmp = (prefix: string) => {
+    const d = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    return d;
+  };
+
+  it("`dispatch cancel` from another cwd writes the request into the recorded run dir", async () => {
+    const home = tmp("dispatch-cancel-home-");
+    const repo = tmp("dispatch-cancel-repo-");
+    const elsewhere = tmp("dispatch-cancel-cwd-");
+    const runDir = join(repo, ".dispatch", "state", "runs", "x1");
+    mkdirSync(runDir, { recursive: true });
+    mkdirSync(join(home, "state"), { recursive: true });
+    const db = join(home, "state", "dispatch.db");
+    const seed = SqliteStateStore.open(db);
+    await running(seed, "x1", null); // supervisor not started yet: no signal is sent
+    seed.setRunDir("x1", runDir);
+    seed.close();
+
+    let out = "";
+    const io = {
+      out: (t: string) => {
+        out += t;
+      },
+      err: (t: string) => {
+        out += t;
+      },
+    };
+    const env = { HOME: home, DISPATCH_HOME: home, PATH: process.env.PATH ?? "" };
+    const program = buildProgram(io, {}, {}, { cwd: elsewhere, env });
+    const code = await runCli(["cancel", "x1", "--json"], io, program, {
+      platform: process.platform,
+      env,
+    });
+    expect(code).toBe(ExitCode.OK);
+    expect(existsSync(join(runDir, CANCEL_FILE))).toBe(true);
+    const r = JSON.parse(out) as RunResult;
+    expect(r).toMatchObject({ summary: CANCELLED, log: { path: join(runDir, "events.jsonl") } });
+  });
+
+  it("rows without a recorded dir still cancel through the cwd lookup", async () => {
+    const { store, clock } = storeAt();
+    const dir = tmp("dispatch-cancel-old-");
+    await running(store, "old1", null);
+    expect(store.getRunDir("old1")).toBeNull();
+    const r = await cancelRun({ store, clock, runDir: () => dir }, "old1");
+    expect(r.summary).toBe(CANCELLED);
+    expect(existsSync(join(dir, CANCEL_FILE))).toBe(true);
+    expect(r.log.path).toBe(join(dir, "events.jsonl"));
+  });
+
+  it("ignores a recorded dir that is gone or does not name the run", async () => {
+    const { store } = storeAt();
+    const fallback = tmp("dispatch-cancel-fb-");
+    await running(store, "g1");
+    store.setRunDir("g1", join(fallback, "nope", "g1"));
+    expect(locateRunDir({ store, runDir: () => fallback }, "g1")).toBe(fallback);
+    const other = join(fallback, "other");
+    mkdirSync(other);
+    store.setRunDir("g1", other);
+    expect(locateRunDir({ store, runDir: () => null }, "g1")).toBeNull();
+  });
+
+  it("win32: never force-kills before the grace when the run dir is known", async () => {
+    const { store } = storeAt();
+    const runDir = join(tmp("dispatch-cancel-win-"), "w1");
+    mkdirSync(runDir);
+    await running(store, "w1", 4545);
+    store.setRunDir("w1", runDir);
+    const start = Date.now();
+    const killedAt: number[] = [];
+    let alive = true;
+    const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
+    const notices: string[] = [];
+    const r = await cancelRun(deps, "w1", {
+      platform: "win32",
+      graceMs: 120,
+      env: { SystemRoot: "C:\\Windows" },
+      kill: () => {
+        throw new Error("no POSIX signal on win32");
+      },
+      run: () => {
+        killedAt.push(Date.now() - start);
+        alive = false;
+        return 0;
+      },
+      onNotice: (m) => notices.push(m),
+    });
+    expect(existsSync(join(runDir, CANCEL_FILE))).toBe(true);
+    expect(killedAt).toHaveLength(1);
+    expect(killedAt[0]).toBeGreaterThanOrEqual(115); // ms rounding of Date.now
+    expect(notices).toEqual([]);
+    expect(r.summary).toBe(CANCELLED);
+  });
+
+  it("win32: a supervisor that honours the request within the grace is never force-killed", async () => {
+    const { store } = storeAt();
+    const runDir = join(tmp("dispatch-cancel-win-"), "w2");
+    mkdirSync(runDir);
+    await running(store, "w2", 4646);
+    store.setRunDir("w2", runDir);
+    let alive = true;
+    setTimeout(() => {
+      alive = !existsSync(join(runDir, CANCEL_FILE));
+    }, 30);
+    const ran: string[] = [];
+    const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
+    const r = await cancelRun(deps, "w2", {
+      platform: "win32",
+      graceMs: 5_000,
+      run: (cmd) => {
+        ran.push(cmd);
+        return 0;
+      },
+    });
+    expect(ran).toEqual([]);
+    expect(r.summary).toBe(CANCELLED);
+  });
+
+  it("win32: without a run dir it still waits the grace and says so", async () => {
+    const { store } = storeAt();
+    await running(store, "w3", 4747);
+    const start = Date.now();
+    const killedAt: number[] = [];
+    let alive = true;
+    const notices: string[] = [];
+    const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
+    await cancelRun(deps, "w3", {
+      platform: "win32",
+      graceMs: 80,
+      env: { SystemRoot: "C:\\Windows" },
+      run: () => {
+        killedAt.push(Date.now() - start);
+        alive = false;
+        return 0;
+      },
+      onNotice: (m) => notices.push(m),
+    });
+    expect(killedAt[0]).toBeGreaterThanOrEqual(75);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatch(/run directory of w3 not found/);
   });
 });
 

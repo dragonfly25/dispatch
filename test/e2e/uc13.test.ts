@@ -102,7 +102,10 @@ describe("[UC13] timeout and a patch that does not apply", () => {
     const kept = keep.run();
     expect(kept.result?.status).toBe("completed");
     expect(worktreeCount(keep)).toBe(1);
-    expect(keep.repo.git("worktree", "list")).toContain(join(keep.home.dispatchHome, "worktrees"));
+    // git prints `/`-separated paths on Windows too.
+    expect(keep.repo.git("worktree", "list")).toContain(
+      join(keep.home.dispatchHome, "worktrees").replaceAll("\\", "/"),
+    );
     // Even a kept worktree never touches the working copy.
     expect(readFileSync(join(keep.repo.dir, "math.js"), "utf8")).toBe(MATH_JS);
     expect(keep.repo.git("status", "--porcelain")).toBe("");
@@ -119,7 +122,8 @@ describe("[UC13] timeout and a patch that does not apply", () => {
       .split("\n")
       .filter((l) => l.startsWith("worktree "))
       .map((l) => l.slice("worktree ".length))
-      .find((p) => p.startsWith(keep.home.dispatchHome));
+      // git prints `/`-separated paths on Windows too.
+      .find((p) => p.startsWith(keep.home.dispatchHome.replaceAll("\\", "/")));
     expect(path).toBeDefined();
     expect(keep.dispatch(["gc"]).stdout).toContain("Removed 0 worktree(s)");
     expect(worktreeCount(keep)).toBe(1);

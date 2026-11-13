@@ -7,6 +7,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { syncBuiltinESMExports } = require("node:module");
+const { fileURLToPath } = require("node:url");
 
 const out = process.env.FS_TRACE_OUT;
 if (out) {
@@ -15,7 +16,7 @@ if (out) {
   const norm = (p) => {
     if (typeof p === "number") return null; // an fd: its path was recorded when it was opened
     try {
-      const s = p instanceof URL ? p.pathname : Buffer.isBuffer(p) ? p.toString() : String(p);
+      const s = p instanceof URL ? fileURLToPath(p) : Buffer.isBuffer(p) ? p.toString() : String(p);
       return path.resolve(s);
     } catch {
       return null;
@@ -32,10 +33,21 @@ if (out) {
   const wrap = (obj, name, op) => {
     const orig = obj[name];
     if (typeof orig !== "function") return;
-    obj[name] = function traced(...args) {
+    const traced = function traced(...args) {
       note(op, args);
       return orig.apply(this, args);
     };
+    // Keep properties such as `realpathSync.native` (used on Windows), traced as well.
+    for (const [key, value] of Object.entries(orig)) {
+      traced[key] =
+        typeof value === "function"
+          ? function tracedProp(...args) {
+              note(`${op}.${key}`, args);
+              return value.apply(this, args);
+            }
+          : value;
+    }
+    obj[name] = traced;
   };
   const OPEN = ["open", "openSync", "readFile", "readFileSync", "createReadStream"];
   const COPY = ["copyFile", "copyFileSync", "cp", "cpSync"];

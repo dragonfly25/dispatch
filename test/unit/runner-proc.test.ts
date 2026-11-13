@@ -6,15 +6,40 @@ import { performance } from "node:perf_hooks";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SpawnRequest } from "../../src/core/contracts.js";
 import { DispatchError } from "../../src/core/errors.js";
+import { WINDOWS_BASE_ENV } from "../../src/platform/os.js";
 import { assertDepthAllowed } from "../../src/runner/depth.js";
 import { buildChildEnv } from "../../src/runner/env.js";
 import { MAX_LINE_LENGTH, ProcessSpawner, TRUNCATION_MARKER } from "../../src/runner/proc.js";
 import { bundleHelper } from "../helpers/bundle.js";
 import { type FakesContext, withFakes } from "../support/index.js";
+import { shimFileName } from "../support/shims.js";
 import { isAlive, sleep, waitFor } from "./fakes-helpers.js";
 
 const NODE = process.execPath;
+/** POSIX signals, process groups and `ps`: the Windows tree path is covered in runner-tree.test.ts. */
+const POSIX_ONLY = process.platform === "win32";
+/** Absolute path of the fake claude (production always spawns a resolved path; Windows PATH lookup never finds a .cmd). */
+const claudeBin = (ctx: FakesContext): string => join(ctx.binDir, shimFileName("claude"));
 const BASE_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
+/**
+ * Variables libuv itself copies from the parent into a Windows child's environment block when the
+ * given env lacks them (uv_spawn's "required vars"); not Dispatch's doing, and none is a secret.
+ */
+const LIBUV_WINDOWS_REQUIRED =
+  process.platform === "win32"
+    ? [
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LOGONSERVER",
+        "SYSTEMDRIVE",
+        "SYSTEMROOT",
+        "TEMP",
+        "USERDOMAIN",
+        "USERNAME",
+        "USERPROFILE",
+        "WINDIR",
+      ]
+    : [];
 
 /**
  * Asserts that `pid` is gone. kill(pid, 0) still succeeds for a killed process that has not been
@@ -102,8 +127,9 @@ describe("ProcessSpawner: basics", () => {
         { env: { ...BASE_ENV, ONLY_THIS: "1" }, cwd: dir },
       );
       const keys: string[] = JSON.parse(r.stdout[0] ?? "[]");
-      // macOS adds __CF_USER_TEXT_ENCODING to every process on its own.
-      expect(keys.filter((k) => k !== "__CF_USER_TEXT_ENCODING")).toEqual(["ONLY_THIS", "PATH"]);
+      // macOS adds __CF_USER_TEXT_ENCODING to every process on its own, libuv the Windows basics.
+      const own = new Set(["__CF_USER_TEXT_ENCODING", ...LIBUV_WINDOWS_REQUIRED]);
+      expect(keys.filter((k) => !own.has(k.toUpperCase()))).toEqual(["ONLY_THIS", "PATH"]);
       expect(r.stdout[1]).toBe(realpathSync(dir));
       rmSync(dir, { recursive: true, force: true });
     } finally {
@@ -118,7 +144,7 @@ describe("ProcessSpawner: basics", () => {
     expect(out.stdout).toEqual(["a;echo pwned|$HOME|`id`"]);
   });
 
-  it("starts the child as leader of a new process group", async () => {
+  it.skipIf(POSIX_ONLY)("starts the child as leader of a new process group", async () => {
     const r = await runNode(
       "const {execFileSync}=require('child_process');" +
         "console.log(execFileSync('ps',['-o','pgid=','-p',String(process.pid)]).toString().trim()+' '+process.pid)",
@@ -154,7 +180,10 @@ describe("ProcessSpawner: basics", () => {
       cwd: tmpdir(),
     });
     await expect(p).rejects.toBeInstanceOf(DispatchError);
-    await expect(p).rejects.toMatchObject({ code: "spawn.failed" });
+    // Windows refuses an extensionless path before spawning (only .exe/.com and npm shims start).
+    await expect(p).rejects.toMatchObject({
+      code: process.platform === "win32" ? "binary.unspawnable" : "spawn.failed",
+    });
   });
 
   it("an onLine callback that throws does not break the run", async () => {
@@ -227,7 +256,7 @@ describe("ProcessSpawner: fake CLIs", () => {
       { claude: [{ scenario: "slow", delayMs: 150, events: ["l1", "l2", "l3", "l4"] }] },
       async (ctx) => {
         const { lines, result } = await runNode("", {
-          binary: "claude",
+          binary: claudeBin(ctx),
           argv: ["-p"],
           env: ctx.env,
           stdin: "go",
@@ -240,64 +269,70 @@ describe("ProcessSpawner: fake CLIs", () => {
     );
   });
 
-  it("[UC13] a crash is reported as exit code (and as a signal when killed by one)", async () => {
-    await withFakes(
-      {
-        claude: [
-          { scenario: "crash", lines: 2 },
-          { scenario: "crash", signal: "SIGABRT" },
-        ],
-      },
-      async (ctx) => {
-        const req = { binary: "claude", argv: ["-p"], env: ctx.env, stdin: "x" };
-        const first = await runNode("", req);
-        expect(first.result).toEqual({ exitCode: 139, signal: null, timedOut: false });
-        expect(first.stderr.join("\n")).toContain("Segmentation fault");
-        expect(first.lines.filter((l) => l.stream === "stdout")).toHaveLength(2);
+  it.skipIf(POSIX_ONLY)(
+    "[UC13] a crash is reported as exit code (and as a signal when killed by one)",
+    async () => {
+      await withFakes(
+        {
+          claude: [
+            { scenario: "crash", lines: 2 },
+            { scenario: "crash", signal: "SIGABRT" },
+          ],
+        },
+        async (ctx) => {
+          const req = { binary: claudeBin(ctx), argv: ["-p"], env: ctx.env, stdin: "x" };
+          const first = await runNode("", req);
+          expect(first.result).toEqual({ exitCode: 139, signal: null, timedOut: false });
+          expect(first.stderr.join("\n")).toContain("Segmentation fault");
+          expect(first.lines.filter((l) => l.stream === "stdout")).toHaveLength(2);
 
-        const second = await runNode("", req);
-        expect(second.result).toEqual({ exitCode: null, signal: "SIGABRT", timedOut: false });
-      },
-    );
-  });
+          const second = await runNode("", req);
+          expect(second.result).toEqual({ exitCode: null, signal: "SIGABRT", timedOut: false });
+        },
+      );
+    },
+  );
 
-  it("[UC13] hang_ignore_term: SIGTERM is ignored, SIGKILL after the grace kills child AND grandchild", async () => {
-    await withFakes(
-      { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
-      async (ctx) => {
-        const started = performance.now();
-        const { result } = await runNode("", {
-          binary: "claude",
-          argv: ["-p"],
-          env: ctx.env,
-          stdin: "x",
-          timeoutMs: 3000,
-          killGraceMs: 600,
-        });
-        const elapsed = performance.now() - started;
-        const entry = ctx.readLog()[0];
-        expect(result.timedOut).toBe(true);
-        expect(result.signal).toBe("SIGKILL");
-        expect(entry?.sigtermCount).toBe(1); // SIGTERM was delivered and ignored
-        expect(elapsed).toBeGreaterThanOrEqual(3000 + 600 - 50); // the grace period was honoured
-        expect(elapsed).toBeLessThan(10_000);
+  it.skipIf(POSIX_ONLY)(
+    "[UC13] hang_ignore_term: SIGTERM is ignored, SIGKILL after the grace kills child AND grandchild",
+    async () => {
+      await withFakes(
+        { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
+        async (ctx) => {
+          const started = performance.now();
+          const { result } = await runNode("", {
+            binary: claudeBin(ctx),
+            argv: ["-p"],
+            env: ctx.env,
+            stdin: "x",
+            timeoutMs: 3000,
+            killGraceMs: 600,
+          });
+          const elapsed = performance.now() - started;
+          const entry = ctx.readLog()[0];
+          expect(result.timedOut).toBe(true);
+          expect(result.signal).toBe("SIGKILL");
+          expect(entry?.sigtermCount).toBe(1); // SIGTERM was delivered and ignored
+          expect(elapsed).toBeGreaterThanOrEqual(3000 + 600 - 50); // the grace period was honoured
+          expect(elapsed).toBeLessThan(10_000);
 
-        const child = entry?.pid as number;
-        const grandchild = entry?.grandchildPid as number;
-        expect(entry?.pgid).toBe(child);
-        expect(grandchild).toBeGreaterThan(0);
-        await expectDead(child);
-        await expectDead(grandchild);
-        expect(() => process.kill(grandchild, 0)).toThrow();
-      },
-    );
-  });
+          const child = entry?.pid as number;
+          const grandchild = entry?.grandchildPid as number;
+          expect(entry?.pgid).toBe(child);
+          expect(grandchild).toBeGreaterThan(0);
+          await expectDead(child);
+          await expectDead(grandchild);
+          expect(() => process.kill(grandchild, 0)).toThrow();
+        },
+      );
+    },
+  );
 
   it("[UC13] a cooperative child dies on SIGTERM and the run does not wait for the grace", async () => {
     await withFakes({ claude: [{ scenario: "slow", delayMs: 2000 }] }, async (ctx) => {
       const started = performance.now();
       const { result } = await runNode("", {
-        binary: "claude",
+        binary: claudeBin(ctx),
         argv: ["-p"],
         env: ctx.env,
         stdin: "x",
@@ -309,34 +344,37 @@ describe("ProcessSpawner: fake CLIs", () => {
     });
   });
 
-  it("[UC13] AbortSignal kills the group like a timeout but without timedOut", async () => {
-    await withFakes(
-      { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
-      async (ctx) => {
-        const ac = new AbortController();
-        const run = runNode("", {
-          binary: "claude",
-          argv: ["-p"],
-          env: ctx.env,
-          stdin: "x",
-          killGraceMs: 400,
-          signal: ac.signal,
-        });
-        const entry = await grandchildLogged(ctx);
-        ac.abort();
-        const { result } = await run;
-        expect(result.timedOut).toBe(false);
-        expect(result.signal).toBe("SIGKILL");
-        await expectDead(entry.pid);
-        await expectDead(entry.grandchildPid as number);
-      },
-    );
-  });
+  it.skipIf(POSIX_ONLY)(
+    "[UC13] AbortSignal kills the group like a timeout but without timedOut",
+    async () => {
+      await withFakes(
+        { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
+        async (ctx) => {
+          const ac = new AbortController();
+          const run = runNode("", {
+            binary: claudeBin(ctx),
+            argv: ["-p"],
+            env: ctx.env,
+            stdin: "x",
+            killGraceMs: 400,
+            signal: ac.signal,
+          });
+          const entry = await grandchildLogged(ctx);
+          ac.abort();
+          const { result } = await run;
+          expect(result.timedOut).toBe(false);
+          expect(result.signal).toBe("SIGKILL");
+          await expectDead(entry.pid);
+          await expectDead(entry.grandchildPid as number);
+        },
+      );
+    },
+  );
 
   it("an already-aborted signal does not spawn anything", async () => {
     await withFakes({ claude: [{ scenario: "slow" }] }, async (ctx) => {
       const r = await runNode("", {
-        binary: "claude",
+        binary: claudeBin(ctx),
         argv: ["-p"],
         env: ctx.env,
         signal: AbortSignal.abort(),
@@ -355,28 +393,34 @@ describe("ProcessSpawner: fake CLIs", () => {
 });
 
 describe("ProcessSpawner: stray processes and timeouts", () => {
-  it("[UC13] reaps background processes left in the group by a child that exited by itself", async () => {
-    const r = await runNode(
-      "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});" +
-        "console.log(c.pid);c.unref()",
-      { killGraceMs: 300 },
-    );
-    expect(r.result.exitCode).toBe(0);
-    const stray = Number(r.stdout[0]);
-    expect(stray).toBeGreaterThan(0);
-    await expectDead(stray);
-  });
+  it.skipIf(POSIX_ONLY)(
+    "[UC13] reaps background processes left in the group by a child that exited by itself",
+    async () => {
+      const r = await runNode(
+        "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});" +
+          "console.log(c.pid);c.unref()",
+        { killGraceMs: 300 },
+      );
+      expect(r.result.exitCode).toBe(0);
+      const stray = Number(r.stdout[0]);
+      expect(stray).toBeGreaterThan(0);
+      await expectDead(stray);
+    },
+  );
 
-  it("does not wait forever for a detached escapee that holds the pipes", async () => {
-    const started = performance.now();
-    const r = await runNode(
-      "const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},3000)'],{detached:true,stdio:['ignore','inherit','inherit']});" +
-        "console.log(c.pid);c.unref()",
-    );
-    expect(r.result.exitCode).toBe(0);
-    expect(performance.now() - started).toBeLessThan(2500);
-    process.kill(Number(r.stdout[0]), "SIGKILL"); // not ours to reap: it left the group on purpose
-  });
+  it.skipIf(POSIX_ONLY)(
+    "does not wait forever for a detached escapee that holds the pipes",
+    async () => {
+      const started = performance.now();
+      const r = await runNode(
+        "const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},3000)'],{detached:true,stdio:['ignore','inherit','inherit']});" +
+          "console.log(c.pid);c.unref()",
+      );
+      expect(r.result.exitCode).toBe(0);
+      expect(performance.now() - started).toBeLessThan(2500);
+      process.kill(Number(r.stdout[0]), "SIGKILL"); // not ours to reap: it left the group on purpose
+    },
+  );
 
   it("[UC13] the timeout uses the injected monotonic clock", async () => {
     // A clock running 10x fast: a 5 s timeout fires after ~0.5 s of real time.
@@ -428,50 +472,56 @@ describe("ProcessSpawner: stray processes and timeouts", () => {
 });
 
 describe("ProcessSpawner: parent signals", () => {
-  it("[UC13] SIGTERM to the parent in-process terminates every running group (second signal escalates)", async () => {
-    await withFakes(
-      { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
-      async (ctx) => {
-        // A listener keeps the default action (terminate the test worker) away; the handler under
-        // test only re-raises when nobody else listens.
-        const noop = (): void => {};
-        process.on("SIGTERM", noop);
-        try {
-          const run = runNode("", {
-            binary: "claude",
-            argv: ["-p"],
-            env: ctx.env,
-            stdin: "x",
-            killGraceMs: 20_000,
-          });
-          const entry = await grandchildLogged(ctx);
-          process.emit("SIGTERM");
-          await waitFor(() => ctx.readLog()[0]?.sigtermCount === 1);
-          await sleep(200);
-          expect(isAlive(entry.pid)).toBe(true); // ignoring SIGTERM, grace is 20 s
-          process.emit("SIGTERM"); // impatient: SIGKILL right away
-          const { result } = await run;
-          expect(result.timedOut).toBe(false);
-          expect(result.signal).toBe("SIGKILL");
-          await expectDead(entry.pid);
-          await expectDead(entry.grandchildPid as number);
-        } finally {
-          process.off("SIGTERM", noop);
-        }
-      },
-    );
-  });
+  it.skipIf(POSIX_ONLY)(
+    "[UC13] SIGTERM to the parent in-process terminates every running group (second signal escalates)",
+    async () => {
+      await withFakes(
+        { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
+        async (ctx) => {
+          // A listener keeps the default action (terminate the test worker) away; the handler under
+          // test only re-raises when nobody else listens.
+          const noop = (): void => {};
+          process.on("SIGTERM", noop);
+          try {
+            const run = runNode("", {
+              binary: claudeBin(ctx),
+              argv: ["-p"],
+              env: ctx.env,
+              stdin: "x",
+              killGraceMs: 20_000,
+            });
+            const entry = await grandchildLogged(ctx);
+            process.emit("SIGTERM");
+            await waitFor(() => ctx.readLog()[0]?.sigtermCount === 1);
+            await sleep(200);
+            expect(isAlive(entry.pid)).toBe(true); // ignoring SIGTERM, grace is 20 s
+            process.emit("SIGTERM"); // impatient: SIGKILL right away
+            const { result } = await run;
+            expect(result.timedOut).toBe(false);
+            expect(result.signal).toBe("SIGKILL");
+            await expectDead(entry.pid);
+            await expectDead(entry.grandchildPid as number);
+          } finally {
+            process.off("SIGTERM", noop);
+          }
+        },
+      );
+    },
+  );
 
-  it("the parent's exit hook kills any group that is still running", async () => {
-    const before = new Set(process.listeners("exit"));
-    const run = runNode("setInterval(()=>{},1000)", { killGraceMs: 200 });
-    const hook = process.listeners("exit").find((l) => !before.has(l));
-    expect(hook).toBeDefined();
-    await sleep(150);
-    (hook as () => void)();
-    const { result } = await run;
-    expect(result.signal).toBe("SIGKILL");
-  });
+  it.skipIf(POSIX_ONLY)(
+    "the parent's exit hook kills any group that is still running",
+    async () => {
+      const before = new Set(process.listeners("exit"));
+      const run = runNode("setInterval(()=>{},1000)", { killGraceMs: 200 });
+      const hook = process.listeners("exit").find((l) => !before.has(l));
+      expect(hook).toBeDefined();
+      await sleep(150);
+      (hook as () => void)();
+      const { result } = await run;
+      expect(result.signal).toBe("SIGKILL");
+    },
+  );
 
   it("registers its process handlers per spawn and removes them afterwards", async () => {
     const count = () => process.listenerCount("SIGINT") + process.listenerCount("SIGTERM");
@@ -498,13 +548,19 @@ describe("ProcessSpawner: parent signal in a real helper process [UC13]", () => 
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it.each(["SIGTERM", "SIGINT"] as const)(
+  it.skipIf(POSIX_ONLY).each(["SIGTERM", "SIGINT"] as const)(
     "[UC13] %s to the parent leaves no orphans (child and grandchild die)",
     async (sig) => {
       await withFakes(
         { claude: [{ scenario: "hang_ignore_term", maxLifetimeMs: 30_000 }] },
         async (ctx) => {
-          const req = { binary: "claude", argv: ["-p"], env: ctx.env, cwd: tmpdir(), stdin: "x" };
+          const req = {
+            binary: claudeBin(ctx),
+            argv: ["-p"],
+            env: ctx.env,
+            cwd: tmpdir(),
+            stdin: "x",
+          };
           const req2 = { ...req, killGraceMs: 400 };
           const parent: ChildProcess = spawn(NODE, [helper, JSON.stringify(req2)], {
             stdio: ["ignore", "pipe", "pipe"],
@@ -568,6 +624,9 @@ describe("[SEC-env] canaries through the real spawner", () => {
     "SHLVL",
     "_",
     "__CF_USER_TEXT_ENCODING", // macOS adds it to every process
+    // Windows: the base list forwards these system variables (none carries a secret).
+    ...(process.platform === "win32" ? WINDOWS_BASE_ENV : []),
+    ...LIBUV_WINDOWS_REQUIRED,
   ]);
 
   it("[SEC-env] the fake CLI sees only allow-listed keys plus DISPATCH_* and never a canary value", async () => {
@@ -580,7 +639,7 @@ describe("[SEC-env] canaries through the real spawner", () => {
         runId: "run-sec-env",
       });
       const r = await runNode("", {
-        binary: "claude",
+        binary: claudeBin(ctx),
         argv: ["-p"],
         env,
         stdin: "x",
@@ -633,7 +692,7 @@ describe("recursion guard through the recurse scenario [UC13][SEC-env]", () => {
         depth,
         runId: "run-rec",
       });
-      const r = await runNode("", { binary: "claude", argv: ["-p"], env, stdin: "x" });
+      const r = await runNode("", { binary: claudeBin(ctx), argv: ["-p"], env, stdin: "x" });
       expect(r.result.exitCode).toBe(0);
       // ...but the child's own `dispatch` call sees DISPATCH_DEPTH=1 and refuses.
       const recursed = ctx.readLog()[0]?.recurse;
@@ -651,7 +710,7 @@ describe("recursion guard through the recurse scenario [UC13][SEC-env]", () => {
         extra: { DISPATCH_RECURSE_CMD: `"${NODE}" "${nested}" 2` },
         depth: 0,
       });
-      await runNode("", { binary: "claude", argv: ["-p"], env, stdin: "x" });
+      await runNode("", { binary: claudeBin(ctx), argv: ["-p"], env, stdin: "x" });
       const recursed = ctx.readLog()[0]?.recurse;
       expect(recursed?.exitCode).toBe(0);
       expect(recursed?.stdout).toContain("allowed depth=1");

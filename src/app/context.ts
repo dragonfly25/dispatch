@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { dispatchHome, type EffectiveConfig, loadEffectiveConfig } from "../config/index.js";
+import { expandTilde, pathApi, samePathKey } from "../config/pathkey.js";
 import { assetsDir as builtInAssetsDir } from "../config/paths.js";
 import { systemClock } from "../core/clock.js";
 import {
@@ -25,6 +26,8 @@ import {
 import { DispatchError } from "../core/errors.js";
 import { newRunId } from "../core/ids.js";
 import { detectHost, type HostDetection } from "../platform/host.js";
+import { homeDir, type OsPlatform } from "../platform/os.js";
+import { resolveBinary } from "../platform/resolve.js";
 import { DefaultQuotaProvider, type RunCostContext } from "../quota/provider.js";
 import type { QuotaReaderRegistry } from "../quota/reader.js";
 import { CLAUDE_USAGE_ID, defaultReaders } from "../quota/readers/index.js";
@@ -148,6 +151,13 @@ export function loadAppContext(opts: LoadAppContextOptions): AppContext {
           env: opts.env,
           reliability: { cacheMinutes: ctx.config.execution.quota.cacheMinutes },
           onObservation: (o) => ctx.quota.recordObservation(o),
+          // Same lookup as the adapters: an absolute path, never a bare name searched from a cwd.
+          resolveBinary: (name, instance) =>
+            resolveBinary(name, {
+              configured: instance.binary,
+              env: opts.env,
+              platform: process.platform,
+            })?.path ?? null,
           claudeLlmFallback:
             ctx.config.execution.quota.readers[CLAUDE_USAGE_ID]?.llm_fallback !== false,
         });
@@ -219,18 +229,26 @@ const HOST_ADAPTER = {
   antigravity: "antigravity",
 } as const;
 
-/** True when two directory paths name the same place (`~` expanded, symlinks resolved if present). */
-function samePath(a: string, b: string, env: AppEnv): boolean {
+/**
+ * True when two directory paths name the same place (`~` expanded, symlinks resolved if present;
+ * on Windows case and `/` vs `\` are ignored).
+ */
+export function samePath(
+  a: string,
+  b: string,
+  env: AppEnv,
+  platform: OsPlatform = process.platform,
+): boolean {
+  const home = homeDir(env, platform);
   const norm = (p: string) => {
-    const expanded = p.startsWith("~/") && env.HOME ? join(env.HOME, p.slice(2)) : p;
-    const abs = resolve(expanded);
+    const abs = pathApi(platform).resolve(expandTilde(p, home, platform));
     try {
       return realpathSync(abs);
     } catch {
       return abs;
     }
   };
-  return norm(a) === norm(b);
+  return samePathKey(norm(a), norm(b), platform);
 }
 
 /**
@@ -239,7 +257,11 @@ function samePath(a: string, b: string, env: AppEnv): boolean {
  * instance; Antigravity → the antigravity instance. No detected host, or no matching instance,
  * gives `self: null`.
  */
-export function resolveHost(env: AppEnv, instances: readonly ProviderInstance[]): AppHost {
+export function resolveHost(
+  env: AppEnv,
+  instances: readonly ProviderInstance[],
+  platform: OsPlatform = process.platform,
+): AppHost {
   const detection = detectHost(env);
   const kind = detection.host;
   if (kind === null) return { detection, self: null };
@@ -247,7 +269,9 @@ export function resolveHost(env: AppEnv, instances: readonly ProviderInstance[])
   const dir = env.CLAUDE_CONFIG_DIR;
   const byDir =
     kind === "claude-code" && dir
-      ? candidates.find((i) => i.configDir !== undefined && samePath(i.configDir, dir, env))
+      ? candidates.find(
+          (i) => i.configDir !== undefined && samePath(i.configDir, dir, env, platform),
+        )
       : undefined;
   const fallback = candidates.find((i) => i.configDir === undefined) ?? candidates[0];
   return { detection, self: (byDir ?? fallback)?.id ?? null };

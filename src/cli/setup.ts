@@ -22,9 +22,11 @@ import {
   planSetup,
   uninstallGlobal,
 } from "../hosts/_framework/index.js";
+import { CODEX_WINDOWS_NO_RULES, codexRulesSupported } from "../hosts/codex/integration.js";
 import { builtinRegistry } from "../hosts/index.js";
 import { shippedProfiles } from "../install/repo.js";
 import { currentInstallPaths, type InstallPaths } from "../platform/launcher.js";
+import { homeDir, type OsPlatform } from "../platform/os.js";
 import { createCommandRunner } from "../runner/command.js";
 import {
   type AnswerFlags,
@@ -72,8 +74,14 @@ export interface SetupCommandDeps {
   tty?: boolean;
   /** Loads `@clack/prompts` (tests inject a fake). */
   clack?: () => Promise<ClackApi>;
-  /** Effective user id (setup never installs the browser as root); default `process.getuid()`. */
+  /**
+   * Effective user id (setup never installs the browser as root); default `process.getuid()`,
+   * which is undefined on Windows (no root check there; an elevated Administrator is not
+   * detected).
+   */
   uid?: number | undefined;
+  /** Launcher flavour and host file layout; default `process.platform`. */
+  platform?: OsPlatform;
 }
 
 async function askTty(question: string): Promise<string> {
@@ -99,9 +107,15 @@ export function defaultSetupDeps(): SetupCommandDeps {
   };
 }
 
-function requireHome(env: SetupCommandDeps["env"]): { home: string; dispatchHome: string } {
-  const home = env.HOME;
-  if (!home) throw new DispatchError("HOME is not set", ExitCode.USAGE, "setup.no_home");
+function requireHome(
+  env: SetupCommandDeps["env"],
+  platform: OsPlatform,
+): { home: string; dispatchHome: string } {
+  const home = homeDir(env, platform);
+  if (!home) {
+    const what = platform === "win32" ? "HOME and USERPROFILE are" : "HOME is";
+    throw new DispatchError(`${what} not set`, ExitCode.USAGE, "setup.no_home");
+  }
   return { home, dispatchHome: dispatchHome(env) };
 }
 
@@ -227,7 +241,8 @@ export async function runSetup(
   deps: SetupCommandDeps,
   opts: SetupOptions,
 ): Promise<void> {
-  const { home, dispatchHome: dHome } = requireHome(deps.env);
+  const platform = deps.platform ?? process.platform;
+  const { home, dispatchHome: dHome } = requireHome(deps.env, platform);
   const interactive = deps.interactive && !opts.nonInteractive;
   const prompter = await choosePrompter(io, deps, interactive);
   const rich = prompter?.rich === true;
@@ -244,9 +259,13 @@ export async function runSetup(
     dispatchHome: dHome,
     install,
     hosts: deps.hosts(),
+    platform,
     ...(browser?.op ? { tools: [{ id: "browser", ops: [browser.op] }] } : {}),
   });
-  const preview = renderPlanPreview(plan, change, { ui, home });
+  if (plan.detected.includes("codex") && !codexRulesSupported(platform)) {
+    io.err(`warning: ${CODEX_WINDOWS_NO_RULES}\n`);
+  }
+  const preview = renderPlanPreview(plan, change, { ui, home, platform });
   if (rich && prompter) {
     prompter.note("Plan", preview.changes.trimEnd());
     if (preview.grants) prompter.note("Trust grants", preview.grants.trimEnd());
@@ -370,7 +389,10 @@ export function registerSetupCommands(program: Command, io: SetupIo, deps: Setup
           await deps.repoUninstall(io, { yes: opts.yes === true, force: opts.force === true });
           return;
         }
-        const { home, dispatchHome: dHome } = requireHome(deps.env);
+        const { home, dispatchHome: dHome } = requireHome(
+          deps.env,
+          deps.platform ?? process.platform,
+        );
         const summary = await uninstallGlobal({
           dispatchHome: dHome,
           keepDispatchHome: opts.keepHome === true,

@@ -9,6 +9,7 @@
  * Quota readings come from the app-server reader (WP18), so `readQuota` is not implemented here.
  */
 import type { Adapter, AdapterCapabilities } from "../../core/contracts.js";
+import type { OsPlatform } from "../../platform/os.js";
 import { buildCodexInvocation } from "./invocation.js";
 import { finalizeCodex, parseCodexLine } from "./parse.js";
 import { probeCodex } from "./probe.js";
@@ -48,12 +49,16 @@ export const CODEX_CAPABILITIES: AdapterCapabilities = {
   childNetwork: "none",
 };
 
-/** Creates the codex adapter. */
-export function createCodexAdapter(): Adapter {
+/**
+ * Creates the codex adapter. `platform` (default `process.platform`) pins the OS the probe env and
+ * the invocation are built for; tests use it to check one OS's argv on any host.
+ */
+export function createCodexAdapter(opts: { platform?: OsPlatform } = {}): Adapter {
+  const { platform } = opts;
   return {
     caps: CODEX_CAPABILITIES,
-    probe: (instance, deps) => probeCodex(instance, deps),
-    buildInvocation: buildCodexInvocation,
+    probe: (instance, deps) => probeCodex(instance, deps, process.env, platform),
+    buildInvocation: (args) => buildCodexInvocation(args, platform),
     parseLine: parseCodexLine,
     finalize: finalizeCodex,
   };

@@ -60,12 +60,15 @@ describe("run summary block", () => {
     expect(text).toContain("✔");
     expect(text).toContain("codex");
     expect(text).toContain("1m");
-    expect(text).toContain("~/repo/.dispatch/state/runs/r1/patch.diff");
+    // Windows: tildified with its own separator.
+    const tilde = (rel: string) =>
+      process.platform === "win32" ? `~\\${rel.replaceAll("/", "\\")}` : `~/${rel}`;
+    expect(text).toContain(tilde("repo/.dispatch/state/runs/r1/patch.diff"));
     expect(text).toContain("applies: yes");
     expect(text).toContain("src/a.ts | 3 ++-");
     expect(text).toContain("EXTERNAL AGENT OUTPUT (untrusted");
     expect(text).toContain("  did it");
-    expect(text).toContain("Log: ~/repo/.dispatch/state/runs/r1/events.jsonl");
+    expect(text).toContain(`Log: ${tilde("repo/.dispatch/state/runs/r1/events.jsonl")}`);
     expect(text).toContain(ESC);
   });
 
@@ -188,7 +191,7 @@ describe("setup plan preview", () => {
   };
 
   it("plain: grouped by destination, ~/ paths, grants with a short line and the exact text", () => {
-    const p = renderPlanPreview(plan, change, { home: "/home/me" });
+    const p = renderPlanPreview(plan, change, { home: "/home/me", platform: "linux" });
     expect(p.changes).toContain("\nDispatch\n  + Global config: create ~/.dispatch/config.yaml\n");
     expect(p.changes).toContain("      main client: codex\n");
     expect(p.changes).toContain("  + create ~/.dispatch/bin/dispatch (mode 0644)");
@@ -205,8 +208,20 @@ describe("setup plan preview", () => {
     expect(`${p.changes}${p.grants}`).not.toContain(ESC);
   });
 
+  it("Codex without a rules file (Windows) grants only the hooks", () => {
+    const hooksOnly = {
+      ...plan,
+      groups: [{ host: "codex", ops: [op("/home/me/.codex/hooks.json", "runs the hooks")] }],
+    };
+    const p = renderPlanPreview(hooksOnly, null, { home: "/home/me", platform: "linux" });
+    expect(p.grants).toContain(
+      "  Codex runs the Dispatch hooks once you approve them with /hooks.",
+    );
+    expect(p.grants).not.toContain("outside its sandbox");
+  });
+
   it("decorated: colors and a warning symbol on the grants; nothing to grant gives no block", () => {
-    const p = renderPlanPreview(plan, null, { ui, home: "/home/me" });
+    const p = renderPlanPreview(plan, null, { ui, home: "/home/me", platform: "linux" });
     expect(p.grants).toContain("⚠");
     expect(p.changes).toContain(ESC);
     const none = renderPlanPreview(

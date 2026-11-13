@@ -21,6 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { isOwnerOnly } from "../../platform/os.js";
 
 /** Directory of handoff files inside the Dispatch home. */
 export const HANDOFF_DIR = "handoffs";
@@ -152,8 +153,8 @@ export function loadHandoff(dispatchHome: string, id: string, nowMs: number): Ha
   if (lstatSync(dir).isSymbolicLink()) {
     throw new HandoffError(`handoff ${id} is outside ${dir}`);
   }
-  const uid = process.getuid?.();
-  if ((uid !== undefined && st.uid !== uid) || (st.mode & 0o077) !== 0) {
+  // POSIX: owned by this uid, no group/other bits. Windows: mode bits do not reflect ACLs.
+  if (!isOwnerOnly(st)) {
     throw new HandoffError(`handoff ${id} has the wrong owner or mode`);
   }
   let v: unknown;

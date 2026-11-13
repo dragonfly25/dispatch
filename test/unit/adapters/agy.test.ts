@@ -31,11 +31,14 @@ import {
   NormalizedEventSchema,
 } from "../../../src/core/contracts.js";
 import { DispatchError } from "../../../src/core/errors.js";
+import { toSpawnCommand } from "../../../src/platform/spawnable.js";
 import * as fx from "../../fixtures/contracts.js";
 import { FakeClock, ScriptedSpawner } from "../../stubs/index.js";
 import { withFakes } from "../../support/index.js";
 
 const adapter = createAgyAdapter();
+/** Builds on POSIX on any host: native Windows refuses agy (adapterPlatformBlocker). */
+const posix = createAgyAdapter({ platform: "linux" });
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../fixtures/agy/1.5.2");
 const WT = "/work/wt";
 const ENDED = "2026-11-07T10:00:00.000Z";
@@ -150,7 +153,7 @@ describe("agy capabilities", () => {
 
 describe("agy buildInvocation", () => {
   it("[UC4][SEC-agy-ro] golden argv for read-only", () => {
-    const inv = adapter.buildInvocation(buildArgs());
+    const inv = posix.buildInvocation(buildArgs());
     expect(InvocationSchema.safeParse(inv).success).toBe(true);
     expect(inv.binary).toBe("/opt/homebrew/bin/agy");
     expect(inv.argv).toEqual([
@@ -179,14 +182,14 @@ describe("agy buildInvocation", () => {
   });
 
   it("rounds the print timeout up to whole seconds", () => {
-    const inv = adapter.buildInvocation(
+    const inv = posix.buildInvocation(
       buildArgs({ task: { ...buildArgs().task, timeoutMs: 1500 } }),
     );
     expect(inv.argv.at(-1)).toBe("2s");
   });
 
   it("[SEC-agy-ro] never adds ANTIGRAVITY_* (or anything) to baseEnv", () => {
-    const inv = adapter.buildInvocation(buildArgs());
+    const inv = posix.buildInvocation(buildArgs());
     expect(inv.env).toEqual(baseEnv);
     expect(Object.keys(inv.env).some((k) => k.startsWith("ANTIGRAVITY_"))).toBe(false);
     expect(inv.env).not.toBe(baseEnv);
@@ -194,7 +197,7 @@ describe("agy buildInvocation", () => {
 
   it("[SEC-agy-ro] rejects worktree and direct autonomy", () => {
     for (const autonomy of ["worktree", "direct"] as const) {
-      const call = () => adapter.buildInvocation(buildArgs({ autonomy }));
+      const call = () => posix.buildInvocation(buildArgs({ autonomy }));
       expect(call).toThrow(DispatchError);
       expect(call).toThrow(/read-only/);
     }
@@ -214,7 +217,7 @@ describe("agy buildInvocation", () => {
         fc.constantFrom("read-only", "worktree", "direct"),
         (prompt, model, effort, timeoutMs, autonomy) => {
           try {
-            const inv = adapter.buildInvocation(
+            const inv = posix.buildInvocation(
               buildArgs({
                 autonomy,
                 task: { ...buildArgs().task, prompt, timeoutMs },
@@ -246,12 +249,12 @@ describe("agy buildInvocation", () => {
   it("rejects model/effort values that could be read as flags", () => {
     for (const bad of ["--dangerously-skip-permissions", "", "-x", "a b"]) {
       expect(() =>
-        adapter.buildInvocation(
+        posix.buildInvocation(
           buildArgs({ target: { instance: "agy", tier: "t", model: bad, effort: "low" } }),
         ),
       ).toThrow(/invalid model/);
       expect(() =>
-        adapter.buildInvocation(
+        posix.buildInvocation(
           buildArgs({ target: { instance: "agy", tier: "t", model: "m", effort: bad } }),
         ),
       ).toThrow(/invalid effort/);
@@ -260,12 +263,12 @@ describe("agy buildInvocation", () => {
 
   it("fails closed without a binary or when --help lacks required flags", () => {
     expect(() =>
-      adapter.buildInvocation(buildArgs({ probe: { ...probe, binaryPath: null } })),
+      posix.buildInvocation(buildArgs({ probe: { ...probe, binaryPath: null } })),
     ).toThrow(/not resolved/);
     expect(() =>
-      adapter.buildInvocation(buildArgs({ probe: { ...probe, flags: ["--output-format"] } })),
+      posix.buildInvocation(buildArgs({ probe: { ...probe, flags: ["--output-format"] } })),
     ).toThrow(/--sandbox/);
-    const all = adapter.buildInvocation(
+    const all = posix.buildInvocation(
       buildArgs({ probe: { ...probe, flags: [...REQUIRED_FLAGS] } }),
     );
     expect(all.argv).toContain("--sandbox");
@@ -661,7 +664,9 @@ describe("agy probe (scripted spawner)", () => {
 const processSpawner: Spawner = {
   spawn: (req: SpawnRequest) =>
     new Promise<SpawnResult>((resolve, reject) => {
-      const child = spawn(req.binary, [...req.argv], {
+      // Windows: the fake is an npm cmd-shim, unwrapped to `node <script>` like production does.
+      const { command, args } = toSpawnCommand(req.binary, req.argv);
+      const child = spawn(command, args, {
         cwd: req.cwd,
         env: { ...req.env },
         stdio: ["ignore", "pipe", "pipe"],
@@ -684,7 +689,7 @@ const processSpawner: Spawner = {
 describe("agy probe (fake CLI)", () => {
   it("[UC4] probes the fake agy: version, help flags, /usage login", async () => {
     await withFakes({ "agy:help": { stdout: `${HELP.join("\n")}\n` } }, async (ctx) => {
-      const p = await adapter.probe(instance, deps(processSpawner, join(ctx.binDir, "agy")));
+      const p = await adapter.probe(instance, deps(processSpawner, ctx.bin("agy")));
       expect(p).toMatchObject({ version: "1.5.2", loggedIn: true, outsideCliRange: false });
       expect(p.flags).toContain("--disable-slash-commands");
       expect(ctx.readLog({ cli: "agy" }).map((i) => i.key)).toEqual(["version", "help", "usage"]);
@@ -693,7 +698,7 @@ describe("agy probe (fake CLI)", () => {
 
   it("parses the help flags of a fake agy that writes --help to stderr", async () => {
     await withFakes({ "agy:help": { stdout: "", stderr: `${HELP.join("\n")}\n` } }, async (ctx) => {
-      const p = await adapter.probe(instance, deps(processSpawner, join(ctx.binDir, "agy")));
+      const p = await adapter.probe(instance, deps(processSpawner, ctx.bin("agy")));
       expect(p.flags).toEqual(expect.arrayContaining([...REQUIRED_FLAGS]));
     });
   });
@@ -705,7 +710,7 @@ describe("agy probe (fake CLI)", () => {
         "agy:usage": { variant: "unauthenticated" },
       },
       async (ctx) => {
-        const p = await adapter.probe(instance, deps(processSpawner, join(ctx.binDir, "agy")));
+        const p = await adapter.probe(instance, deps(processSpawner, ctx.bin("agy")));
         expect(p.loggedIn).toBe(false);
       },
     );
@@ -718,7 +723,7 @@ describe("agy fake CLI replay", () => {
       const stdout: string[] = [];
       const stderr: string[] = [];
       const r = await processSpawner.spawn({
-        binary: join(ctx.binDir, "agy"),
+        binary: ctx.bin("agy"),
         argv: ["-p=x"],
         env: { ...(process.env as Record<string, string>) },
         cwd: ctx.stateDir,
@@ -733,7 +738,7 @@ describe("agy fake CLI replay", () => {
     await withFakes({ agy: [{ scenario: "malformed" }] }, async (ctx) => {
       const stdout: string[] = [];
       const r = await processSpawner.spawn({
-        binary: join(ctx.binDir, "agy"),
+        binary: ctx.bin("agy"),
         argv: ["-p=x"],
         env: { ...(process.env as Record<string, string>) },
         cwd: ctx.stateDir,

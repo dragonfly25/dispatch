@@ -40,7 +40,8 @@ function setup(policy: Partial<PolicySummary> = HARD): { input: HookInput; env: 
   const repo = join(h.home, "work", "repo");
   mkdirSync(repo, { recursive: true });
   writeHookCache(h.dispatchHome, cacheFor(repo, policy));
-  const raw = readFileSync(FIXTURE, "utf8").replace("<REPO>", repo);
+  // JSON-escaped: a Windows path holds backslashes.
+  const raw = readFileSync(FIXTURE, "utf8").replace("<REPO>", JSON.stringify(repo).slice(1, -1));
   return { input: JSON.parse(raw) as HookInput, env: { DISPATCH_HOME: h.dispatchHome } };
 }
 

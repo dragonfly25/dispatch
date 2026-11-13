@@ -23,7 +23,11 @@ import {
 
 const bundles = useBundles();
 
-const hasPython = spawnSync("python3", ["--version"], { encoding: "utf8" }).status === 0;
+// Windows installs usually name the interpreter `python` (`python3` may be a Store stub).
+const python = ["python3", "python"].find(
+  (cmd) => spawnSync(cmd, ["--version"], { encoding: "utf8" }).status === 0,
+);
+const hasPython = python !== undefined;
 const script = resolve(import.meta.dirname, "../helpers/uc10_client.py");
 
 describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framework", () => {
@@ -36,9 +40,13 @@ describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framewo
       scenarios: { ...EDIT_CODEX, ...CLAUDE_QUOTA_UNREAD },
     });
     const before = snapshotTree(w.repo.dir);
-    const r = w.exec("python3", ["-I", script, process.execPath, bundles().cli, w.repo.dir], {
-      env: { CLAUDECODE: "1", CODEX_THREAD_ID: "leaked-from-the-test-runner" },
-    });
+    const r = w.exec(
+      python as string,
+      ["-I", script, process.execPath, bundles().cli, w.repo.dir],
+      {
+        env: { CLAUDECODE: "1", CODEX_THREAD_ID: "leaked-from-the-test-runner" },
+      },
+    );
     expect(r.stderr).toBe("");
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout);
@@ -73,12 +81,21 @@ describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framewo
       decision: { targets: { instance: string }[]; chain: { effect: string }[] };
     }>(w.dispatch(["run", "--task", "x", "--dry-run", "--json"]));
     expect(dry.input.host.self).toBeNull();
-    expect(dry.decision.targets.map((t) => t.instance).sort()).toEqual(["claude", "codex"]);
+    // Native Windows leaves claude out (its OS sandbox does not exist there, by design).
+    const win = process.platform === "win32";
+    expect(dry.decision.targets.map((t) => t.instance).sort()).toEqual(
+      win ? ["codex"] : ["claude", "codex"],
+    );
     expect(dry.decision.chain.some((c) => /self/.test(c.effect))).toBe(false);
 
     const viaClaude = w.run(["--provider", "claude"]);
     expect(viaClaude.code, viaClaude.stderr).toBe(0);
-    expect(viaClaude.result?.externalAgent?.instance).toBe("claude");
+    if (win) {
+      expect(viaClaude.result?.status).toBe("returned_to_host");
+      expect(viaClaude.result?.summary).toMatch(/not available on this OS: claude: .*WSL2/);
+    } else {
+      expect(viaClaude.result?.externalAgent?.instance).toBe("claude");
+    }
     expect(w.fakes.readLog({ cli: "codex", kind: "run" })).toEqual([]);
   });
 });

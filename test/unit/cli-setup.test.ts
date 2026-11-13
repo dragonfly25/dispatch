@@ -8,11 +8,17 @@ import {
   registerSetupCommands,
   type SetupCommandDeps,
 } from "../../src/cli/setup.js";
+import { createCodexIntegration } from "../../src/hosts/codex/integration.js";
+import { launcherFileName } from "../../src/platform/os.js";
 import { fakeCodexHost } from "../support/fake-host.js";
 import { type TempHome, tempHome } from "../support/temp.js";
 
 let h: TempHome;
 afterEach(() => h?.cleanup());
+
+/** A fixture absolute path in the running platform's form (`/a/b` or `C:\\a\\b`). */
+const abs = (p: string): string =>
+  process.platform === "win32" ? `C:${p.replaceAll("/", "\\")}` : p;
 
 function cli(deps: Partial<SetupCommandDeps>) {
   const io = { stdout: "", stderr: "" };
@@ -26,7 +32,11 @@ function cli(deps: Partial<SetupCommandDeps>) {
   };
   const full: Partial<SetupCommandDeps> = {
     env: h.env,
-    install: () => ({ nodePath: "/n/node", cliPath: "/d/cli.mjs", hookPath: "/d/hook.mjs" }),
+    install: () => ({
+      nodePath: abs("/n/node"),
+      cliPath: abs("/d/cli.mjs"),
+      hookPath: abs("/d/hook.mjs"),
+    }),
     hosts: () => [fakeCodexHost()],
     runner: () => ({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }),
     interactive: false,
@@ -74,9 +84,10 @@ describe("dispatch setup / uninstall --global [UC1][UC14]", () => {
     expect(no.io.stdout).toContain("Nothing was changed.");
     const yes = cli({ interactive: true, ask: async () => "yes", hosts: () => [] });
     expect(await yes.run("setup")).toBe(0);
-    expect(existsSync(join(h.dispatchHome, "bin", "dispatch"))).toBe(true);
+    const launcher = join(h.dispatchHome, "bin", launcherFileName());
+    expect(existsSync(launcher)).toBe(true);
     const stale = cli({ interactive: true, ask: async () => "y", hosts: () => [] });
-    writeFileSync(join(h.dispatchHome, "bin", "dispatch"), "edited");
+    writeFileSync(launcher, "edited");
     expect(await stale.run("uninstall", "--global", "--keep-home")).toBe(0);
     expect(stale.io.stderr).toMatch(/warning: .*edited since setup/);
     expect(existsSync(h.dispatchHome)).toBe(true);
@@ -118,7 +129,8 @@ describe("dispatch setup / uninstall --global [UC1][UC14]", () => {
 
   it("needs HOME and has sane production defaults", async () => {
     h = tempHome();
-    const { io, run } = cli({ env: {} });
+    // POSIX wording (the win32 one is tested below).
+    const { io, run } = cli({ env: {}, platform: "darwin" });
     expect(await run("setup", "--yes")).toBe(2);
     expect(io.stderr).toMatch(/HOME is not set/);
     expect(await run("uninstall", "--global")).toBe(2);
@@ -127,5 +139,38 @@ describe("dispatch setup / uninstall --global [UC1][UC14]", () => {
     expect(d.install().hookPath).toMatch(/hook\.mjs$/);
     expect(Array.isArray(d.hosts())).toBe(true);
     expect(typeof d.runner(h.home).run).toBe("function");
+  });
+});
+
+describe("dispatch setup on Windows (platform win32 injected)", () => {
+  const install = () => ({
+    nodePath: "C:\\nodejs\\node.exe",
+    cliPath: "C:\\d\\cli.mjs",
+    hookPath: "C:\\d\\hook.mjs",
+  });
+
+  it("takes the home from USERPROFILE, writes dispatch.cmd and warns that Codex gets no rule", async () => {
+    h = tempHome();
+    mkdirSync(join(h.home, ".codex"));
+    const { HOME: _home, ...rest } = h.env;
+    const env = { ...rest, USERPROFILE: h.home };
+    const NONE = { isExecutableFile: () => false, realpath: (p: string) => p };
+    const codex = createCodexIntegration({ env: () => env, fs: NONE, platform: "win32" });
+    const { io, run } = cli({ env, install, hosts: () => [codex], platform: "win32" });
+    expect(await run("setup", "--yes")).toBe(0);
+    expect(io.stderr).toContain("no Codex rule is installed on Windows");
+    expect(readFileSync(join(h.dispatchHome, "bin", "dispatch.cmd"), "utf8")).toContain(
+      '"C:\\nodejs\\node.exe" --disable-warning=ExperimentalWarning "C:\\d\\cli.mjs" %*\r\n',
+    );
+    expect(existsSync(join(h.home, ".codex", "rules", "dispatch.rules"))).toBe(false);
+    expect(await run("uninstall", "--global")).toBe(0);
+    expect(existsSync(join(h.dispatchHome, "bin", "dispatch.cmd"))).toBe(false);
+  });
+
+  it("names both variables when neither HOME nor USERPROFILE is set", async () => {
+    h = tempHome();
+    const { io, run } = cli({ env: {}, platform: "win32" });
+    expect(await run("setup", "--yes")).toBe(2);
+    expect(io.stderr).toMatch(/HOME and USERPROFILE are not set/);
   });
 });

@@ -6,7 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type RunResult, RunResultSchema } from "../../src/core/contracts.js";
 import {
@@ -241,7 +241,8 @@ function plantCredentials(h: TempHome): { paths: string[]; values: string[] } {
 }
 
 describe("[SEC-redact][AC7] no credential copied, logged or read", () => {
-  it.each(["codex", "claude"] as const)(
+  // claude is never a delegation target on native Windows (by design).
+  it.each(process.platform === "win32" ? (["codex"] as const) : (["codex", "claude"] as const))(
     "[AC7][SEC-redact] %s leak_secret: zero canary hits in state, run dir and stdout; credential files never opened",
     (cli) => {
       const { run, home, repo } = setup({
@@ -284,7 +285,7 @@ describe("[SEC-redact][AC7] no credential copied, logged or read", () => {
       expect(touched.length).toBeGreaterThan(0);
       for (const cred of creds.paths) expect(touched).not.toContain(cred);
       const credDirs = [".claude", ".codex", ".gemini"].map((d) => join(home.home, d));
-      expect(touched.filter((p) => credDirs.some((d) => p.startsWith(`${d}/`)))).toEqual([]);
+      expect(touched.filter((p) => credDirs.some((d) => p.startsWith(`${d}${sep}`)))).toEqual([]);
       for (const cred of creds.paths) expect(existsSync(cred)).toBe(true);
     },
     60_000,
@@ -311,26 +312,30 @@ describe("[SEC-agy-ro] Antigravity stays read-only even when opted in", () => {
     expect(fakes.readLog({ cli: "agy", kind: "run" })).toEqual([]);
   });
 
-  it("[SEC-agy-ro] a read-only task may go to agy, without --dangerously-skip-permissions", () => {
-    const { run, fakes } = setup({
-      global: AGY_ON,
-      // The fake ignores the sandbox and edits anyway: a read-only run still yields no patch.
-      scenarios: { agy: [{ scenario: "success_edit", file: "math.js", content: "agy\n" }] },
-    });
-    const r = run(["--autonomy", "read-only"]);
-    expect(r.code, r.stderr).toBe(0);
-    expect(r.result).toMatchObject({
-      status: "completed",
-      externalAgent: { instance: "antigravity" },
-    });
-    const runs = fakes.readLog({ cli: "agy", kind: "run" });
-    expect(runs).toHaveLength(1);
-    for (const inv of fakes.readLog({ cli: "agy" })) {
-      expect(inv.argv).not.toContain("--dangerously-skip-permissions");
-      expect(inv.argv.join(" ")).not.toMatch(/dangerously|yolo/i);
-    }
-    expect(r.result?.patch ?? null).toBeNull();
-  });
+  // agy is never a delegation target on native Windows (by design).
+  it.skipIf(process.platform === "win32")(
+    "[SEC-agy-ro] a read-only task may go to agy, without --dangerously-skip-permissions",
+    () => {
+      const { run, fakes } = setup({
+        global: AGY_ON,
+        // The fake ignores the sandbox and edits anyway: a read-only run still yields no patch.
+        scenarios: { agy: [{ scenario: "success_edit", file: "math.js", content: "agy\n" }] },
+      });
+      const r = run(["--autonomy", "read-only"]);
+      expect(r.code, r.stderr).toBe(0);
+      expect(r.result).toMatchObject({
+        status: "completed",
+        externalAgent: { instance: "antigravity" },
+      });
+      const runs = fakes.readLog({ cli: "agy", kind: "run" });
+      expect(runs).toHaveLength(1);
+      for (const inv of fakes.readLog({ cli: "agy" })) {
+        expect(inv.argv).not.toContain("--dangerously-skip-permissions");
+        expect(inv.argv.join(" ")).not.toMatch(/dangerously|yolo/i);
+      }
+      expect(r.result?.patch ?? null).toBeNull();
+    },
+  );
 
   it("[SEC-agy-ro] a disabled agy (the default) is never spawned, not even for quota", () => {
     const { run, fakes } = setup({

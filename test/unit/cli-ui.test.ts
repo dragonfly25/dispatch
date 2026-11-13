@@ -79,17 +79,17 @@ describe("decorationEnabled", () => {
 
 describe("tildify", () => {
   it("shows paths under home as ~/…", () => {
-    expect(tildify("/Users/me/.dispatch/bin/dispatch", "/Users/me")).toBe(
+    expect(tildify("/Users/me/.dispatch/bin/dispatch", "/Users/me", "linux")).toBe(
       "~/.dispatch/bin/dispatch",
     );
-    expect(tildify("/Users/me", "/Users/me")).toBe("~");
-    expect(tildify("/Users/me/x", "/Users/me/")).toBe("~/x");
+    expect(tildify("/Users/me", "/Users/me", "linux")).toBe("~");
+    expect(tildify("/Users/me/x", "/Users/me/", "linux")).toBe("~/x");
   });
   it("leaves other paths alone", () => {
-    expect(tildify("/Users/meme/x", "/Users/me")).toBe("/Users/meme/x");
-    expect(tildify("/opt/x", "/Users/me")).toBe("/opt/x");
-    expect(tildify("/opt/x", undefined)).toBe("/opt/x");
-    expect(tildify("/opt/x", "/")).toBe("/opt/x");
+    expect(tildify("/Users/meme/x", "/Users/me", "linux")).toBe("/Users/meme/x");
+    expect(tildify("/opt/x", "/Users/me", "linux")).toBe("/opt/x");
+    expect(tildify("/opt/x", undefined, "linux")).toBe("/opt/x");
+    expect(tildify("/opt/x", "/", "linux")).toBe("/opt/x");
   });
   it("tildifyText rewrites every home path inside a message", () => {
     expect(tildifyText("a /h/me/x and /h/me/y", "/h/me")).toBe("a ~/x and ~/y");

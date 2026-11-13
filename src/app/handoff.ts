@@ -12,10 +12,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { browserNote, type LaunchConfig, readLaunchConfigs } from "../browser/note.js";
+import { isPathInside, pathApi, relativeToHome } from "../config/pathkey.js";
 import type { RunResult, Task } from "../core/contracts.js";
 import { addPassthrough, type Handoff } from "../hosts/claude-code/handoff.js";
+import { homeDir, isOwnerOnly, type OsPlatform } from "../platform/os.js";
 import type { DetachHandoff } from "../runner/detach.js";
 import { type AppContext, buildTask } from "./context.js";
 
@@ -36,10 +38,19 @@ export interface HandoffRun {
 }
 
 /** Where the agent file is, for the task text: repo-relative or `~`-relative when possible. */
-function shownPath(h: Handoff, repoRoot: string, home: string | undefined): string {
+function shownPath(
+  h: Handoff,
+  repoRoot: string,
+  home: string | undefined,
+  platform: OsPlatform,
+): string {
   const p = h.agent.path;
-  if (h.agent.source === "project" && p.startsWith(`${repoRoot}/`)) return relative(repoRoot, p);
-  return home && p.startsWith(`${home}/`) ? `~/${relative(home, p)}` : p;
+  const api = pathApi(platform);
+  if (h.agent.source === "project" && p !== repoRoot && isPathInside(p, repoRoot, platform)) {
+    return api.relative(repoRoot, p);
+  }
+  const rel = relativeToHome(p, home, platform);
+  return rel === null ? p : `~${api.sep}${rel}`;
 }
 
 /**
@@ -51,6 +62,7 @@ export function handoffPromptText(
   repoRoot: string,
   home?: string,
   launch: readonly LaunchConfig[] = [],
+  platform: OsPlatform = process.platform,
 ): string {
   const parts = [
     `The task below was given to the "${h.agent.name}" sub-agent of the user's Claude Code ` +
@@ -58,7 +70,7 @@ export function handoffPromptText(
   ];
   if (h.instructions.trim() !== "") {
     parts.push(
-      `## Agent instructions (from ${shownPath(h, repoRoot, home)})`,
+      `## Agent instructions (from ${shownPath(h, repoRoot, home, platform)})`,
       h.instructions.trim(),
     );
   }
@@ -76,7 +88,7 @@ export function handoffTask(ctx: AppContext, h: Handoff, repoRoot: string): Task
     task: handoffPromptText(
       h,
       repoRoot,
-      ctx.env.HOME,
+      homeDir(ctx.env),
       h.browser === true ? readLaunchConfigs(repoRoot) : [],
     ),
     ...(h.model === null ? {} : { model: h.model }),
@@ -116,15 +128,20 @@ export function writeHandoffRun(dispatchHome: string, rec: HandoffRun): void {
   renameSync(tmp, path);
 }
 
-/** The record of `runId`; null when it is missing, not a plain file of this user, or malformed. */
-export function readHandoffRun(dispatchHome: string, runId: string): HandoffRun | null {
+/**
+ * The record of `runId`; null when it is missing, not a plain file (a symlink or, on Windows, a
+ * junction is refused), not private to this user (POSIX uid and mode; see {@link isOwnerOnly}
+ * for Windows), or malformed.
+ */
+export function readHandoffRun(
+  dispatchHome: string,
+  runId: string,
+  platform: OsPlatform = process.platform,
+): HandoffRun | null {
   try {
     const path = recordPath(dispatchHome, runId);
     const st = lstatSync(path);
-    const uid = process.getuid?.();
-    if (!st.isFile() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o077) !== 0) {
-      return null;
-    }
+    if (!st.isFile() || !isOwnerOnly(st, platform)) return null;
     const v = JSON.parse(readFileSync(path, "utf8")) as Partial<HandoffRun>;
     if (
       v.version !== 1 ||

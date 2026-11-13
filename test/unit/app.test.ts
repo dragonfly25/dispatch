@@ -189,6 +189,25 @@ describe("buildDecisionInput and dryRun", () => {
       ctx.close();
     }
   });
+
+  it("on Windows routes around claude and agy and says why", async () => {
+    const sb = sandbox();
+    const ctx = ctxFor(sb);
+    try {
+      const task = buildTask(ctx, { task: "x", path: ["src/a.ts"] });
+      const r = await dryRun(ctx, task, {}, "win32");
+      const instances = (r.input.routing as { instances: { adapter: string; enabled: boolean }[] })
+        .instances;
+      for (const i of instances.filter((x) => x.adapter === "claude" || x.adapter === "agy")) {
+        expect(i.enabled).toBe(false);
+      }
+      expect(r.explain).toContain("Unavailable");
+      const posix = await dryRun(ctx, task, {}, "darwin");
+      expect(posix.explain).not.toContain("Unavailable");
+    } finally {
+      ctx.close();
+    }
+  });
 });
 
 describe("adapter registry", () => {

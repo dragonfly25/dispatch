@@ -12,6 +12,7 @@ import { systemClock } from "../../core/clock.js";
 import { ExitCode, type RunResult, type Task } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import { detectHost } from "../../platform/host.js";
+import { homeDir } from "../../platform/os.js";
 import {
   type DetachOptions,
   recordSupervisorFailure,
@@ -67,6 +68,7 @@ async function withStore<T>(
   const home = dispatchHome(deps.env);
   const clock = deps.clock ?? systemClock;
   const store = SqliteStateStore.open(join(home, "state", "dispatch.db"), { clock });
+  // Fallback only: the store records each detached run's directory (`locateRunDir`).
   const root = await repoRoot(deps.cwd).catch(() => null);
   try {
     return await fn({ store, clock, runDir: (id) => findRunDir(root, home, id) }, store);
@@ -133,7 +135,7 @@ export function registerRunCommands(program: Command, deps: CliDeps): void {
         }
       });
       if (opts.json) printJson(io, result);
-      else io.out(renderRun(result, { ui: outUi(io), home: deps.env.HOME }));
+      else io.out(renderRun(result, { ui: outUi(io), home: homeDir(deps.env) }));
       if (exitCode !== ExitCode.OK) throw new ExitRequest(exitCode);
     });
 
@@ -143,7 +145,9 @@ export function registerRunCommands(program: Command, deps: CliDeps): void {
     .argument("<runId>", "id printed by `run --detach`")
     .option("--json", "machine-readable output")
     .action(async (runId: string, opts: { json?: boolean }) => {
-      const result = await withStore(deps, (w) => cancelRun(w, runId));
+      const result = await withStore(deps, (w) =>
+        cancelRun(w, runId, { onNotice: (m) => io.err(`dispatch: cancel: ${m}\n`) }),
+      );
       if (opts.json) printJson(io, result);
       else io.out(renderRun(result));
     });

@@ -175,3 +175,93 @@ describe("buildChildEnv [SEC-env]", () => {
     expect(secrets).toEqual([]);
   });
 });
+
+describe("buildChildEnv on win32 [SEC-env]", () => {
+  const winParent = {
+    Path: "C:\\Windows\\system32;C:\\node",
+    SystemRoot: "C:\\Windows",
+    USERPROFILE: "C:\\Users\\u",
+    ComSpec: "C:\\Windows\\system32\\cmd.exe",
+    PATHEXT: ".COM;.EXE;.BAT;.CMD",
+    TEMP: "C:\\Users\\u\\AppData\\Local\\Temp",
+    "ProgramFiles(x86)": "C:\\Program Files (x86)",
+    LocalAppData: "C:\\Users\\u\\AppData\\Local",
+    lc_all: "C",
+    Term: "xterm",
+    Anthropic_Api_Key: "sk-ant-api03-canary",
+    Github_Token: "ghp_canarycanary",
+    Node_Options: "--require C:\\evil.js",
+    ClaudeCode: "1",
+    Codex_Thread_Id: "t",
+    dispatch_depth: "7",
+    MY_TOOL_HOME: "C:\\tool",
+  } as const;
+
+  it("forwards WINDOWS_BASE_ENV and the POSIX base list case-insensitively, under the parent's spelling", () => {
+    const { env, secrets } = buildChildEnv({
+      parentEnv: winParent,
+      passthrough: ["my_tool_home"],
+      extra: {},
+      depth: 0,
+      runId: "r1",
+      platform: "win32",
+    });
+    expect(env).toEqual({
+      Path: "C:\\Windows\\system32;C:\\node",
+      SystemRoot: "C:\\Windows",
+      USERPROFILE: "C:\\Users\\u",
+      ComSpec: "C:\\Windows\\system32\\cmd.exe",
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      TEMP: "C:\\Users\\u\\AppData\\Local\\Temp",
+      "ProgramFiles(x86)": "C:\\Program Files (x86)",
+      LocalAppData: "C:\\Users\\u\\AppData\\Local",
+      lc_all: "C",
+      MY_TOOL_HOME: "C:\\tool",
+      TERM: "dumb",
+      DISPATCH_DEPTH: "1",
+      DISPATCH_RUN_ID: "r1",
+    });
+    expect(secrets).toEqual(
+      expect.arrayContaining(["sk-ant-api03-canary", "ghp_canarycanary", "--require C:\\evil.js"]),
+    );
+  });
+
+  it("the deny-list wins over allow/passthrough in any case; only dangerouslyAllow (any case) bypasses it", () => {
+    const { env } = buildChildEnv({
+      parentEnv: winParent,
+      allow: ["ANTHROPIC_API_KEY", "CODEX_*"],
+      passthrough: ["github_token", "NODE_OPTIONS", "CLAUDECODE"],
+      extra: {},
+      depth: 0,
+      platform: "win32",
+      dangerouslyAllow: ["CLAUDECODE"],
+    });
+    expect(env).not.toHaveProperty("Anthropic_Api_Key");
+    expect(env).not.toHaveProperty("Github_Token");
+    expect(env).not.toHaveProperty("Node_Options");
+    expect(env).not.toHaveProperty("Codex_Thread_Id");
+    expect(env.ClaudeCode).toBe("1");
+  });
+
+  it("emits each variable once: a second spelling in the parent and Dispatch's own values replace, never duplicate", () => {
+    const { env } = buildChildEnv({
+      parentEnv: { Path: "C:\\a", PATH: "C:\\b", TMP: "C:\\t" },
+      passthrough: [],
+      extra: { path: "C:\\override", Tmp: "C:\\t2" },
+      depth: 2,
+      platform: "win32",
+    });
+    expect(env).toEqual({ path: "C:\\override", Tmp: "C:\\t2", TERM: "dumb", DISPATCH_DEPTH: "3" });
+  });
+
+  it("POSIX stays exact-case: `Path` is not PATH and WINDOWS_BASE_ENV is not forwarded", () => {
+    const { env } = buildChildEnv({
+      parentEnv: { Path: "/x", PATH: "/usr/bin", SystemRoot: "C:\\Windows", USERPROFILE: "/u" },
+      passthrough: [],
+      extra: {},
+      depth: 0,
+      platform: "linux",
+    });
+    expect(env).toEqual({ PATH: "/usr/bin", TERM: "dumb", DISPATCH_DEPTH: "1" });
+  });
+});

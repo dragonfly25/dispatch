@@ -12,6 +12,8 @@ import type {
   SpawnRequest,
   SpawnResult,
 } from "../../../src/core/contracts.js";
+import { spawnCommandFor } from "../../../src/runner/spawn.js";
+import { killTree, spawnDetachedFor } from "../../../src/runner/tree.js";
 
 export const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
 
@@ -25,10 +27,12 @@ export class TestSpawner implements Spawner {
   spawn(req: SpawnRequest): Promise<SpawnResult> {
     this.requests.push(req);
     return new Promise((resolve, reject) => {
-      const child = spawn(req.binary, [...req.argv], {
+      const cmd = spawnCommandFor(req.binary, req.argv);
+      const child = spawn(cmd.command, cmd.args, {
         cwd: req.cwd,
         env: { ...req.env },
-        detached: true,
+        detached: spawnDetachedFor(),
+        windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
       let timedOut = false;
@@ -37,11 +41,8 @@ export class TestSpawner implements Spawner {
           ? undefined
           : setTimeout(() => {
               timedOut = true;
-              try {
-                if (child.pid) process.kill(-child.pid, "SIGKILL");
-              } catch {
-                // already gone
-              }
+              // POSIX: SIGKILL to the group; Windows: taskkill /T /F.
+              if (child.pid) killTree(child.pid, { force: true });
             }, req.timeoutMs);
       for (const name of ["stdout", "stderr"] as const) {
         let buf = "";

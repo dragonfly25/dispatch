@@ -89,13 +89,19 @@ describe("example host integration [UC14][AC2][UC9]", () => {
   let h: TempHome;
   afterEach(() => h?.cleanup());
 
+  const WIN = process.platform === "win32";
+  /** A fixture absolute path in the running platform's form (`/a/b` or `C:\\a\\b`). */
+  const abs = (p: string): string => (WIN ? `C:${p.replaceAll("/", "\\")}` : p);
+  /** `s` as it appears inside a JSON string. */
+  const inJson = (s: string): string => JSON.stringify(s).slice(1, -1);
+
   const ctx = (): SetupContext => ({
     home: h.home,
     dispatchHome: h.dispatchHome,
     install: {
-      nodePath: "/opt/node/bin/node",
-      cliPath: "/opt/d/cli.mjs",
-      hookPath: "/opt/d/hook.mjs",
+      nodePath: abs("/opt/node/bin/node"),
+      cliPath: abs("/opt/d/cli.mjs"),
+      hookPath: abs("/opt/d/hook.mjs"),
     },
     hosts: [acmeHost],
   });
@@ -114,8 +120,11 @@ describe("example host integration [UC14][AC2][UC9]", () => {
     await applySetup(plan, { dispatchHome: h.dispatchHome, confirm: true });
     const text = readFileSync(hooks, "utf8");
     expect(text).toContain("// mine");
-    expect(text).toContain("'/opt/d/hook.mjs' acme SessionStart");
-    expect(text).toContain('[ -n \\"$DISPATCH_DEPTH\\" ] && exit 0;'); // the silent guard (JSON-escaped)
+    expect(text).toContain(inJson(`'${abs("/opt/d/hook.mjs")}' acme SessionStart`));
+    // The silent guard for a Dispatch child (sh on POSIX, PowerShell on Windows).
+    expect(text).toContain(
+      inJson(WIN ? "if ($env:DISPATCH_DEPTH) { exit 0 };" : '[ -n "$DISPATCH_DEPTH" ] && exit 0;'),
+    );
 
     await uninstallGlobal({ dispatchHome: h.dispatchHome });
     expect(snapshotTree(h.home)).toEqual(before);

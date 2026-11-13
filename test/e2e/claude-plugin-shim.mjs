@@ -6,24 +6,31 @@
 // `installed_plugins.json` and a cache dir; uninstall leaves empty `enabledPlugins`/
 // `extraKnownMarketplaces` objects, an `installed_plugins.json`, an orphaned cache and `plugins/data`.
 // That is exactly the residue `uninstall --global` must clean up to leave host files byte-identical.
-// Every other invocation is forwarded to the real fake CLI named by FAKE_REAL_CLAUDE.
+// Every other invocation is forwarded to the real fake CLI named by FAKE_REAL_CLAUDE (a `.mjs`
+// entry on Windows, which is started with this node).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 const argv = process.argv.slice(2);
+const runReal = (stdio) => {
+  const real = process.env.FAKE_REAL_CLAUDE;
+  return real.endsWith(".mjs")
+    ? spawnSync(process.execPath, [real, ...argv], { stdio })
+    : spawnSync(real, argv, { stdio });
+};
 
 if (argv[0] !== "plugin") {
-  const real = process.env.FAKE_REAL_CLAUDE;
-  const r = spawnSync(real, argv, { stdio: "inherit" });
+  const r = runReal("inherit");
   process.exit(r.status ?? 1);
 }
 
 // The fake logs the call (FAKE_LOG) so tests can assert the plugin commands; its output is dropped.
-spawnSync(process.env.FAKE_REAL_CLAUDE, argv, { stdio: "ignore" });
+runReal("ignore");
 
-const configDir = process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || homedir(), ".claude");
+const home = process.env.HOME || process.env.USERPROFILE || homedir();
+const configDir = process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
 const settingsPath = join(configDir, "settings.json");
 const plugins = join(configDir, "plugins");
 const settings = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, "utf8")) : {};

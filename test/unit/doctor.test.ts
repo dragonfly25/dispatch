@@ -1,6 +1,6 @@
 /** WP26: `dispatch doctor` with fake CLIs, a temp HOME and temp repos. */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fromHostLines } from "../../src/doctor/host.js";
 import { patchFiles } from "../../src/doctor/live.js";
@@ -8,6 +8,7 @@ import { loadFixtureVersions } from "../../src/doctor/provider.js";
 import { launcherLine, platformLine } from "../../src/doctor/system.js";
 import { HostRegistry } from "../../src/hosts/_framework/registry.js";
 import { builtinRegistry } from "../../src/hosts/index.js";
+import { launcherFileName } from "../../src/platform/os.js";
 import { type TempRepo, tempRepo } from "../support/index.js";
 import {
   agyReply,
@@ -29,7 +30,10 @@ afterEach(() => {
 
 const ranTasks = (cli: "claude" | "codex" | "agy") => h.fakes.readLog({ cli, kind: "run" });
 
-describe("doctor: checks", () => {
+// The matrix probes the claude and antigravity fakes, which doctor does not probe on native
+// Windows (adapterPlatformBlocker: a `warn` line instead); doctor-windows.test.ts covers win32
+// with an injected platform, and test/e2e/uc01.test.ts runs doctor end to end there.
+describe.skipIf(process.platform === "win32")("doctor: checks", () => {
   it("[UC1] an all-green matrix: every enabled provider passes, nothing fails, exit 0", async () => {
     h = doctorHarness();
     h.config(ENABLE_AGY);
@@ -351,31 +355,36 @@ describe("doctor: system lines", () => {
       fix: "dispatch setup",
     });
     const launcher = join(h.home.dispatchHome, "bin");
+    // The POSIX launcher, plus the same text under the native name (`dispatch.cmd` on Windows) so
+    // the CLI run below sees it too: the parser accepts either format under either name.
     const write = (text: string) => {
       require("node:fs").mkdirSync(launcher, { recursive: true });
       writeFileSync(join(launcher, "dispatch"), text);
+      writeFileSync(join(launcher, launcherFileName()), text);
     };
     write("#!/bin/sh\necho hi\n");
-    expect(launcherLine(h.home.dispatchHome)).toMatchObject({
+    expect(launcherLine(h.home.dispatchHome, "linux")).toMatchObject({
       status: "warn",
       fix: "dispatch setup --refresh",
     });
     write(
       `#!/bin/sh\nexec "/gone/node" --disable-warning=ExperimentalWarning "/gone/cli.mjs" "$@"\n`,
     );
-    const stale = launcherLine(h.home.dispatchHome);
+    const stale = launcherLine(h.home.dispatchHome, "linux");
     expect(stale).toMatchObject({ status: "fail", fix: "dispatch setup --refresh" });
     expect(stale.message).toContain("/gone/node");
     expect(stale.message).toContain("/gone/cli.mjs");
-    expect(stale.message).toContain("/gone/hook.mjs");
+    // The hook path is derived with the native path module (`\gone\hook.mjs` on Windows).
+    expect(stale.message).toContain(join(dirname("/gone/cli.mjs"), "hook.mjs"));
     const { code } = await h.run(["doctor"]);
     expect(code).toBe(4);
   });
 
-  it("the platform line rejects Windows and an old Node", () => {
+  it("the platform line rejects an unsupported OS and an old Node", () => {
     expect(platformLine("darwin", "v22.13.0").status).toBe("ok");
     expect(platformLine("linux", "v24.1.0").status).toBe("ok");
-    expect(platformLine("win32", "v22.13.0")).toMatchObject({ status: "fail" });
+    expect(platformLine("win32", "v22.13.0").status).toBe("ok");
+    expect(platformLine("freebsd", "v22.13.0")).toMatchObject({ status: "fail" });
     expect(platformLine("darwin", "v22.12.0")).toMatchObject({ status: "fail" });
     expect(platformLine("darwin", "v20.1.0").message).toContain(">= 22.13");
   });
@@ -449,11 +458,25 @@ describe("doctor --from-host", () => {
       env: { CODEX_THREAD_ID: "t1", CODEX_SANDBOX: "seatbelt" },
     });
     expect(r.code).toBe(4);
-    const l = lineOf(r.report, "host.codex-rule");
+    expect(lineOf(r.report, "host.codex-rule").status).toBe("fail");
+    // The advice depends on the OS (no Codex rule exists on Windows): pin each platform.
+    const env = { CODEX_THREAD_ID: "t1", CODEX_SANDBOX: "seatbelt" };
+    const rule = (platform: NodeJS.Platform) => {
+      const found = fromHostLines(env, h.home.dispatchHome, platform).find(
+        (x) => x.id === "host.codex-rule",
+      );
+      if (!found) throw new Error("no host.codex-rule line");
+      return found;
+    };
+    const l = rule("linux");
     expect(l.status).toBe("fail");
     expect(l.message).toContain("rules file did not match");
     expect(l.fix).toContain("/hooks");
     expect(l.fix).toContain("dispatch.rules");
+    const w = rule("win32");
+    expect(w.status).toBe("fail");
+    expect(w.message).toContain("no Codex rule is installed on Windows");
+    expect(w.fix).toContain("outside the sandbox");
     // Other commands stay gated.
     expect((await h.run(["providers"], { env: { CODEX_SANDBOX: "seatbelt" } })).code).toBe(3);
   });
@@ -479,93 +502,115 @@ describe("doctor --live", () => {
     content,
   });
 
-  it("[UC1] one real task per enabled provider passes when it adds exactly DISPATCH_OK", async () => {
-    h = doctorHarness({
-      claude: [
-        { scenario: "fail", stdout: "Usage: claude\n  --safe-mode\n", stderr: "", exitCode: 0 },
-        edit("DISPATCH_OK"),
-      ],
-      codex: [
-        { scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 },
-        edit("DISPATCH_OK"),
-      ],
-    });
-    const { code, report, err } = await h.report(["--live", "--yes"]);
-    expect(code).toBe(0);
-    expect(report.live).toBe(true);
-    expect(lineOf(report, "live.claude")).toMatchObject({ status: "ok", section: "live" });
-    expect(lineOf(report, "live.codex").status).toBe("ok");
-    expect(lineOf(report, "live.claude").data).toMatchObject({
-      status: "completed",
-      outcome: "success",
-    });
-    expect(report.checks.some((c) => c.id === "live.antigravity")).toBe(false);
-    // JSON mode keeps stdout clean: the plan went to stderr.
-    expect(err).toContain("consumes a small amount of quota");
-    expect(err).toContain('"Create a file named DISPATCH_OK containing the word ok"');
-    // The tasks really ran, once each, with the live prompt.
-    const claudeRun = ranTasks("claude").find((r) => r.stdin?.includes("DISPATCH_OK"));
-    expect(claudeRun).toBeDefined();
-    expect(ranTasks("codex").some((r) => r.stdin?.includes("DISPATCH_OK"))).toBe(true);
-  }, 60_000);
+  // claude and antigravity are never delegation targets on native Windows (adapterPlatformBlocker),
+  // so their live runs are POSIX-only; the codex tests below cover the generic live checks there.
+  const posixIt = it.skipIf(process.platform === "win32");
+
+  posixIt(
+    "[UC1] one real task per enabled provider passes when it adds exactly DISPATCH_OK",
+    async () => {
+      h = doctorHarness({
+        claude: [
+          { scenario: "fail", stdout: "Usage: claude\n  --safe-mode\n", stderr: "", exitCode: 0 },
+          edit("DISPATCH_OK"),
+        ],
+        codex: [
+          { scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 },
+          edit("DISPATCH_OK"),
+        ],
+      });
+      const { code, report, err } = await h.report(["--live", "--yes"]);
+      expect(code).toBe(0);
+      expect(report.live).toBe(true);
+      expect(lineOf(report, "live.claude")).toMatchObject({ status: "ok", section: "live" });
+      expect(lineOf(report, "live.codex").status).toBe("ok");
+      expect(lineOf(report, "live.claude").data).toMatchObject({
+        status: "completed",
+        outcome: "success",
+      });
+      expect(report.checks.some((c) => c.id === "live.antigravity")).toBe(false);
+      // JSON mode keeps stdout clean: the plan went to stderr.
+      expect(err).toContain("consumes a small amount of quota");
+      expect(err).toContain('"Create a file named DISPATCH_OK containing the word ok"');
+      // The tasks really ran, once each, with the live prompt.
+      const claudeRun = ranTasks("claude").find((r) => r.stdin?.includes("DISPATCH_OK"));
+      expect(claudeRun).toBeDefined();
+      expect(ranTasks("codex").some((r) => r.stdin?.includes("DISPATCH_OK"))).toBe(true);
+    },
+    60_000,
+  );
 
   it("fails when the agent edits another file", async () => {
     h = doctorHarness({
-      claude: [
-        { scenario: "fail", stdout: "Usage: claude\n  --safe-mode\n", stderr: "", exitCode: 0 },
-        edit("OTHER.txt"),
-      ],
+      codex: [{ scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 }, edit("OTHER.txt")],
     });
-    const { code, report } = await h.report(["--live", "--yes", "--provider", "claude"]);
+    const { code, report } = await h.report(["--live", "--yes", "--provider", "codex"]);
     expect(code).toBe(4);
-    const l = lineOf(report, "live.claude");
+    const l = lineOf(report, "live.codex");
     expect(l.status).toBe("fail");
     expect(l.message).toContain("expected a patch adding only DISPATCH_OK, got: OTHER.txt");
     expect(l.fix).toContain("run log");
-    expect(report.checks.some((c) => c.id === "live.codex")).toBe(false);
+    expect(report.checks.some((c) => c.id === "live.claude")).toBe(false);
   }, 60_000);
 
-  it("fails when DISPATCH_OK does not say ok, or the run is not a success", async () => {
+  it("fails when DISPATCH_OK does not say ok", async () => {
     h = doctorHarness({
-      claude: [
-        { scenario: "fail", stdout: "Usage: claude\n  --safe-mode\n", stderr: "", exitCode: 0 },
+      codex: [
+        { scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 },
         edit("DISPATCH_OK", "nope\n"),
       ],
+    });
+    const { report } = await h.report(["--live", "--yes", "--provider", "codex"]);
+    expect(lineOf(report, "live.codex").message).toContain('does not contain "ok"');
+  }, 60_000);
+
+  it("fails when the run is not a success", async () => {
+    h = doctorHarness({
       codex: [
         { scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 },
         { scenario: "quota_exhausted" },
       ],
     });
-    const { report } = await h.report(["--live", "--yes"]);
-    expect(lineOf(report, "live.claude").message).toContain('does not contain "ok"');
+    const { report } = await h.report(["--live", "--yes", "--provider", "codex"]);
     const codex = lineOf(report, "live.codex");
     expect(codex.status).toBe("fail");
     expect(codex.message).toMatch(/returned_to_host|quota/);
   }, 60_000);
 
-  it("[UC1] Antigravity is tested read-only: pass when the reply says ok", async () => {
-    h = doctorHarness({
-      agy: [{ scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 }, agyReply("ok")],
-    });
-    h.config(ENABLE_AGY);
-    const { code, report } = await h.report(["--live", "--yes", "--provider", "antigravity"]);
-    expect(code).toBe(0);
-    expect(lineOf(report, "live.antigravity")).toMatchObject({ status: "ok" });
-    expect(lineOf(report, "live.antigravity").message).toContain("replied ok");
-    const runs = ranTasks("agy").filter((r) =>
-      r.argv.some((a) => a.startsWith("-p=Reply") || a.includes("Reply with the word ok")),
-    );
-    expect(runs.length).toBe(1);
-  }, 60_000);
+  posixIt(
+    "[UC1] Antigravity is tested read-only: pass when the reply says ok",
+    async () => {
+      h = doctorHarness({
+        agy: [{ scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 }, agyReply("ok")],
+      });
+      h.config(ENABLE_AGY);
+      const { code, report } = await h.report(["--live", "--yes", "--provider", "antigravity"]);
+      expect(code).toBe(0);
+      expect(lineOf(report, "live.antigravity")).toMatchObject({ status: "ok" });
+      expect(lineOf(report, "live.antigravity").message).toContain("replied ok");
+      const runs = ranTasks("agy").filter((r) =>
+        r.argv.some((a) => a.startsWith("-p=Reply") || a.includes("Reply with the word ok")),
+      );
+      expect(runs.length).toBe(1);
+    },
+    60_000,
+  );
 
-  it("Antigravity fails the live test when the reply lacks ok", async () => {
-    h = doctorHarness({
-      agy: [{ scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 }, agyReply("nothing")],
-    });
-    h.config(ENABLE_AGY);
-    const { report } = await h.report(["--live", "--yes", "--provider", "antigravity"]);
-    expect(lineOf(report, "live.antigravity").message).toContain('does not contain "ok"');
-  }, 60_000);
+  posixIt(
+    "Antigravity fails the live test when the reply lacks ok",
+    async () => {
+      h = doctorHarness({
+        agy: [
+          { scenario: "fail", stdout: "Usage\n", stderr: "", exitCode: 0 },
+          agyReply("nothing"),
+        ],
+      });
+      h.config(ENABLE_AGY);
+      const { report } = await h.report(["--live", "--yes", "--provider", "antigravity"]);
+      expect(lineOf(report, "live.antigravity").message).toContain('does not contain "ok"');
+    },
+    60_000,
+  );
 
   it("a disabled provider named with --provider is skipped without starting anything", async () => {
     h = doctorHarness();

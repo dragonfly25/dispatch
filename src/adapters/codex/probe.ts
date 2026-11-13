@@ -1,8 +1,10 @@
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import type { AdapterDeps, ProbeResult, ProviderInstance } from "../../core/contracts.js";
+import type { OsPlatform } from "../../platform/os.js";
+import { probeEnv } from "../platform.js";
 
-/** Variables passed to probe commands (nothing else is inherited). */
+/** Variables passed to probe commands (nothing else is inherited; Windows adds its base set). */
 const PROBE_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL"];
 const PROBE_TIMEOUT_MS = 15_000;
 
@@ -46,11 +48,13 @@ export function codexVersionInRange(version: string): boolean {
  * Probes an installed codex through the injected spawner: `--version`, `exec --help` (flags),
  * `features list` (feature names; buildInvocation fails closed on missing isolation features)
  * and `login status` (exit 0 = logged in, 1 = logged out). `CODEX_HOME` follows the instance.
+ * On Windows the env lookup is case-insensitive and adds the Windows base variables.
  */
 export async function probeCodex(
   instance: ProviderInstance,
   deps: AdapterDeps,
   baseEnv: Readonly<Record<string, string | undefined>> = process.env,
+  platform: OsPlatform = process.platform,
 ): Promise<ProbeResult> {
   const binaryPath = await deps.resolveBinary("codex", instance);
   if (!binaryPath) {
@@ -71,11 +75,7 @@ export async function probeCodex(
     realpath = null;
   }
 
-  const env: Record<string, string> = {};
-  for (const key of PROBE_ENV_KEYS) {
-    const v = baseEnv[key];
-    if (v !== undefined) env[key] = v;
-  }
+  const env = probeEnv(baseEnv, PROBE_ENV_KEYS, platform);
   if (instance.configDir) env.CODEX_HOME = instance.configDir;
 
   const run = async (argv: string[]): Promise<Captured | null> => {

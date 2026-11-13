@@ -70,68 +70,72 @@ function gui(argv: string[], input: string, withHome = true) {
   });
 }
 
-describe("[AC5][SEC-hooks] a collaborator without Dispatch sees nothing", () => {
-  const cases = Object.entries(STDIN).flatMap(([name, input]) =>
-    [true, false].map((withHome) => [name, input, withHome] as const),
-  );
+// POSIX-only: simulates a GUI host with `/usr/bin/env -i PATH=/usr/bin:/bin /bin/sh -c`.
+describe.skipIf(process.platform === "win32")(
+  "[AC5][SEC-hooks] a collaborator without Dispatch sees nothing",
+  () => {
+    const cases = Object.entries(STDIN).flatMap(([name, input]) =>
+      [true, false].map((withHome) => [name, input, withHome] as const),
+    );
 
-  it.each(cases)(
-    "[AC5][SEC-hooks] the Claude SessionStart hook command (as setup writes it) is silent: %s stdin, HOME=%s",
-    (_name, input, withHome) => {
-      const installed = renderHookCommand({
-        nodePath: process.execPath,
-        hookPath: bundles.hook,
-        host: "claude-code",
-        event: "SessionStart",
-      });
-      const missing = renderHookCommand({
-        nodePath: process.execPath,
-        hookPath: join(emptyHome, ".dispatch", "lib", "hook.mjs"),
-        host: "claude-code",
-        event: "SessionStart",
-      });
-      for (const command of [installed, missing]) {
-        const r = gui(["/bin/sh", "-c", command], input, withHome);
-        expect({ code: r.status, out: r.stdout, err: r.stderr }).toEqual({
-          code: 0,
-          out: "",
-          err: "",
+    it.each(cases)(
+      "[AC5][SEC-hooks] the Claude SessionStart hook command (as setup writes it) is silent: %s stdin, HOME=%s",
+      (_name, input, withHome) => {
+        const installed = renderHookCommand({
+          nodePath: process.execPath,
+          hookPath: bundles.hook,
+          host: "claude-code",
+          event: "SessionStart",
         });
-      }
-    },
-  );
-
-  it.each(Object.entries(STDIN))(
-    "[AC5][SEC-hooks] hook.mjs run directly is silent for %s stdin, for every host and event",
-    (_name, input) => {
-      for (const [host, event] of [
-        ["claude-code", "SessionStart"],
-        ["codex", "SessionStart"],
-        ["codex", "PreToolUse"],
-        ["nope", "SessionStart"],
-      ]) {
-        const r = gui([process.execPath, bundles.hook, host as string, event as string], input);
-        expect({ code: r.status, out: r.stdout, err: r.stderr }).toEqual({
-          code: 0,
-          out: "",
-          err: "",
+        const missing = renderHookCommand({
+          nodePath: process.execPath,
+          hookPath: join(emptyHome, ".dispatch", "lib", "hook.mjs"),
+          host: "claude-code",
+          event: "SessionStart",
         });
-      }
-    },
-  );
+        for (const command of [installed, missing]) {
+          const r = gui(["/bin/sh", "-c", command], input, withHome);
+          expect({ code: r.status, out: r.stdout, err: r.stderr }).toEqual({
+            code: 0,
+            out: "",
+            err: "",
+          });
+        }
+      },
+    );
 
-  it("[AC5] the clone has no Dispatch side effects: clean status, no hooks, nothing in HOME", () => {
-    const git = (...args: string[]) =>
-      spawnSync("git", args, {
-        cwd: clone,
-        env: { ...GIT_TEST_ENV, PATH: "/usr/bin:/bin", HOME: emptyHome },
-        encoding: "utf8",
-      });
-    expect(git("status", "--porcelain", "--ignored").stdout).toBe("");
-    const hooks = readdirSync(join(clone, ".git", "hooks"));
-    expect(hooks.filter((h) => !h.endsWith(".sample"))).toEqual([]);
-    expect(snapshotTree(emptyHome)).toEqual({});
-    // Only the committed policy files; no host config dirs in the repo.
-    expect(readdirSync(clone).sort()).toEqual([".dispatch", ".git", "README.md"]);
-  });
-});
+    it.each(Object.entries(STDIN))(
+      "[AC5][SEC-hooks] hook.mjs run directly is silent for %s stdin, for every host and event",
+      (_name, input) => {
+        for (const [host, event] of [
+          ["claude-code", "SessionStart"],
+          ["codex", "SessionStart"],
+          ["codex", "PreToolUse"],
+          ["nope", "SessionStart"],
+        ]) {
+          const r = gui([process.execPath, bundles.hook, host as string, event as string], input);
+          expect({ code: r.status, out: r.stdout, err: r.stderr }).toEqual({
+            code: 0,
+            out: "",
+            err: "",
+          });
+        }
+      },
+    );
+
+    it("[AC5] the clone has no Dispatch side effects: clean status, no hooks, nothing in HOME", () => {
+      const git = (...args: string[]) =>
+        spawnSync("git", args, {
+          cwd: clone,
+          env: { ...GIT_TEST_ENV, PATH: "/usr/bin:/bin", HOME: emptyHome },
+          encoding: "utf8",
+        });
+      expect(git("status", "--porcelain", "--ignored").stdout).toBe("");
+      const hooks = readdirSync(join(clone, ".git", "hooks"));
+      expect(hooks.filter((h) => !h.endsWith(".sample"))).toEqual([]);
+      expect(snapshotTree(emptyHome)).toEqual({});
+      // Only the committed policy files; no host config dirs in the repo.
+      expect(readdirSync(clone).sort()).toEqual([".dispatch", ".git", "README.md"]);
+    });
+  },
+);

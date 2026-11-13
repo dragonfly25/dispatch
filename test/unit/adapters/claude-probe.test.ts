@@ -1,5 +1,4 @@
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createClaudeAdapter,
@@ -39,7 +38,7 @@ describe("claude adapter: probe", () => {
     await withFakes(
       { claude: [{ scenario: "fail", stdout: HELP, stderr: "", exitCode: 0 }] },
       async (ctx) => {
-        const bin = join(ctx.binDir, "claude");
+        const bin = ctx.bin("claude");
         const p = await adapter.probe(
           { ...instance, configDir: "/tmp/alt" },
           deps(new TestSpawner(), bin),
@@ -117,77 +116,82 @@ describe("claude adapter: probe", () => {
   });
 });
 
-describe("claude adapter: end to end against the fake CLI", () => {
-  async function runOnce(scenarios: Parameters<typeof withFakes>[0], timeoutMs?: number) {
-    return withFakes(scenarios, async (ctx) => {
-      const home = tempHome();
-      const repo = tempRepo();
-      const spawner = new TestSpawner();
-      const bin = join(ctx.binDir, "claude");
-      const probe = {
-        binaryPath: bin,
-        realpath: bin,
-        version: "2.1.301",
-        flags: ["--safe-mode"],
-        features: [],
-        loggedIn: null,
-        outsideCliRange: false,
-      };
-      const inv = adapter.buildInvocation({
-        task: {
-          id: "t",
-          prompt: "say hi",
-          paths: [],
+// Native Windows refuses to build a claude invocation (adapterPlatformBlocker: no OS sandbox), so
+// there is no claude child to run end to end there.
+describe.skipIf(process.platform === "win32")(
+  "claude adapter: end to end against the fake CLI",
+  () => {
+    async function runOnce(scenarios: Parameters<typeof withFakes>[0], timeoutMs?: number) {
+      return withFakes(scenarios, async (ctx) => {
+        const home = tempHome();
+        const repo = tempRepo();
+        const spawner = new TestSpawner();
+        const bin = ctx.bin("claude");
+        const probe = {
+          binaryPath: bin,
+          realpath: bin,
+          version: "2.1.301",
+          flags: ["--safe-mode"],
+          features: [],
+          loggedIn: null,
+          outsideCliRange: false,
+        };
+        const inv = adapter.buildInvocation({
+          task: {
+            id: "t",
+            prompt: "say hi",
+            paths: [],
+            autonomy: "worktree",
+            timeoutMs: 60_000,
+          },
+          target: { instance: "claude", tier: "fast", model: "haiku", effort: "low" },
           autonomy: "worktree",
-          timeoutMs: 60_000,
-        },
-        target: { instance: "claude", tier: "fast", model: "haiku", effort: "low" },
-        autonomy: "worktree",
-        worktree: repo.dir,
-        repoRoot: repo.dir,
-        runDir: home.home,
-        instance,
-        probe,
-        baseEnv: { PATH: ctx.env.PATH ?? "", HOME: home.home },
+          worktree: repo.dir,
+          repoRoot: repo.dir,
+          runDir: home.home,
+          instance,
+          probe,
+          baseEnv: { PATH: ctx.env.PATH ?? "", HOME: home.home },
+        });
+        const rc = runCtx(repo.dir, { instanceId: "claude" });
+        const events: string[] = [];
+        const res = await spawner.spawn({
+          binary: inv.binary,
+          argv: inv.argv,
+          env: inv.env,
+          cwd: inv.cwd,
+          stdin: inv.stdin ?? "",
+          ...(timeoutMs ? { timeoutMs } : {}),
+          onLine: (s, l) => {
+            for (const e of adapter.parseLine(s, l, rc)) events.push(e.kind);
+          },
+        });
+        const outcome = adapter.finalize({ ...res, durationMs: 1 }, rc);
+        const log = ctx.readLog({ cli: "claude", kind: "run" });
+        home.cleanup();
+        repo.cleanup();
+        return { outcome, events, log, rc };
       });
-      const rc = runCtx(repo.dir, { instanceId: "claude" });
-      const events: string[] = [];
-      const res = await spawner.spawn({
-        binary: inv.binary,
-        argv: inv.argv,
-        env: inv.env,
-        cwd: inv.cwd,
-        stdin: inv.stdin ?? "",
-        ...(timeoutMs ? { timeoutMs } : {}),
-        onLine: (s, l) => {
-          for (const e of adapter.parseLine(s, l, rc)) events.push(e.kind);
-        },
+    }
+
+    it("[UC2] replays the isolation fixture through spawn → parseLine → finalize", async () => {
+      const { outcome, log, rc } = await runOnce({
+        claude: [{ scenario: "replay", fixture: "claude/2.1.301/child_isolation_canary" }],
       });
-      const outcome = adapter.finalize({ ...res, durationMs: 1 }, rc);
-      const log = ctx.readLog({ cli: "claude", kind: "run" });
-      home.cleanup();
-      repo.cleanup();
-      return { outcome, events, log, rc };
+      expect(outcome.outcome).toBe("success");
+      expect(log[0]?.args.slice(0, 2)).toEqual(["-p", "--safe-mode"]);
+      expect(log[0]?.stdin).toContain("--- TASK ---\nsay hi");
+      expect((rc.scratch.quotaObservations as QuotaObservation[])[0]?.window?.kind).toBe("7d");
     });
-  }
 
-  it("[UC2] replays the isolation fixture through spawn → parseLine → finalize", async () => {
-    const { outcome, log, rc } = await runOnce({
-      claude: [{ scenario: "replay", fixture: "claude/2.1.301/child_isolation_canary" }],
+    it("[UC13] a hanging child is killed at the timeout and classified as timeout", async () => {
+      const { outcome } = await runOnce({ claude: [{ scenario: "slow", delayMs: 400 }] }, 600);
+      expect(outcome.outcome).toBe("timeout");
     });
-    expect(outcome.outcome).toBe("success");
-    expect(log[0]?.args.slice(0, 2)).toEqual(["-p", "--safe-mode"]);
-    expect(log[0]?.stdin).toContain("--- TASK ---\nsay hi");
-    expect((rc.scratch.quotaObservations as QuotaObservation[])[0]?.window?.kind).toBe("7d");
-  });
 
-  it("[UC13] a hanging child is killed at the timeout and classified as timeout", async () => {
-    const { outcome } = await runOnce({ claude: [{ scenario: "slow", delayMs: 400 }] }, 600);
-    expect(outcome.outcome).toBe("timeout");
-  });
-
-  it("fake quota_exhausted scenario → quota_exhausted", async () => {
-    const { outcome } = await runOnce({ claude: [{ scenario: "quota_exhausted" }] });
-    expect(outcome.outcome).toBe("quota_exhausted");
-  });
-});
+    it("fake quota_exhausted scenario → quota_exhausted", async () => {
+      const { outcome } = await runOnce({ claude: [{ scenario: "quota_exhausted" }] });
+      expect(outcome.outcome).toBe("quota_exhausted");
+    });
+  },
+);

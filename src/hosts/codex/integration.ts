@@ -7,13 +7,17 @@
  *   (`deny_redirect`, see `./hook.ts`). Codex runs them only after the user approves them in
  *   `/hooks`; Dispatch never writes that trust itself.
  * - `<codex home>/rules/dispatch.rules`: a trust grant that lets ONLY the absolute launcher's
- *   `run|wait|cancel|status` run outside the Codex sandbox (docs/spikes/codex.md Q2).
+ *   `run|wait|cancel|status` run outside the Codex sandbox (docs/spikes/codex.md Q2). Not on
+ *   Windows: there the launcher is a batch file whose arguments cmd.exe re-parses, so a matched
+ *   rule would run model-written text unsandboxed (docs/spikes/windows.md). Codex-hosted runs on
+ *   Windows stay sandboxed and need the user's per-call approval to reach the network.
  *
  * `config.toml` and AGENTS.md are never touched.
  */
 import { existsSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import type { EditOp, HostIntegration, HostPlanContext } from "../../core/contracts.js";
+import { envGet, isWindows, type OsPlatform } from "../../platform/os.js";
 import type { ResolveFs } from "../../platform/resolve.js";
 import {
   assetOps,
@@ -26,15 +30,23 @@ import { CODEX_SPAWN_MATCHER, CODEX_WAIT_TIMEOUT_SEC, hookHandlers } from "./hoo
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** Codex's home: `$CODEX_HOME` when absolute, else `<home>/.codex`. */
-export function codexHomeDir(env: Env, home: string): string {
-  const dir = env.CODEX_HOME;
-  return dir && isAbsolute(dir) ? dir : join(home, ".codex");
+/**
+ * Codex's home: `$CODEX_HOME` when absolute, else `<home>/.codex` (`%USERPROFILE%\.codex` on
+ * Windows, where the variable name is case-insensitive).
+ */
+export function codexHomeDir(
+  env: Env,
+  home: string,
+  platform: OsPlatform = process.platform,
+): string {
+  const dir = envGet(env, "CODEX_HOME", platform);
+  const absolute = isWindows(platform) ? win32.isAbsolute : posix.isAbsolute;
+  return dir && absolute(dir) ? dir : join(home, ".codex");
 }
 
 /** Where the Dispatch files live for a Codex home and a user HOME. */
-export function codexPaths(env: Env, home: string) {
-  const codexHome = codexHomeDir(env, home);
+export function codexPaths(env: Env, home: string, platform: OsPlatform = process.platform) {
+  const codexHome = codexHomeDir(env, home, platform);
   return {
     codexHome,
     hooks: join(codexHome, "hooks.json"),
@@ -51,6 +63,21 @@ export function rulesGrant(launcher: string): string {
     "compound commands (&&, ;, pipes, $, redirects) stay sandboxed"
   );
 }
+
+/**
+ * True when setup installs the Codex rules file on `platform`: never on Windows, where the
+ * launcher is `dispatch.cmd` (see the module comment). Doctor and setup report the consequence.
+ */
+export function codexRulesSupported(platform: OsPlatform = process.platform): boolean {
+  return !isWindows(platform);
+}
+
+/** What setup and doctor say on Windows instead of installing the rules file. */
+export const CODEX_WINDOWS_NO_RULES =
+  "no Codex rule is installed on Windows (the launcher is a batch file and cmd.exe would re-parse " +
+  "the model's arguments outside the sandbox), so a Codex-hosted Dispatch run stays in the Codex " +
+  "sandbox: approve running the Dispatch command outside the sandbox when Codex asks, or the run " +
+  "has no network";
 
 /** Trust grant of the hooks, including the manual `/hooks` approval step. */
 export const HOOKS_GRANT =
@@ -80,11 +107,14 @@ function hookGroups(values: TemplateValues): [string, { hooks: { command: string
 export interface CodexHostDeps {
   env?: () => Env;
   fs?: ResolveFs;
+  /** Default `process.platform`. */
+  platform?: OsPlatform;
 }
 
 /** Builds the integration; tests pass an environment and a filesystem view. */
 export function createCodexIntegration(deps: CodexHostDeps = {}): HostIntegration {
   const env = (): Env => (deps.env ? deps.env() : process.env);
+  const platform = deps.platform ?? process.platform;
 
   const host: HostIntegration = {
     id: "codex",
@@ -101,20 +131,23 @@ export function createCodexIntegration(deps: CodexHostDeps = {}): HostIntegratio
     async detect(ctx) {
       const e = env();
       return (
-        existsSync(codexHomeDir(e, ctx.home)) ||
+        existsSync(codexHomeDir(e, ctx.home, platform)) ||
         hostPresent({
           home: ctx.home,
           binary: "codex",
           dir: ".codex",
           env: e,
+          platform,
           ...(deps.fs ? { fs: deps.fs } : {}),
         })
       );
     },
 
     plan(ctx: HostPlanContext): EditOp[] {
-      const values = templateValues(ctx, host);
-      const paths = codexPaths(env(), ctx.home);
+      // Codex runs model commands and hooks in PowerShell on Windows.
+      const values = templateValues(ctx, host, { platform, shell: "powershell" });
+      const paths = codexPaths(env(), ctx.home, platform);
+      const windows = isWindows(platform);
       const hooks = hookGroups(values).map(
         ([event, group]): EditOp => ({
           file: paths.hooks,
@@ -127,13 +160,22 @@ export function createCodexIntegration(deps: CodexHostDeps = {}): HostIntegratio
       );
       return [
         ...assetOps(values, [
-          { template: "codex/skills/dispatch/SKILL.md", dest: paths.skill },
           {
-            template: "codex/dispatch.rules.tmpl",
-            dest: paths.rules,
-            kind: "rules-file",
-            trustGrant: rulesGrant(ctx.launcherPath),
+            template: windows
+              ? "codex/skills/dispatch/SKILL.windows.md"
+              : "codex/skills/dispatch/SKILL.md",
+            dest: paths.skill,
           },
+          ...(codexRulesSupported(platform)
+            ? [
+                {
+                  template: "codex/dispatch.rules.tmpl",
+                  dest: paths.rules,
+                  kind: "rules-file" as const,
+                  trustGrant: rulesGrant(ctx.launcherPath),
+                },
+              ]
+            : []),
         ]),
         ...hooks,
       ];

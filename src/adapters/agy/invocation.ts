@@ -3,7 +3,9 @@ import type { Invocation } from "../../core/contracts.js";
 import { ExitCode } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import { refuseMcp } from "../../mcp/forward.js";
+import type { OsPlatform } from "../../platform/os.js";
 import { type BuildInvocationWithWeb, refuseWeb } from "../../web/index.js";
+import { adapterPlatformBlocker } from "../platform.js";
 
 /** Flags the read-only invocation depends on; a probe that lists flags without them fails closed. */
 export const REQUIRED_FLAGS = [
@@ -45,12 +47,20 @@ function nativeValue(what: string, value: string): string {
  * Builds the read-only `agy` command. Any autonomy other than `read-only` throws: agy has no
  * enforceable write boundary, and `--dangerously-skip-permissions` is never passed. The prompt
  * travels as `-p=<prompt>` (argv index 0, redacted) because agy ignores stdin. The env is exactly
- * `baseEnv`: nothing is added, in particular no `ANTIGRAVITY_*` variable.
+ * `baseEnv`: nothing is added, in particular no `ANTIGRAVITY_*` variable. Native Windows is
+ * refused ({@link adapterPlatformBlocker}).
  */
-export function buildAgyInvocation(args: BuildInvocationWithWeb & BrowserForwarding): Invocation {
+export function buildAgyInvocation(
+  args: BuildInvocationWithWeb & BrowserForwarding,
+  platform: OsPlatform = process.platform,
+): Invocation {
   refuseMcp("antigravity", args);
   refuseBrowser("antigravity", args);
   refuseWeb("antigravity", args);
+  const blocker = adapterPlatformBlocker("antigravity", platform);
+  if (blocker) {
+    throw new DispatchError(`agy: ${blocker}`, ExitCode.REJECTED, "adapter.platform_unsupported");
+  }
   if (args.autonomy !== "read-only") {
     throw new DispatchError(
       `agy supports read-only only (requested ${args.autonomy})`,

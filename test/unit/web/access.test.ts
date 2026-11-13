@@ -77,42 +77,43 @@ describe("codex web search (golden argv) [UC2]", () => {
   });
 });
 
+// claude and antigravity are built for POSIX: native Windows refuses both (adapterPlatformBlocker).
 describe("claude web tools (golden argv) [UC2]", () => {
   it("adds only the requested web tools to --tools and pre-approves them; settings unchanged", () => {
     expect(webTools(undefined)).toEqual([]);
     expect(webTools("search")).toEqual(["WebSearch"]);
     expect(webTools("fetch")).toEqual(["WebSearch", "WebFetch"]);
-    const plain = buildClaudeInvocation(args("claude", undefined, "read-only"));
+    const plain = buildClaudeInvocation(args("claude", undefined, "read-only"), "linux");
     expect(plain.argv).not.toContain("--allowedTools");
     expect(flagValue(plain.argv, "--tools")).toBe("Read,Grep,Glob");
 
-    const ro = buildClaudeInvocation(args("claude", "search", "read-only"));
+    const ro = buildClaudeInvocation(args("claude", "search", "read-only"), "linux");
     expect(flagValue(ro.argv, "--tools")).toBe("Read,Grep,Glob,WebSearch");
     expect(flagValue(ro.argv, "--allowedTools")).toBe("WebSearch");
     expect(flagValue(ro.argv, "--permission-mode")).toBe("dontAsk");
     expect(ro.sideEffectGuards).toContain("claude-web-tools-only");
 
-    const wt = buildClaudeInvocation(args("claude", "fetch", "worktree"));
+    const wt = buildClaudeInvocation(args("claude", "fetch", "worktree"), "linux");
     expect(flagValue(wt.argv, "--tools")).toBe("Read,Grep,Glob,Edit,Write,Bash,WebSearch,WebFetch");
     expect(flagValue(wt.argv, "--allowedTools")).toBe("WebSearch,WebFetch");
     expect(flagValue(wt.argv, "--disallowedTools")).toBe("Agent");
     expect(wt.argv).toContain("--safe-mode");
     // The credential deny rules are the same with or without web [SEC-claude-cred].
-    const plainWt = buildClaudeInvocation(args("claude", undefined, "worktree"));
+    const plainWt = buildClaudeInvocation(args("claude", undefined, "worktree"), "linux");
     expect(flagValue(wt.argv, "--settings")).toBe(flagValue(plainWt.argv, "--settings"));
   });
 });
 
 describe("antigravity never gets web access", () => {
   it("refuses a run with web (fail closed) and builds without", () => {
-    expect(() => buildAgyInvocation(args("antigravity", "search"))).toThrow(
+    expect(() => buildAgyInvocation(args("antigravity", "search"), "linux")).toThrow(
       /never gets web access/,
     );
     expect(() =>
-      buildAgyInvocation({
-        ...args("antigravity"),
-        probe: { ...probeResult, binaryPath: "/bin/agy", flags: [] },
-      }),
+      buildAgyInvocation(
+        { ...args("antigravity"), probe: { ...probeResult, binaryPath: "/bin/agy", flags: [] } },
+        "linux",
+      ),
     ).not.toThrow();
     expect(() => refuseWeb("other", { web: "fetch" })).toThrow(/other cannot be given web/);
     expect(() => refuseWeb("other", {})).not.toThrow();

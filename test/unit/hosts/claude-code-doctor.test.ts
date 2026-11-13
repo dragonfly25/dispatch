@@ -12,6 +12,7 @@ import {
 import { claudeDoctorChecks, permissionRules } from "../../../src/hosts/claude-code/doctor.js";
 import { createClaudeCodeIntegration } from "../../../src/hosts/claude-code/integration.js";
 import { builtinRegistry } from "../../../src/hosts/index.js";
+import { launcherFileName } from "../../../src/platform/os.js";
 import { fakeClaudeRunner } from "../../support/fake-host.js";
 import { createFakes, type FakesContext } from "../../support/index.js";
 import { type TempHome, tempHome } from "../../support/temp.js";
@@ -25,7 +26,13 @@ afterEach(() => {
 });
 
 const NONE = { isExecutableFile: () => false, realpath: (p: string) => p };
-const FOUND = { isExecutableFile: (p: string) => p === "/bin/claude", realpath: (p: string) => p };
+const WIN = process.platform === "win32";
+/** A PATH dir and the `claude` binary in it, in the running platform's form. */
+const BIN_DIR = WIN ? "C:\\bin" : "/bin";
+const CLAUDE = WIN ? "C:\\bin\\claude.exe" : "/bin/claude";
+const FOUND = { isExecutableFile: (p: string) => p === CLAUDE, realpath: (p: string) => p };
+/** `s` as it appears inside a JSON string (Windows paths hold backslashes). */
+const inJson = (s: string): string => JSON.stringify(s).slice(1, -1);
 
 function dctx(env: Record<string, string> = {}): DoctorContext {
   return { home: h.home, dispatchHome: h.dispatchHome, env: { HOME: h.home, ...env } };
@@ -43,7 +50,7 @@ const runner = (code: number, stdout: string): (() => CommandRunner) => {
 
 describe("claude-code.plugin [UC1]", () => {
   const plugin = (deps: Parameters<typeof claudeDoctorChecks>[0]) =>
-    check("claude-code.plugin", deps).run(dctx({ PATH: "/bin" }));
+    check("claude-code.plugin", deps).run(dctx({ PATH: BIN_DIR }));
 
   it("is ok when Claude Code is not installed at all", async () => {
     h = tempHome();
@@ -140,8 +147,8 @@ describe("claude-code.files [UC1]", () => {
     writeFileSync(hook, "");
     writeFileSync(cli, "");
     const integration = createClaudeCodeIntegration({
-      env: () => ({ HOME: h.home, PATH: "/bin" }),
-      fs: { isExecutableFile: (p) => p === "/bin/claude", realpath: (p) => p },
+      env: () => ({ HOME: h.home, PATH: BIN_DIR }),
+      fs: FOUND,
     });
     const plan = await planSetup({
       home: h.home,
@@ -193,7 +200,7 @@ describe("claude-code.files [UC1]", () => {
       "hooks",
       "hooks.json",
     );
-    const launcher = join(h.dispatchHome, "bin", "dispatch");
+    const launcher = join(h.dispatchHome, "bin", launcherFileName());
     const original = readFileSync(launcher, "utf8");
     writeFileSync(launcher, original.replace(process.execPath, "/gone/node"));
     expect((await run()).message).toContain("/gone/node");
@@ -216,7 +223,7 @@ describe("claude-code.files [UC1]", () => {
       "hooks",
       "hooks.json",
     );
-    const json = readFileSync(hooksFile, "utf8").replace(process.execPath, "/gone/node");
+    const json = readFileSync(hooksFile, "utf8").replace(inJson(process.execPath), "/gone/node");
     writeFileSync(hooksFile, json);
     expect((await run()).message).toContain("/gone/node");
   });
@@ -232,7 +239,7 @@ describe("claude-code.permission-rule [UC1]", () => {
     const settings = join(h.home, ".claude", "settings.json");
     writeFileSync(settings, '{ "model": "opus" }\n');
     const r = await run();
-    const launcher = join(h.dispatchHome, "bin", "dispatch");
+    const launcher = join(h.dispatchHome, "bin", launcherFileName());
     expect(r.status).toBe("warn");
     expect(r.message).toContain(
       `  Bash(${launcher} run:*)\n  Bash(${launcher} wait:*)\n  Bash(${launcher} apply:*)`,
@@ -250,7 +257,7 @@ describe("claude-code.permission-rule [UC1]", () => {
   it("is ok once both rules are in permissions.allow (jsonc accepted)", async () => {
     h = tempHome();
     mkdirSync(join(h.home, ".claude"));
-    const rules = permissionRules(join(h.dispatchHome, "bin", "dispatch"));
+    const rules = permissionRules(join(h.dispatchHome, "bin", launcherFileName()));
     writeFileSync(
       join(h.home, ".claude", "settings.json"),
       `{\n  // mine\n  "permissions": { "allow": [${rules.map((r) => JSON.stringify(r)).join(", ")}, 5] }\n}\n`,
@@ -301,7 +308,7 @@ describe("claude-code.hard-mode [UC2]", () => {
     h = tempHome();
     mkdirSync(join(h.home, ".claude"));
     const integration = createClaudeCodeIntegration({
-      env: () => ({ HOME: h.home, PATH: "/bin" }),
+      env: () => ({ HOME: h.home, PATH: BIN_DIR }),
       fs: FOUND,
     });
     const plan = await planSetup({
@@ -309,8 +316,8 @@ describe("claude-code.hard-mode [UC2]", () => {
       dispatchHome: h.dispatchHome,
       install: {
         nodePath: process.execPath,
-        cliPath: "/opt/d/cli.mjs",
-        hookPath: "/opt/d/hook.mjs",
+        cliPath: join(h.home, "app", "cli.mjs"),
+        hookPath: join(h.home, "app", "hook.mjs"),
       },
       hosts: [integration],
     });

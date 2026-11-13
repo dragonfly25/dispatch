@@ -12,8 +12,9 @@
  * (docs/spikes/hosts-prototype.md §1).
  */
 import { existsSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { join, normalize, posix, win32 } from "node:path";
 import type { EditOp, HostIntegration, HostPlanContext } from "../../core/contracts.js";
+import { envGet, isWindows, type OsPlatform } from "../../platform/os.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { assetOps, hostAssetDir, hostPresent, templateValues } from "../_framework/index.js";
 import { CLAUDE_WAIT_TIMEOUT_SEC, hookHandlers } from "./hook.js";
@@ -27,10 +28,18 @@ export const PLUGIN_ID = `${PLUGIN}@${MARKETPLACE}`;
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** The Claude Code config directory: `$CLAUDE_CONFIG_DIR` when absolute, else `<home>/.claude`. */
-export function claudeConfigDir(env: Env, home: string): string {
-  const dir = env.CLAUDE_CONFIG_DIR;
-  return dir && isAbsolute(dir) ? dir : join(home, ".claude");
+/**
+ * The Claude Code config directory: `$CLAUDE_CONFIG_DIR` when absolute, else `<home>/.claude`
+ * (`%USERPROFILE%\.claude` on Windows, where the variable name is case-insensitive).
+ */
+export function claudeConfigDir(
+  env: Env,
+  home: string,
+  platform: OsPlatform = process.platform,
+): string {
+  const dir = envGet(env, "CLAUDE_CONFIG_DIR", platform);
+  const absolute = isWindows(platform) ? win32.isAbsolute : posix.isAbsolute;
+  return dir && absolute(dir) ? dir : join(home, ".claude");
 }
 
 /** Which Claude Code instance a process belongs to (UC12: `claude-alt` has its own config dir). */
@@ -40,10 +49,13 @@ export interface ClaudeInstance {
   isDefault: boolean;
 }
 
-/** The instance selected by the environment (`CLAUDE_CONFIG_DIR`); the default one when unset. */
+/**
+ * The instance selected by the environment (`CLAUDE_CONFIG_DIR`); the default one when unset.
+ * The comparison normalizes separators, so `C:/Users/u/.claude` is the default instance on Windows.
+ */
 export function claudeInstanceOf(env: Env, home: string): ClaudeInstance {
   const configDir = claudeConfigDir(env, home);
-  return { configDir, isDefault: configDir === join(home, ".claude") };
+  return { configDir, isDefault: normalize(configDir) === join(home, ".claude") };
 }
 
 /** Version from `CLAUDE_CODE_VERSION`, else a `x.y.z` path segment of `CLAUDE_CODE_EXECPATH`. */
@@ -58,15 +70,19 @@ function selfVersion(env: Env): string | null {
 export interface ClaudeHostDeps {
   env?: () => Env;
   fs?: ResolveFs;
+  /** Default `process.platform`. */
+  platform?: OsPlatform;
 }
 
 /** Builds the integration; tests pass an environment and a filesystem view. */
 export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostIntegration {
   const env = (): Env => (deps.env ? deps.env() : process.env);
+  const platform = deps.platform ?? process.platform;
 
   /** Absolute path of the `claude` binary, or null. Never taken from a Dispatch child's env. */
   const binary = (): string | null =>
-    resolveBinary("claude", { env: env(), ...(deps.fs ? { fs: deps.fs } : {}) })?.path ?? null;
+    resolveBinary("claude", { env: env(), platform, ...(deps.fs ? { fs: deps.fs } : {}) })?.path ??
+    null;
 
   const host: HostIntegration = {
     id: "claude-code",
@@ -85,12 +101,13 @@ export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostInte
     async detect(ctx) {
       const e = env();
       return (
-        existsSync(claudeConfigDir(e, ctx.home)) ||
+        existsSync(claudeConfigDir(e, ctx.home, platform)) ||
         hostPresent({
           home: ctx.home,
           binary: "claude",
           dir: ".claude",
           env: e,
+          platform,
           ...(deps.fs ? { fs: deps.fs } : {}),
         })
       );
@@ -100,10 +117,11 @@ export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostInte
       // The plugin can only be installed through the CLI; without it there is nothing to plan.
       const claude = binary();
       if (claude === null) return [];
-      const values = templateValues(ctx, host);
+      // Claude Code's Bash tool is Git Bash on Windows, so the model's calls use bash quoting.
+      const values = templateValues(ctx, host, { platform, shell: "bash" });
       const dir = hostAssetDir(ctx, "claude-code");
       const plugin = join(dir, "plugins", PLUGIN);
-      const config = claudeConfigDir(env(), ctx.home);
+      const config = claudeConfigDir(env(), ctx.home, platform);
       const settings = join(config, "settings.json");
       const plugins = join(config, "plugins");
       const cli = (signature: string, spec: unknown, trustGrant: string | null): EditOp => ({
@@ -127,7 +145,13 @@ export function createClaudeCodeIntegration(deps: ClaudeHostDeps = {}): HostInte
             template: "claude-code/agents/dispatch.md",
             dest: join(plugin, "agents", "dispatch.md"),
           },
-          { template: "claude-code/hooks/hooks.json", dest: join(plugin, "hooks", "hooks.json") },
+          {
+            // Windows: exec form (`command` + `args`), so no shell parses the paths.
+            template: isWindows(platform)
+              ? "claude-code/hooks/hooks.windows.json"
+              : "claude-code/hooks/hooks.json",
+            dest: join(plugin, "hooks", "hooks.json"),
+          },
         ]),
         cli(
           "claude-marketplace",

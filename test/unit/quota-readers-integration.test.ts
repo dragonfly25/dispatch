@@ -16,6 +16,7 @@ import type {
   QuotaWindow,
   RunRecord,
 } from "../../src/core/contracts.js";
+import { resolveBinary } from "../../src/platform/resolve.js";
 import { DefaultQuotaProvider } from "../../src/quota/provider.js";
 import {
   CLAUDE_PASSIVE_ID,
@@ -70,6 +71,9 @@ function setup(scenarios: FakeScenarioMap = {}, timeoutMs = 3_000) {
     env,
     version: "1.2.3",
     onObservation: (o) => holder.provider?.recordObservation(o),
+    // As in production (app/context.ts): absolute paths from the readers' own PATH.
+    resolveBinary: (name, instance) =>
+      resolveBinary(name, { configured: instance.binary, env })?.path ?? null,
   });
   const provider = new DefaultQuotaProvider({
     store,
@@ -146,6 +150,41 @@ describe("readers wired into the quota core [UC11]", () => {
       reliability: { cacheMinutes: 1 },
     });
     expect(tuned.all()).toHaveLength(4);
+  });
+
+  it("passes the resolved binary to every spawning reader; null falls back to instance.binary ?? name", async () => {
+    const binaries: string[] = [];
+    const spawner = {
+      spawn: async (req: { binary: string }) => {
+        binaries.push(req.binary);
+        return { exitCode: 1, signal: null, timedOut: false };
+      },
+    };
+    const asked: string[] = [];
+    const readers = defaultReaders({
+      clock,
+      spawner,
+      store,
+      env: { PATH: "" },
+      claudeLlmFallback: false,
+      resolveBinary: (name, inst) => {
+        asked.push(`${name}:${inst.id}`);
+        if (name === "claude") return "/abs/bin/claude";
+        if (name === "codex") return "/nonexistent/abs/codex";
+        return null;
+      },
+    });
+    const byId = (id: string) => readers.all().find((r) => r.id === id);
+    const inst = (id: string, adapter: string, binary?: string): ProviderInstance =>
+      ({ id, adapter, ...(binary ? { binary } : {}) }) as ProviderInstance;
+    await expect(byId("claude-usage")?.read(inst("c", "claude"))).rejects.toThrow();
+    await expect(byId("agy-usage")?.read(inst("a", "antigravity"))).rejects.toThrow();
+    await expect(byId("agy-usage")?.read(inst("a2", "antigravity", "/cfg/agy"))).rejects.toThrow();
+    await expect(byId("codex-app-server")?.read(inst("x", "codex"))).rejects.toThrow(
+      "/nonexistent/abs/codex",
+    );
+    expect(binaries).toEqual(["/abs/bin/claude", "agy", "/cfg/agy"]);
+    expect(asked).toEqual(["claude:c", "agy:a", "agy:a2", "codex:x"]);
   });
 
   it("codex ok: real windows in the snapshot, healthy reader", async () => {

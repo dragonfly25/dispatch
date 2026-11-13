@@ -21,6 +21,7 @@ import {
 } from "../hook/cache.js";
 import { DEFAULT_CLAUDE_INTERCEPT } from "../hosts/claude-code/hook.js";
 import { forwardableNames, memoRead } from "../mcp/resolve.js";
+import { homeDir } from "../platform/os.js";
 import { type AppContext, type LoadAppContextOptions, loadAppContext } from "./context.js";
 
 /** Longest summary written (the Claude hook cuts at 2000 characters). */
@@ -170,7 +171,7 @@ function browserPolicy(
     enabled: global?.hosts?.["claude-code"]?.browser === true,
     dispatchHome: ctx.dispatchHome,
     platform: process.platform,
-    home: ctx.env.HOME,
+    home: homeDir(ctx.env),
   });
   const network = global?.network === "on" ? "all" : (global?.network ?? "off");
   return {

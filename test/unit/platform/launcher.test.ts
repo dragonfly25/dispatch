@@ -9,13 +9,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DispatchError } from "../../../src/core/errors.js";
 import {
+  cliPathBesideHook,
+  hostInvocation,
+  powershellQuote,
+  runningInvocation,
+} from "../../../src/platform/invocation.js";
+import {
   currentInstallPaths,
+  parseLauncherScript,
   renderHookCommand,
+  renderHookExec,
   renderLauncherScript,
 } from "../../../src/platform/launcher.js";
 
@@ -25,7 +33,10 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-describe("renderLauncherScript [UC1]", () => {
+/** The POSIX renderings run through sh; the win32 ones are asserted as text below. */
+const WIN = process.platform === "win32";
+
+describe.skipIf(WIN)("renderLauncherScript [UC1]", () => {
   it("renders the exact exec line", () => {
     expect(
       renderLauncherScript({ nodePath: "/opt/node/bin/node", cliPath: "/x/dist/cli.mjs" }),
@@ -72,7 +83,7 @@ describe("renderLauncherScript [UC1]", () => {
   });
 });
 
-describe("renderHookCommand [UC9][AC5]", () => {
+describe.skipIf(WIN)("renderHookCommand [UC9][AC5]", () => {
   const args = {
     nodePath: "/abs/node",
     hookPath: "/abs/hook.mjs",
@@ -186,18 +197,128 @@ describe("renderHookCommand [UC9][AC5]", () => {
 
 describe("currentInstallPaths", () => {
   it("derives cli and hook paths next to the given module and uses execPath for node", () => {
-    const url = pathToFileURL("/opt/dispatch/dist/cli.mjs").href;
-    expect(currentInstallPaths({ moduleUrl: url, execPath: "/n/node" })).toEqual({
+    // Native form: on Windows `/opt/...` resolves against the current drive.
+    const file = resolve("/opt/dispatch/dist/cli.mjs");
+    expect(
+      currentInstallPaths({ moduleUrl: pathToFileURL(file).href, execPath: "/n/node" }),
+    ).toEqual({
       nodePath: "/n/node",
-      cliPath: "/opt/dispatch/dist/cli.mjs",
-      hookPath: "/opt/dispatch/dist/hook.mjs",
+      cliPath: file,
+      hookPath: join(dirname(file), "hook.mjs"),
     });
   });
 
   it("defaults to the running node and this module's directory", () => {
     const p = currentInstallPaths();
     expect(p.nodePath).toBe(process.execPath);
-    expect(p.cliPath.endsWith("/cli.mjs")).toBe(true);
-    expect(p.hookPath.endsWith("/hook.mjs")).toBe(true);
+    expect(p.cliPath.endsWith(`${sep}cli.mjs`)).toBe(true);
+    expect(p.hookPath.endsWith(`${sep}hook.mjs`)).toBe(true);
+  });
+});
+
+describe("Windows renderings (win32, asserted as text)", () => {
+  const NODE = "C:\\Program Files\\nodejs\\node.exe";
+  const CLI = "C:\\Users\\o'neil\\dist\\cli.mjs";
+  const HOOK = "C:\\Users\\o'neil\\dist\\hook.mjs";
+
+  it("dispatch.cmd: @echo off, CRLF, quoted absolute paths, %* forwarding", () => {
+    expect(renderLauncherScript({ nodePath: NODE, cliPath: CLI }, "win32")).toBe(
+      `@echo off\r\n"${NODE}" --disable-warning=ExperimentalWarning "${CLI}" %*\r\n`,
+    );
+    expect(
+      renderLauncherScript({ nodePath: "\\\\srv\\share\\node.exe", cliPath: CLI }, "win32"),
+    ).toContain('"\\\\srv\\share\\node.exe"');
+  });
+
+  it.each(['"', "%", "!", "^", "&", "|", "<", ">", "\n", "\r", "\0"])(
+    "[SEC-hookpath] dispatch.cmd rejects %j in a path instead of escaping it",
+    (bad) => {
+      expect(() =>
+        renderLauncherScript({ nodePath: `C:\\n${bad}\\node.exe`, cliPath: CLI }, "win32"),
+      ).toThrow(DispatchError);
+      expect(() =>
+        renderLauncherScript({ nodePath: NODE, cliPath: `C:\\c${bad}\\cli.mjs` }, "win32"),
+      ).toThrow(DispatchError);
+    },
+  );
+
+  it.each(["node.exe", "\\node.exe", "C:node.exe", "/usr/bin/node"])(
+    "dispatch.cmd rejects the non-absolute Windows path %j",
+    (p) => {
+      expect(() => renderLauncherScript({ nodePath: p, cliPath: CLI }, "win32")).toThrow(
+        /absolute/,
+      );
+    },
+  );
+
+  it("parseLauncherScript reads both launcher flavours and rejects anything else", () => {
+    expect(
+      parseLauncherScript(renderLauncherScript({ nodePath: NODE, cliPath: CLI }, "win32")),
+    ).toEqual({ nodePath: NODE, cliPath: CLI });
+    expect(
+      parseLauncherScript(
+        renderLauncherScript({ nodePath: "/n/node", cliPath: "/c/cli.mjs" }, "linux"),
+      ),
+    ).toEqual({ nodePath: "/n/node", cliPath: "/c/cli.mjs" });
+    expect(parseLauncherScript("@echo off\r\nnode cli.mjs\r\n")).toBeNull();
+  });
+
+  it("the Codex (PowerShell) hook command: depth guard, file guards, UTF-8 stdin, exit code", () => {
+    const cmd = renderHookCommand(
+      { nodePath: NODE, hookPath: HOOK, host: "codex", event: "SessionStart" },
+      "win32",
+    );
+    const n = `'${NODE}'`;
+    const hk = "'C:\\Users\\o''neil\\dist\\hook.mjs'";
+    expect(cmd).toBe(
+      "if ($env:DISPATCH_DEPTH) { exit 0 }; " +
+        `if (-not (Test-Path -LiteralPath ${n} -PathType Leaf) -or -not (Test-Path -LiteralPath ${hk} -PathType Leaf)) { exit 0 }; ` +
+        "$utf8 = New-Object System.Text.UTF8Encoding $false; " +
+        "try { [Console]::InputEncoding = $utf8; [Console]::OutputEncoding = $utf8 } catch {}; " +
+        "$OutputEncoding = $utf8; " +
+        `$input | & ${n} ${hk} codex SessionStart; exit $LASTEXITCODE`,
+    );
+    expect(() =>
+      renderHookCommand({ nodePath: NODE, hookPath: HOOK, host: "a;b", event: "E" }, "win32"),
+    ).toThrow(DispatchError);
+    expect(() =>
+      renderHookCommand({ nodePath: "node", hookPath: HOOK, host: "codex", event: "E" }, "win32"),
+    ).toThrow(/absolute/);
+  });
+
+  it("powershellQuote doubles every single-quote character, typographic ones too", () => {
+    expect(powershellQuote("a'b\u2019c")).toBe("'a''b\u2019\u2019c'");
+    expect(powershellQuote("$env:X `n")).toBe("'$env:X `n'");
+  });
+
+  it("the Claude (exec form) hook: node as command, hook/host/event as args", () => {
+    const args = { nodePath: NODE, hookPath: HOOK, host: "claude-code", event: "PreToolUse" };
+    expect(renderHookExec(args, "win32")).toEqual({
+      command: NODE,
+      args: [HOOK, "claude-code", "PreToolUse"],
+    });
+    expect(renderHookExec({ ...args, nodePath: "/n", hookPath: "/h" }, "linux").command).toBe("/n");
+    expect(() => renderHookExec({ ...args, event: "a b" }, "win32")).toThrow(DispatchError);
+  });
+
+  it("hostInvocation: launcher path on POSIX, node+cli on Windows per shell", () => {
+    const paths = { launcherPath: "/h/.dispatch/bin/dispatch", nodePath: NODE, cliPath: CLI };
+    expect(hostInvocation(paths, "bash", "linux")).toBe("/h/.dispatch/bin/dispatch");
+    expect(hostInvocation(paths, "powershell", "darwin")).toBe("/h/.dispatch/bin/dispatch");
+    expect(hostInvocation(paths, "bash", "win32")).toBe(
+      `'${NODE}' 'C:\\Users\\o'\\''neil\\dist\\cli.mjs'`,
+    );
+    expect(hostInvocation(paths, "powershell", "win32")).toBe(
+      `& '${NODE}' 'C:\\Users\\o''neil\\dist\\cli.mjs'`,
+    );
+  });
+
+  it("cliPathBesideHook and runningInvocation follow the platform's path rules", () => {
+    expect(cliPathBesideHook(HOOK, "win32")).toBe(CLI);
+    expect(cliPathBesideHook("/x/dist/hook.mjs", "linux")).toBe("/x/dist/cli.mjs");
+    expect(runningInvocation("/h/.dispatch", "bash", "linux")).toBe("/h/.dispatch/bin/dispatch");
+    expect(runningInvocation("C:\\h", "powershell", "win32", HOOK)).toBe(
+      `& '${process.execPath}' 'C:\\Users\\o''neil\\dist\\cli.mjs'`,
+    );
   });
 });

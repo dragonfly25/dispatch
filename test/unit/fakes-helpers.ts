@@ -1,5 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import type { FakeCli, FakesContext } from "../support/index.js";
+import { isWindows } from "../../src/platform/os.js";
+import { toSpawnCommand } from "../../src/platform/spawnable.js";
+import { type FakeCli, type FakesContext, resolveOnPath } from "../support/index.js";
 
 export interface RunResult {
   code: number | null;
@@ -8,7 +10,10 @@ export interface RunResult {
   stderr: string;
 }
 
-/** Spawns a fake CLI by bare name through the PATH of `ctx.env` (exactly how Dispatch finds it). */
+/**
+ * Spawns a fake CLI by bare name through the PATH of `ctx.env` (exactly how Dispatch finds it).
+ * On Windows the `.cmd` found on PATH is unwrapped by the production `toSpawnCommand`.
+ */
 export function startFake(
   ctx: FakesContext,
   cli: FakeCli,
@@ -21,7 +26,14 @@ export function startFake(
     keepStdin?: boolean;
   } = {},
 ): { child: ChildProcess; done: Promise<RunResult> } {
-  const child = spawn(cli, args, {
+  let command: string = cli;
+  let argv = args;
+  if (isWindows()) {
+    const found = resolveOnPath(cli, ctx.env.PATH);
+    if (found === null) throw new Error(`${cli} is not on the fakes PATH`);
+    ({ command, args: argv } = toSpawnCommand(found, args));
+  }
+  const child = spawn(command, argv, {
     cwd: opts.cwd,
     env: { ...ctx.env, ...opts.env },
     detached: opts.detached,

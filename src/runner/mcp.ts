@@ -12,6 +12,7 @@ import {
   referencedVariables,
   resolveForwardedServers,
 } from "../mcp/resolve.js";
+import { envGet } from "../platform/os.js";
 import { restrictToCapable } from "../router/capability.js";
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -78,6 +79,9 @@ export function mcpVariables(
   env: Env,
 ): { names: string[]; values: string[] } {
   const names = referencedVariables(servers);
-  const values = names.flatMap((n) => (env[n] ? [env[n] as string] : []));
+  const values = names.flatMap((n) => {
+    const v = envGet(env, n);
+    return v === undefined ? [] : [v];
+  });
   return { names, values };
 }

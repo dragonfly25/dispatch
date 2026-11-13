@@ -1,7 +1,7 @@
 /** WP24: `dispatch run` (sync, --dry-run, --json, --provider) with fake CLIs on PATH. */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderRunResult } from "../../src/cli/commands/run.js";
 import { ExitRequest } from "../../src/cli/exit.js";
 import { buildProgram, runCli } from "../../src/cli/program.js";
@@ -24,7 +24,14 @@ import {
 let fakes: FakesContext | undefined;
 let home: TempHome | undefined;
 let repo: TempRepo | undefined;
-afterEach(() => {
+// Real CLI processes spawn much slower on Windows runners than the 5 s default allows.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
+/** CLI calls still running (a timed-out test): awaited so the store is closed before cleanup. */
+const inFlight = new Set<Promise<unknown>>();
+afterEach(async () => {
+  await Promise.allSettled([...inFlight]);
+  inFlight.clear();
   fakes?.dispose();
   home?.cleanup();
   repo?.cleanup();
@@ -51,10 +58,10 @@ function setup(o: Setup = {}) {
   const base = { ...fakes.env, ...home.env };
   // The fake claude does not advertise --safe-mode, so the probes are seeded (as in WP19).
   const probes = new ProbeCache();
-  for (const cli of ["claude", "codex"]) {
+  for (const cli of ["claude", "codex"] as const) {
     probes.set(cli, cli, {
       ...probeResult,
-      binaryPath: join(fakes.binDir, cli),
+      binaryPath: fakes.bin(cli),
       flags: ["--safe-mode"],
       features: ["hooks", "plugins", "apps", "memories"],
     });
@@ -83,7 +90,9 @@ function setup(o: Setup = {}) {
         runner: { probes },
       },
     );
-    const code = await runCli(args, io, program, { platform: process.platform, env });
+    const pending = runCli(args, io, program, { platform: process.platform, env });
+    inFlight.add(pending);
+    const code = await pending.finally(() => inFlight.delete(pending));
     return { code, out, err };
   };
   return { run, fakes, home, repo };
@@ -191,9 +200,9 @@ describe("dispatch run", () => {
 
   it("--provider forces a pin that explain shows; the router still applies", async () => {
     const { run, fakes } = setup({ config: "profile: preserve\n" });
-    const dry = await run([...TASK, "--provider", "claude", "--dry-run", "--json"]);
+    const dry = await run([...TASK, "--provider", "codex", "--dry-run", "--json"]);
     const d = JSON.parse(dry.out);
-    expect(d.decision.targets.map((t: { instance: string }) => t.instance)).toEqual(["claude"]);
+    expect(d.decision.targets.map((t: { instance: string }) => t.instance)).toEqual(["codex"]);
     expect(d.explain).toContain("flag:provider");
     // Inside Claude Code the host is never a target: the pinned task stays on the host.
     const self = await run([...TASK, "--provider", "claude", "--json"], { CLAUDECODE: "1" });

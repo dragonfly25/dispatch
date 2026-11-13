@@ -130,8 +130,12 @@ export async function runLive(
         ...(fs
           ? {
               resolveBinary: async (name, instance) =>
-                resolveBinary(name, { configured: instance.binary, env: ctx.env, fs })?.path ??
-                null,
+                resolveBinary(name, {
+                  configured: instance.binary,
+                  env: ctx.env,
+                  fs,
+                  platform: process.platform,
+                })?.path ?? null,
             }
           : {}),
         ...deps.overrides,

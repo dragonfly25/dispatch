@@ -315,6 +315,8 @@ module.
 
 ### T11. The Codex rules file is used to escape the sandbox (A2, A3; deviation 7)
 
+(Windows: no rules file is installed; see T17.)
+
 - **Mitigation (WP27).**
   - `~/.codex/rules/dispatch.rules` allows only the absolute launcher path with the
     `run|wait|cancel|status` subcommands, with per-session and per-day caps.
@@ -538,6 +540,33 @@ at setup). The server runs outside the codex shell sandbox, as the user.
   does not stop (redirects), and, with the sandbox network on, its shell can do everything T15
   describes. `browser_evaluate` runs script in the page (not in the server). Turn the browser off
   (`browser: false`) for repositories whose local services are sensitive.
+
+### T17. Windows-specific isolation gaps (A2, A3; after v0.1.0)
+
+Context: native Windows support (STATUS.md, "Windows support"; facts in docs/spikes/windows.md).
+
+- **Fail closed where the sandbox is missing.** Claude Code has no OS sandbox on native Windows, so
+  a delegated `claude` is refused before it starts (`adapter.platform_unsupported`); `agy` is
+  refused as unverified. Codex always gets `-c windows.sandbox="elevated"`: without an explicit
+  mode Codex would run commands unsandboxed, and `--ignore-user-config` drops the user's setting.
+- **No binary from the working directory.** Windows looks for a bare command in the cwd before
+  PATH; Dispatch resolves bare names (`git`) to an absolute path first, so a `git.exe` a delegated
+  agent writes into its worktree is never executed by Dispatch's own git calls.
+- **No shell ever parses model text.** Batch files cannot be spawned without `cmd.exe`, so npm
+  cmd-shims are unwrapped to `node <script>` and any other batch file is refused. taskkill and
+  PowerShell are called by absolute path with validated integer pids only.
+- **No Codex rules file (T11 on Windows).** A prefix rule cannot match a quoted path under
+  PowerShell, and a matched `dispatch.cmd` would let cmd.exe re-parse the model's arguments
+  outside the sandbox. Setup skips the rules file; `dispatch` refuses inside the Codex sandbox and
+  says to approve the call outside it. Hosts call `node.exe` + `cli.mjs` directly.
+- **Files.** Mode bits do not reflect ACLs: owner-only checks rely on the user-profile ACL. Trust
+  files are checked with `lstat` and a `dev`/`ino` compare instead of `O_NOFOLLOW`. Junctions count
+  as links; worktree disposal removes every link first so deletion never follows one.
+- **Residual risk.** No Job Objects: a child's background processes that outlive it are not reaped,
+  and a hard kill of Dispatch leaves children running. Not yet exercised on a real Windows machine.
+- Tests: `test/unit/platform/{os,spawnable,resolve}.test.ts`, `test/unit/runner-tree.test.ts`,
+  `test/unit/adapters/windows.test.ts`, `test/unit/hosts/windows.test.ts`,
+  `test/unit/config/windows.test.ts`, `test/unit/sandbox-windows.test.ts`.
 
 ## 5. Accepted risks and disclosures
 

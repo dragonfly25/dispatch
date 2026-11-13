@@ -26,6 +26,7 @@ import {
   browserCliPath,
   browserReadiness,
   browserToolsDir,
+  chromeCandidates,
   ENABLED_TOOLS,
   findChrome,
   installStatus,
@@ -130,7 +131,26 @@ describe("the pinned install is verified before use [SEC-browser]", () => {
     expect(
       findChrome("linux", "/home/u", { exists: (p) => p === "/opt/google/chrome/chrome" }),
     ).toBe("/opt/google/chrome/chrome");
-    expect(findChrome("win32", undefined, { exists: () => true })).toBeNull();
+    expect(findChrome("win32", undefined, { exists: () => true }, {})).toBeNull();
+    expect(findChrome("freebsd", "/home/u", { exists: () => true })).toBeNull();
+  });
+
+  it("Windows: per-user, Program Files and Program Files (x86) installs, env names any case", () => {
+    const env = {
+      LocalAppData: "C:\\Users\\u\\AppData\\Local",
+      ProgramFiles: "C:\\Program Files",
+      "PROGRAMFILES(X86)": "C:\\Program Files (x86)",
+    };
+    const app = "Google\\Chrome\\Application\\chrome.exe";
+    expect(chromeCandidates("win32", undefined, env)).toEqual([
+      `C:\\Users\\u\\AppData\\Local\\${app}`,
+      `C:\\Program Files\\${app}`,
+      `C:\\Program Files (x86)\\${app}`,
+    ]);
+    expect(chromeCandidates("win32", undefined, { ProgramFiles: "relative" })).toEqual([]);
+    expect(
+      findChrome("win32", undefined, { exists: (p) => p.startsWith("C:\\Program Files\\") }, env),
+    ).toBe(`C:\\Program Files\\${app}`);
   });
 });
 
@@ -148,7 +168,7 @@ describe("setup provisions it with npm, never running lifecycle scripts [SEC-bro
     });
     expect(op.trustGrant).toMatch(/@playwright\/mcp@0\.0\.84 \(~19 MB\).*never your own profile/);
     const spec = JSON.parse(op.content);
-    const dir = "/h/.dispatch/tools/playwright-mcp";
+    const dir = join("/h/.dispatch", "tools", "playwright-mcp");
     expect(spec.argv).toEqual(installArgv("/n/npm-cli.js", dir));
     expect(spec.argv).toContain("--ignore-scripts");
     expect(spec.argv).toContain("@playwright/mcp@0.0.84");
@@ -165,17 +185,35 @@ describe("setup provisions it with npm, never running lifecycle scripts [SEC-bro
     expect(spec.snapshot.leftovers).toEqual([{ path: dir, recursive: true }]);
   });
 
-  it("is never planned as root, nor without an npm next to node", () => {
+  it("Windows: npm-cli.js under <node dir>\\node_modules\\npm, never the npm.cmd shim", () => {
     const bin = tmp();
-    writeFileSync(join(bin, "node"), "");
-    expect(provisionBlocker(join(bin, "node"), 501)).toMatch(/npm was not found/);
-    mkdirSync(join(bin, "lib"));
-    writeFileSync(join(bin, "lib", "npm-cli.js"), "");
-    symlinkSync(join(bin, "lib", "npm-cli.js"), join(bin, "npm"));
-    expect(npmCliFor(join(bin, "node"))).toBe(realpathSync(join(bin, "lib", "npm-cli.js")));
-    expect(provisionBlocker(join(bin, "node"), 501)).toBeNull();
-    expect(provisionBlocker(join(bin, "node"), 0)).toMatch(/root/);
+    writeFileSync(join(bin, "npm.cmd"), "");
+    expect(npmCliFor(join(bin, "node.exe"), undefined, "win32")).toBeNull();
+    mkdirSync(join(bin, "node_modules", "npm", "bin"), { recursive: true });
+    writeFileSync(join(bin, "node_modules", "npm", "bin", "npm-cli.js"), "");
+    expect(npmCliFor(join(bin, "node.exe"), undefined, "win32")).toBe(
+      realpathSync(join(bin, "node_modules", "npm", "bin", "npm-cli.js")),
+    );
+    expect(provisionBlocker(join(bin, "node.exe"), undefined)).toBe(
+      process.platform === "win32" ? null : `npm was not found next to ${join(bin, "node.exe")}`,
+    );
   });
+
+  // POSIX npm layout (symlinked bin/npm); Windows is covered above.
+  it.skipIf(process.platform === "win32")(
+    "is never planned as root, nor without an npm next to node",
+    () => {
+      const bin = tmp();
+      writeFileSync(join(bin, "node"), "");
+      expect(provisionBlocker(join(bin, "node"), 501)).toMatch(/npm was not found/);
+      mkdirSync(join(bin, "lib"));
+      writeFileSync(join(bin, "lib", "npm-cli.js"), "");
+      symlinkSync(join(bin, "lib", "npm-cli.js"), join(bin, "npm"));
+      expect(npmCliFor(join(bin, "node"))).toBe(realpathSync(join(bin, "lib", "npm-cli.js")));
+      expect(provisionBlocker(join(bin, "node"), 501)).toBeNull();
+      expect(provisionBlocker(join(bin, "node"), 0)).toMatch(/root/);
+    },
+  );
 });
 
 describe("hosts.claude-code.browser: off by default, a repo or flag can only turn it off [SEC-flags]", () => {
@@ -393,7 +431,7 @@ function invArgs(
 
 describe("codex gets the Dispatch-owned dispatch_browser server [SEC-browser]", () => {
   it("golden overrides: isolated headless Chrome, origins, output dir and HOME outside the worktree, allowlisted tools", () => {
-    expect(browserOverrides(RUN, "worktree", "/w/run/attempt-1")).toEqual([
+    expect(browserOverrides(RUN, "worktree", "/w/run/attempt-1", "linux")).toEqual([
       "-c",
       'mcp_servers.dispatch_browser.command="/n/node"',
       "-c",

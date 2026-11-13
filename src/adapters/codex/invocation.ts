@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import path from "node:path";
 import {
   BROWSER_SERVER_NAME,
   type BrowserRun,
@@ -8,6 +8,7 @@ import {
 import type { Invocation } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
 import type { McpServer } from "../../mcp/resolve.js";
+import { isWindows, type OsPlatform } from "../../platform/os.js";
 import {
   type BuildInvocationWithNetwork,
   packageCacheEnv,
@@ -24,12 +25,31 @@ export const CODEX_OUTPUT_FILE = "last.txt";
  *   `trust_level="trusted"` for the (main) repo root into the user's `~/.codex/config.toml`.
  * - `codex-agents-disabled`: `-c agents.enabled=false` (multi-agent V2 ignores `--disable multi_agent`).
  * - `codex-user-config-ignored`: `--ignore-user-config --ignore-rules --strict-config`.
+ *
+ * Windows adds {@link CODEX_WINDOWS_SANDBOX_GUARD}.
  */
 export const CODEX_SIDE_EFFECT_GUARDS = [
   "codex-project-trust-untrusted",
   "codex-agents-disabled",
   "codex-user-config-ignored",
 ] as const;
+
+/**
+ * Native Windows: `-c windows.sandbox="elevated"`. Without a `windows.sandbox` selection codex
+ * runs every command with no sandbox on Windows (codex-rs `prepare_windows_sandbox_config`: no
+ * mode → `SandboxType::None`), and `--ignore-user-config` drops the user's own selection, so
+ * Dispatch always names one. `elevated` is the strictest legacy mode (dedicated sandbox users,
+ * firewall rules, denied reads); it needs a one-time `codex sandbox setup --elevated` by an
+ * administrator. `unelevated` (weaker network isolation) is never chosen.
+ */
+export const CODEX_WINDOWS_SANDBOX = 'windows.sandbox="elevated"';
+/** Guard asserted by the Windows golden-argv tests. */
+export const CODEX_WINDOWS_SANDBOX_GUARD = "codex-windows-sandbox-elevated";
+
+/** The `-c` override selecting the native Windows sandbox; nothing on POSIX. */
+export function windowsSandboxOverride(platform: OsPlatform = process.platform): string[] {
+  return isWindows(platform) ? ["-c", CODEX_WINDOWS_SANDBOX] : [];
+}
 
 /** Features that must be disabled for isolation; a missing name fails closed. */
 export const REQUIRED_DISABLED_FEATURES = ["hooks", "plugins"] as const;
@@ -170,15 +190,20 @@ export function networkOverride(
  * attempt's browser dirs, so nothing lands in the worktree or the user's caches. `enabled_tools`
  * is an allowlist: `browser_run_code_unsafe` (code in the server process, outside the sandbox) and
  * the file-reading tools are never offered. Worktree runs only (dev servers need the shell).
+ * On Windows the server's `USERPROFILE` is the same browser home (Windows tools read it, not HOME).
  */
 export function browserOverrides(
   browser: BrowserRun | undefined,
   autonomy: BuildInvocationWithBrowser["autonomy"],
   runDir: string,
+  platform: OsPlatform = process.platform,
 ): string[] {
   if (browser === undefined || autonomy !== "worktree") return [];
+  const { join } = isWindows(platform) ? path.win32 : path.posix;
   const key = `mcp_servers.${BROWSER_SERVER_NAME}`;
   const out = join(runDir, "browser");
+  const home = tomlString(join(runDir, "browser-home"));
+  const env = isWindows(platform) ? `{HOME=${home},USERPROFILE=${home}}` : `{HOME=${home}}`;
   const args = [
     browser.cliPath,
     "--isolated",
@@ -196,7 +221,7 @@ export function browserOverrides(
     "-c",
     `${key}.args=${tomlArray(args)}`,
     "-c",
-    `${key}.env={HOME=${tomlString(join(runDir, "browser-home"))}}`,
+    `${key}.env=${env}`,
     "-c",
     `${key}.cwd=${tomlString(out)}`,
     "-c",
@@ -214,9 +239,13 @@ export function browserOverrides(
  * `network` (optional, worktree only) opens the shell sandbox network ({@link networkOverride});
  * `browser` (optional, worktree only) adds the isolated browser server ({@link browserOverrides}).
  * Throws {@link DispatchError} for `direct` autonomy, a missing binary, or when a
- * required isolation feature is unknown to the installed CLI (fail closed).
+ * required isolation feature is unknown to the installed CLI (fail closed). On native Windows it
+ * always selects the elevated Windows sandbox ({@link CODEX_WINDOWS_SANDBOX}).
  */
-export function buildCodexInvocation(args: BuildInvocationWithBrowser): Invocation {
+export function buildCodexInvocation(
+  args: BuildInvocationWithBrowser,
+  platform: OsPlatform = process.platform,
+): Invocation {
   const { probe, autonomy, worktree, repoRoot, runDir, target, instance } = args;
   if (autonomy === "direct") {
     throw new DispatchError(
@@ -241,7 +270,10 @@ export function buildCodexInvocation(args: BuildInvocationWithBrowser): Invocati
     .filter((f) => known.has(f))
     .flatMap((f) => ["--disable", f]);
 
-  const outputFile = join(runDir, CODEX_OUTPUT_FILE);
+  const outputFile = (isWindows(platform) ? path.win32 : path.posix).join(
+    runDir,
+    CODEX_OUTPUT_FILE,
+  );
   const argv = [
     "exec",
     "--json",
@@ -252,12 +284,13 @@ export function buildCodexInvocation(args: BuildInvocationWithBrowser): Invocati
     ...disable,
     "-c",
     "agents.enabled=false",
+    ...windowsSandboxOverride(platform),
     "-c",
     untrustedProjectsOverride([worktree, repoRoot]),
     ...mcpOverrides(args.mcpServers ?? []),
     ...webOverride(args.web),
     ...networkOverride(args.network, autonomy),
-    ...browserOverrides(args.browser, autonomy, runDir),
+    ...browserOverrides(args.browser, autonomy, runDir, platform),
     "-C",
     worktree,
     "-m",
@@ -286,10 +319,11 @@ export function buildCodexInvocation(args: BuildInvocationWithBrowser): Invocati
     redactArgvIndexes: [],
     sideEffectGuards: [
       ...CODEX_SIDE_EFFECT_GUARDS,
+      ...(isWindows(platform) ? [CODEX_WINDOWS_SANDBOX_GUARD] : []),
       ...(args.mcpServers?.length ? ["codex-mcp-forwarded-only"] : []),
       ...(args.web ? ["codex-web-model-side-only"] : []),
       ...(net ? ["codex-network-opt-in"] : []),
-      ...(browserOverrides(args.browser, autonomy, runDir).length > 0
+      ...(browserOverrides(args.browser, autonomy, runDir, platform).length > 0
         ? ["codex-browser-isolated"]
         : []),
     ],

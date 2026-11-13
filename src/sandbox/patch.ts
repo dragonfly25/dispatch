@@ -102,6 +102,41 @@ function excludeSpec(path: string): string {
 }
 
 /**
+ * The bootstrapped paths that `add -A` could pick up, i.e. those git does not already ignore.
+ * A POSIX symlink never matches a `node_modules/` rule, but a Windows junction is a directory to
+ * git and does: `add` would then fail ("paths are ignored") on the exclude pathspec, and the
+ * pathspec is pointless anyway since ignored paths are never added.
+ */
+async function addableBootstrapped(
+  cwd: string,
+  paths: readonly string[],
+  env: Record<string, string>,
+): Promise<string[]> {
+  if (paths.length === 0) return [];
+  const out = await git(
+    cwd,
+    [
+      "ls-files",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "--directory",
+      "-z",
+      "--",
+      ...paths.map((p) => `:(literal)${p}`),
+    ],
+    env,
+  );
+  const ignored = new Set(
+    out
+      .split("\0")
+      .filter(Boolean)
+      .map((p) => p.replace(/\/+$/, "")),
+  );
+  return paths.filter((p) => !ignored.has(p.replaceAll("\\", "/").replace(/\/+$/, "")));
+}
+
+/**
  * Collects, filters, scans and checks the agent's changes, then writes the patch.
  * Never touches the worktree's real index nor the user's index or working tree.
  */
@@ -124,7 +159,8 @@ export async function buildPatch(opts: BuildPatchOptions): Promise<PatchResult> 
   const patchPath = join(runDir, PATCH_FILE);
   try {
     await git(wt.path, ["read-tree", wt.baseRef], env);
-    await git(wt.path, ["add", "-A", "--", ".", ...wt.bootstrapped.map(excludeSpec)], env);
+    const excluded = await addableBootstrapped(wt.path, wt.bootstrapped, env);
+    await git(wt.path, ["add", "-A", "--", ".", ...excluded.map(excludeSpec)], env);
     const raw = await git(
       wt.path,
       ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames", wt.baseRef],

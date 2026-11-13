@@ -34,3 +34,41 @@ export function restrictToCapable(
   });
   return { routing: { ...routing, instances }, excluded, remaining };
 }
+
+/** An instance taken out of routing, with the reason shown to the user. */
+export interface InstanceExclusion {
+  id: string;
+  reason: string;
+}
+
+/** Result of {@link excludeUnavailable}. */
+export interface UnavailableRestriction {
+  routing: RoutingConfig;
+  /** Enabled instances that were disabled, in config order, each with its reason. */
+  excluded: InstanceExclusion[];
+}
+
+/**
+ * Disables every enabled instance for which `reasonOf` returns a reason (e.g. an adapter that
+ * cannot run on this OS). Like {@link restrictToCapable}, the routing contract is unchanged: the
+ * filter trace shows "disabled", and the caller reports `excluded` with its reasons.
+ */
+export function excludeUnavailable(
+  routing: RoutingConfig,
+  reasonOf: (instance: RoutingConfig["instances"][number]) => string | null,
+): UnavailableRestriction {
+  const excluded: InstanceExclusion[] = [];
+  const instances = routing.instances.map((i) => {
+    if (!i.enabled) return i;
+    const reason = reasonOf(i);
+    if (reason === null) return i;
+    excluded.push({ id: i.id, reason });
+    return { ...i, enabled: false };
+  });
+  return { routing: excluded.length ? { ...routing, instances } : routing, excluded };
+}
+
+/** One-line text of `excluded` for a run or explain reason (empty string when none). */
+export function describeExclusions(excluded: readonly InstanceExclusion[]): string {
+  return excluded.map((e) => `${e.id}: ${e.reason}`).join("; ");
+}

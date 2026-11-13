@@ -5,17 +5,20 @@
  *
  * - The task travels in a 0600 file inside the run directory, never in argv or env.
  * - The supervisor beats every {@link SUPERVISOR_HEARTBEAT_MS} (the run's `updatedAt`), ignores
- *   SIGHUP, and turns SIGTERM/SIGINT (`cancel`) into a cancelled result after the child group is
- *   killed, its lease released and its worktree disposed.
+ *   SIGHUP, and turns SIGTERM/SIGINT or a cancel request file ({@link CANCEL_FILE}, written by
+ *   `cancel`) into a cancelled result after the child tree is killed, its lease released and its
+ *   worktree disposed. The file is the portable channel: on Windows a "SIGTERM" sent to another
+ *   process is TerminateProcess, which would skip that cleanup.
  * - Idempotency (red-team R4): the same key returns the existing run instead of starting another
  *   one, so a host that retries the redirected call does not double the work.
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { Clock, HostContext, RunRecord, RunResult, Task } from "../core/contracts.js";
+import { DispatchError } from "../core/errors.js";
 import { newRunId } from "../core/ids.js";
 import type { HostDetection } from "../platform/host.js";
 import { canonicalJson } from "../router/canonical.js";
@@ -25,6 +28,7 @@ import { withWeb } from "../web/index.js";
 import { type ExecuteOptions, executeTask, type RunnerDeps } from "./orchestrate.js";
 import { failedRun, toHost } from "./result.js";
 import { EVENTS_FILE, resolveRunDir } from "./runlog.js";
+import { spawnCommandFor } from "./spawn.js";
 
 /** File (in the run directory) that carries the task to the supervisor. */
 export const TASK_FILE = "task.json";
@@ -38,6 +42,30 @@ export const SUPERVISOR_HEARTBEAT_MS = 5_000;
 export const START_WAIT_MS = 2_000;
 /** Summary of a cancelled run. */
 export const CANCELLED = "cancelled";
+/** File (in the run directory) whose presence asks the supervisor to cancel the run. */
+export const CANCEL_FILE = "cancel.request";
+/** How often a supervisor looks for {@link CANCEL_FILE}. */
+export const CANCEL_POLL_MS = 250;
+
+/**
+ * Asks the supervisor of the run in `runDir` to cancel (writes {@link CANCEL_FILE}, 0600). False
+ * when the file could not be written (e.g. the run directory is gone).
+ */
+export function requestCancel(runDir: string, now: Date = new Date()): boolean {
+  try {
+    writeFileSync(join(runDir, CANCEL_FILE), `${JSON.stringify({ at: now.toISOString() })}\n`, {
+      mode: 0o600,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a cancel was requested for the run in `runDir`. */
+export function cancelRequested(runDir: string): boolean {
+  return existsSync(join(runDir, CANCEL_FILE));
+}
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -73,7 +101,7 @@ export interface DetachPayload {
 /** Store operations used to start a detached run. */
 export type DetachStore = Pick<
   SqliteStateStore,
-  "recordRun" | "getRun" | "updateRun" | "getOrCreateIdempotent"
+  "recordRun" | "getRun" | "updateRun" | "getOrCreateIdempotent" | "setRunDir"
 >;
 
 /** Dependencies of {@link startDetached}. */
@@ -170,18 +198,28 @@ export async function startDetached(
     pid: null,
     result: null,
   });
+  store.setRunDir(runId, runDir); // `cancel` finds the run dir from any cwd
 
-  const [command = process.execPath, ...args] = deps.cli ?? defaultCli();
+  const [cliBinary = process.execPath, ...cliArgs] = deps.cli ?? defaultCli();
   const env = Object.fromEntries(
     Object.entries(deps.env).filter((e): e is [string, string] => e[1] !== undefined),
   );
   const out = openSync(join(runDir, SUPERVISOR_LOG), "a", 0o600);
   let spawnError: Error | null = null;
   try {
+    // Inside the try: a binary Windows refuses to start (binary.unspawnable / not_found) ends the
+    // run like a spawn error instead of leaving it "running" with no supervisor.
+    const { command, args } = spawnCommandFor(cliBinary, cliArgs, process.platform, undefined, {
+      env,
+    });
+    // detached on every OS: the supervisor must outlive this process (Windows: no console of its
+    // own is shown thanks to windowsHide).
     const child = spawn(command, [...args, SUPERVISE_COMMAND, runId, "--run-dir", runDir], {
       cwd: opts.repoPath,
       env,
       detached: true,
+      shell: false,
+      windowsHide: true,
       stdio: ["ignore", out, out],
     });
     child.on("error", (err) => {
@@ -191,6 +229,9 @@ export async function startDetached(
     if (child.pid !== undefined) {
       await store.updateRun(runId, { pid: child.pid, updatedAt: createdAt });
     }
+  } catch (err) {
+    if (!(err instanceof DispatchError)) throw err;
+    spawnError = err;
   } finally {
     closeSync(out);
   }
@@ -237,13 +278,16 @@ export interface SuperviseDeps {
   signals?: Pick<NodeJS.Process, "on" | "off">;
   /** Default {@link SUPERVISOR_HEARTBEAT_MS}. */
   heartbeatMs?: number;
+  /** How often {@link CANCEL_FILE} is checked. Default {@link CANCEL_POLL_MS}. */
+  cancelPollMs?: number;
   /** Called with the final result (errors are ignored). */
   onFinished?(payload: DetachPayload, result: RunResult): void;
 }
 
 /**
  * Body of `__supervise <runId>`: reads (and deletes) the task file, runs the task, beats while it
- * runs and records the final result. SIGHUP is ignored; SIGTERM/SIGINT cancel the run.
+ * runs and records the final result. SIGHUP is ignored (Node also emits it on Windows when the
+ * console closes); SIGTERM/SIGINT and a {@link CANCEL_FILE} request cancel the run.
  */
 export async function superviseRun(
   deps: SuperviseDeps,
@@ -257,8 +301,12 @@ export async function superviseRun(
   const controller = new AbortController();
   let cancelled = false;
   const onTerm = () => {
+    if (cancelled) return;
     cancelled = true;
     controller.abort();
+  };
+  const checkCancel = () => {
+    if (cancelRequested(runDir)) onTerm();
   };
   const ignore = () => {};
   signals.on("SIGHUP", ignore);
@@ -268,6 +316,8 @@ export async function superviseRun(
   const beat = () => runner.store.updateRun(runId, {}).catch(() => {});
   await runner.store.updateRun(runId, { pid: process.pid });
   const timer = setInterval(beat, deps.heartbeatMs ?? SUPERVISOR_HEARTBEAT_MS);
+  checkCancel(); // a cancel issued while the supervisor was starting
+  const cancelTimer = setInterval(checkCancel, deps.cancelPollMs ?? CANCEL_POLL_MS);
   try {
     const opts: ExecuteOptions = {
       repoPath: payload.repoPath,
@@ -294,6 +344,7 @@ export async function superviseRun(
     return result;
   } finally {
     clearInterval(timer);
+    clearInterval(cancelTimer);
     signals.off("SIGHUP", ignore);
     signals.off("SIGTERM", onTerm);
     signals.off("SIGINT", onTerm);

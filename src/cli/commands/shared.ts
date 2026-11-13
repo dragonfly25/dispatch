@@ -8,6 +8,7 @@ import type { ResolveFs } from "../../platform/resolve.js";
 import type { QuotaReaderRegistry } from "../../quota/reader.js";
 import type { SignalTarget } from "../../runner/lifecycle.js";
 import type { RunnerDeps } from "../../runner/orchestrate.js";
+import { pidExists } from "../../runner/tree.js";
 import type { CliIo } from "../io.js";
 
 /** Test seams of `dispatch doctor`. */
@@ -54,14 +55,12 @@ export interface CliDeps {
 export const realSleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Default {@link CliDeps.isAlive}: signal 0 (a process we may not signal still exists). */
+/**
+ * Default {@link CliDeps.isAlive}: signal 0 (a process we may not signal still exists). Node maps
+ * signal 0 to an existence check on Windows too (EPERM there likewise means "exists").
+ */
 export function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
+  return pidExists(pid);
 }
 
 /** Per-command options of {@link withContext}. */

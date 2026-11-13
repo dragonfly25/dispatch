@@ -125,7 +125,8 @@ Decided in planning (details in docs/PLAN.md §7):
 12. `reserve_for_host` dropped; `unspecified_model` default `balanced` (session model often unobservable).
 13. Commands added: setup, trust, wait, cancel, gc; `watch` → `logs --follow`; `status --history` dropped.
 14. UC8 shadow results are decisions recomputed on recorded snapshots; consumption labelled estimated.
-15. State in SQLite. 16. Windows unsupported. 17. `doctor` spends no quota unless `--live`.
+15. State in SQLite. 16. Windows unsupported (superseded after v0.1.0: native Windows support, see
+    [Windows support](#windows-support)). 17. `doctor` spends no quota unless `--live`.
 
 Taken during execution:
 18. agy read-only is enforced by headless auto-deny (`--mode plan` is ineffective); read-only runs with a
@@ -247,6 +248,66 @@ Taken during execution:
 - **Risk:** a forwarded server runs as the user outside the child's sandbox, driven by an
   unsupervised agent (docs/security.md T13). Not live-verified: `env_http_headers` and
   `shell_environment_policy.exclude` (keys taken from the codex 0.167 config schema).
+
+## Windows support
+
+Branch `feat/windows-support` (after v0.1.0). Dispatch runs natively on win32; WSL stays on the
+Linux path. Developed by six parallel agents with disjoint file ownership around a shared
+`src/platform/os.ts`. **Not yet run on a real Windows machine**: every Windows branch is unit-tested
+on macOS with an injected `platform: "win32"`, and CI gains `windows-latest` test and pack-smoke
+jobs. Host and CLI facts with sources: `docs/spikes/windows.md`.
+
+What changes on Windows:
+- **Platform and binaries.** `win32` passes the platform gate. Binaries are resolved through
+  `PATHEXT` (`.com/.exe/.bat/.cmd`, never extensionless or `.ps1`) in PATH, `%USERPROFILE%\.local\bin`,
+  `%APPDATA%\npm`, the npm prefix and node's dir. `toSpawnCommand` (`src/platform/spawnable.ts`)
+  unwraps npm/pnpm cmd-shims to `node <script>`; other batch files are refused
+  (`binary.unspawnable`). Nothing is ever spawned through `cmd.exe` or a shell.
+- **Processes.** No process groups: trees are stopped with `%SystemRoot%\System32\taskkill.exe /T`
+  then `/T /F` (`src/runner/tree.ts`). Detached-run cancel uses a `cancel.request` file in the run
+  dir that the supervisor polls every 250 ms (also written on POSIX, where SIGTERM is still sent);
+  `taskkill /T /F` after the grace. The run dir is stored with the run (state migration v2,
+  nullable `runs.run_dir`), so `cancel` works from any cwd; an older Dispatch refuses a v2 database.
+  Supervisor liveness uses PowerShell `Get-Process` start time.
+- **Bare commands.** On Windows a bare name such as `git` is resolved to an absolute path (absolute
+  PATH entries and well-known dirs, never the cwd) before it is spawned, so a `git.exe` planted in a
+  worktree or a cloned repo is never run; an unresolvable name fails (`binary.not_found`). Quota
+  readers use the instance's resolved binary.
+- **Child env.** The allow-list adds `WINDOWS_BASE_ENV` (system dirs, profile, temp, `PATHEXT`);
+  names match case-insensitively and each variable is emitted once (`Path`/`PATH`).
+- **Files.** Home is `HOME` → `USERPROFILE` → `HOMEDRIVE`+`HOMEPATH`. Owner-only checks pass on
+  Windows (mode bits do not reflect ACLs). Trust files: `lstat` before and `dev`/`ino` compare after
+  open instead of `O_NOFOLLOW`. Paths compare case-insensitively. Worktree bootstrap links
+  directories as junctions, refuses files, and removes every link before deleting a worktree so
+  `git worktree remove` cannot follow a junction into the checkout.
+- **Adapters.** Delegated `claude` and `agy` are refused (`adapter.platform_unsupported`): Claude
+  Code has no OS sandbox on native Windows and `failIfUnavailable` would fail every run; agy is
+  unverified. Routing excludes them like a disabled instance (run log event `platform.unsupported`,
+  "Unavailable" in `explain`), so the fallback chain moves on; `doctor` warns. Codex gets `-c windows.sandbox="elevated"` (without a mode Codex runs commands
+  unsandboxed; `--ignore-user-config` drops the user's own setting). `doctor` warns that
+  `codex sandbox setup --elevated` must run once as administrator.
+- **Hosts.** Launcher `~/.dispatch/bin/dispatch.cmd` (paths with `" % ! ^ & | < >` are rejected,
+  not escaped). Claude Code hooks use the exec form (`command` + `args`, Claude Code >= 2.1.139);
+  Codex hooks run a PowerShell script with single-quoted paths. Agents and skills call `node.exe`
+  + `cli.mjs` directly. **No Codex rules file on Windows**: a rule cannot match a quoted path in
+  PowerShell, and the batch launcher would let cmd.exe re-parse the model's arguments outside the
+  sandbox (T11). Codex-hosted calls stay in the sandbox and need per-call approval.
+- **Codex SKILL.md fix (all platforms):** it named `--prompt-file`, which does not exist; now
+  `--task-file`.
+
+Residual risks and open checks (Windows only):
+- Not executed on Windows yet: taskkill/PowerShell output, detached supervisor survival, junction
+  removal, the PowerShell hook's stdin forwarding, Codex shell selection, Playwright paths.
+- No Job Objects: background processes a child leaves behind after it exits on its own are not
+  reaped; a hard kill of Dispatch does not kill its children; `execTool` timeouts kill only the
+  top process.
+- Handoff records, run dirs and the state DB rely on the user-profile ACL instead of mode bits.
+- What headless `codex exec` does when the elevated sandbox was never set up (error, UAC prompt or
+  hang) is unknown.
+- A user typing `dispatch.cmd` in a terminal still goes through cmd's `%*` re-parse (their own
+  input, not a model's).
+- A missing node or hook file gives a visible, non-blocking hook error (POSIX exits silently).
+- Unknown hand-written `.cmd` wrappers are refused; the user must configure the `.exe`.
 
 ## Process notes
 

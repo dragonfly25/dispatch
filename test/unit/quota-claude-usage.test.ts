@@ -352,6 +352,7 @@ describe("claude /usage reader (fake claude) [UC11]", () => {
     const { reader, spawner, fakes } = setup({ "claude:usage": { variant: "changed_format" } });
     const dir = mkdtempSync(join(tmpdir(), "dispatch-claude-usage-db-"));
     const store = SqliteStateStore.open(join(dir, "dispatch.db"), { clock });
+    let open = true;
     try {
       const provider = new DefaultQuotaProvider({
         store,
@@ -369,6 +370,7 @@ describe("claude /usage reader (fake claude) [UC11]", () => {
       expect(stdin).toContain("34 percent");
       expect(logged).toBe(stdin);
       store.close();
+      open = false;
       const db = readFileSync(join(dir, "dispatch.db")).toString("latin1");
       const health = JSON.stringify(provider.readerHealth());
       for (const p of PRIVATE) {
@@ -378,6 +380,8 @@ describe("claude /usage reader (fake claude) [UC11]", () => {
         expect(health).not.toContain(p);
       }
     } finally {
+      // Windows cannot unlink an open database file.
+      if (open) store.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });

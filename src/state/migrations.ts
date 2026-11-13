@@ -101,6 +101,12 @@ CREATE TABLE overrides (
 );
 `,
   },
+  {
+    // Where a run's directory lives (cancel.request, events.jsonl), so `cancel` finds it from any
+    // cwd. Nullable: rows written before v2 keep working (cancel falls back to the cwd lookup).
+    version: 2,
+    sql: "ALTER TABLE runs ADD COLUMN run_dir TEXT;",
+  },
 ];
 
 /** Latest schema version known to this build. */

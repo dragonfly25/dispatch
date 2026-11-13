@@ -3,6 +3,9 @@ import { StringDecoder } from "node:string_decoder";
 import { systemClock } from "../core/clock.js";
 import type { Clock, Spawner, SpawnRequest, SpawnResult } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
+import type { OsPlatform } from "../platform/os.js";
+import { spawnCommandFor, type ToSpawn } from "./spawn.js";
+import { type ProcessTree, processTree, spawnDetachedFor } from "./tree.js";
 
 /** Longest line (in UTF-16 code units) handed to `onLine`; the rest of the line is dropped. */
 export const MAX_LINE_LENGTH = 1024 * 1024;
@@ -22,6 +25,12 @@ export interface ProcessSpawnerOptions {
   clock?: Pick<Clock, "monotonicMs">;
   /** Overrides {@link MAX_LINE_LENGTH}. */
   maxLineLength?: number;
+  /** OS whose spawn shape and tree termination are used. Default `process.platform`. */
+  platform?: OsPlatform;
+  /** Builds the {@link ProcessTree} of a spawned pid. Default {@link processTree}. */
+  tree?: (pid: number) => ProcessTree;
+  /** Spawn-shape conversion (tests). Default `toSpawnCommand`. */
+  toSpawn?: ToSpawn;
 }
 
 /** Splits a text stream into lines: handles partial chunks, CRLF and over-long lines. */
@@ -71,11 +80,11 @@ class LineSplitter {
   }
 }
 
-/** A running child's process group, as seen by the parent-signal handlers. */
+/** A running child's process tree, as seen by the parent-signal handlers. */
 interface ActiveGroup {
-  /** SIGTERM now, SIGKILL after the grace period; resolves when the group is gone. */
+  /** Polite request now, forced after the grace period; resolves when the tree is gone. */
   reap(): Promise<void>;
-  /** SIGKILL immediately and synchronously. */
+  /** Forced, immediately and synchronously. */
   killNow(): void;
 }
 
@@ -127,29 +136,29 @@ function unregister(group: ActiveGroup): void {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Sends `sig` to the whole process group of `pgid`; false when the group no longer exists. */
-function signalGroup(pgid: number, sig: NodeJS.Signals | 0): boolean {
-  try {
-    process.kill(-pgid, sig);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Real {@link Spawner}: runs the child as the leader of a new process group (`setsid` semantics via
- * `detached: true`), without a shell and with exactly `req.env`. On timeout, abort, parent SIGINT or
- * SIGTERM the whole group gets SIGTERM, and SIGKILL after `killGraceMs`. Strays left behind by a
- * child that exited on its own are reaped the same way, so no orphans survive a finished spawn.
+ * Real {@link Spawner}: runs the child without a shell and with exactly `req.env` (a Windows npm
+ * `.cmd` shim is unwrapped by `toSpawnCommand`). On POSIX the child leads a new process group
+ * (`setsid` semantics via `detached: true`); on timeout, abort, parent SIGINT or SIGTERM the whole
+ * group gets SIGTERM, and SIGKILL after `killGraceMs`. Strays left behind by a child that exited
+ * on its own are reaped the same way, so no orphans survive a finished spawn. On Windows the tree
+ * is ended with `taskkill /T` (then `/T /F`, at once when the polite request is refused); strays
+ * of a child that already exited cannot be found there (see `tree.ts`).
  */
 export class ProcessSpawner implements Spawner {
   private readonly clock: Pick<Clock, "monotonicMs">;
   private readonly maxLineLength: number;
+  private readonly platform: OsPlatform;
+  private readonly tree: (pid: number) => ProcessTree;
+  private readonly toSpawn: ToSpawn | undefined;
 
   constructor(opts: ProcessSpawnerOptions = {}) {
     this.clock = opts.clock ?? systemClock;
     this.maxLineLength = opts.maxLineLength ?? MAX_LINE_LENGTH;
+    this.platform = opts.platform ?? process.platform;
+    const platform = this.platform;
+    this.tree = opts.tree ?? ((pid) => processTree(pid, { platform }));
+    this.toSpawn = opts.toSpawn;
   }
 
   spawn(req: SpawnRequest): Promise<SpawnResult> {
@@ -168,10 +177,13 @@ export class ProcessSpawner implements Spawner {
     const graceMs = req.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
     const startedAt = clock.monotonicMs();
 
-    const child: ChildProcess = spawn(req.binary, [...req.argv], {
+    const cmd = spawnCommandFor(req.binary, req.argv, this.platform, this.toSpawn, {
+      env: req.env,
+    });
+    const child: ChildProcess = spawn(cmd.command, cmd.args, {
       cwd: req.cwd,
       env: { ...req.env },
-      detached: true,
+      detached: spawnDetachedFor(this.platform),
       shell: false,
       windowsHide: true,
       stdio: [req.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -181,17 +193,19 @@ export class ProcessSpawner implements Spawner {
     let timer: NodeJS.Timeout | undefined;
     let terminating: Promise<void> | undefined;
 
-    const pgid = child.pid;
-    /** SIGTERM the group, wait for it to vanish, SIGKILL after the grace. Idempotent. */
+    const tree = child.pid === undefined ? undefined : this.tree(child.pid);
+    let exited = false;
+    /** Polite request to the tree, wait for it to vanish, force after the grace. Idempotent. */
     const reap = (): Promise<void> => {
-      if (pgid === undefined) return Promise.resolve();
+      // After the root's exit only a POSIX group can still be addressed (Windows pids recycle).
+      if (tree === undefined || (exited && !tree.outlivesRoot)) return Promise.resolve();
       terminating ??= (async () => {
-        if (!signalGroup(pgid, 0)) return;
-        signalGroup(pgid, "SIGTERM");
-        const deadline = clock.monotonicMs() + graceMs;
-        while (signalGroup(pgid, 0) && clock.monotonicMs() < deadline) await sleep(POLL_MS);
-        if (signalGroup(pgid, "SIGKILL")) {
-          for (let i = 0; i < 200 && signalGroup(pgid, 0); i++) await sleep(POLL_MS);
+        if (!tree.alive()) return;
+        const delivered = tree.terminate();
+        const deadline = clock.monotonicMs() + (delivered ? graceMs : 0);
+        while (tree.alive() && clock.monotonicMs() < deadline) await sleep(POLL_MS);
+        if (tree.kill()) {
+          for (let i = 0; i < 200 && tree.alive(); i++) await sleep(POLL_MS);
         }
       })();
       return terminating;
@@ -199,7 +213,7 @@ export class ProcessSpawner implements Spawner {
     const group: ActiveGroup = {
       reap,
       killNow: () => {
-        if (pgid !== undefined) signalGroup(pgid, "SIGKILL");
+        if (tree !== undefined && !(exited && !tree.outlivesRoot)) tree.kill();
       },
     };
 
@@ -269,6 +283,7 @@ export class ProcessSpawner implements Spawner {
     });
 
     child.on("exit", (exitCode, signal) => {
+      exited = true;
       if (timer) clearTimeout(timer);
       void (async () => {
         await reap(); // strays in the group

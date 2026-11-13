@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { DispatchError } from "../core/errors.js";
+import { envKey, type OsPlatform } from "../platform/os.js";
+import { spawnCommandFor, type ToSpawn } from "./spawn.js";
 
 /** Options for {@link execTool}. */
 export interface ExecToolOptions {
@@ -10,6 +12,10 @@ export interface ExecToolOptions {
   input?: string;
   /** Kills the child (SIGKILL) after this many milliseconds. */
   timeoutMs?: number;
+  /** OS whose spawn shape and env-name rules apply (tests). Default `process.platform`. */
+  platform?: OsPlatform;
+  /** Spawn-shape conversion (tests). Default `toSpawnCommand`. */
+  toSpawn?: ToSpawn;
 }
 
 /** Outcome of a finished tool. `code` is -1 when the child died from a signal (e.g. timeout). */
@@ -22,6 +28,24 @@ export interface ExecToolResult {
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 
+type Env = Readonly<Record<string, string | undefined>>;
+
+/**
+ * `base` with `extra` layered over it. On Windows a variable is replaced under the name it already
+ * has in `base` (`Path`, not a second `PATH`), so the child never receives two spellings.
+ */
+export function layerEnv(
+  base: Env,
+  extra: Readonly<Record<string, string>> | undefined,
+  platform: OsPlatform = process.platform,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = { ...base };
+  for (const [k, v] of Object.entries(extra ?? {})) {
+    out[envKey(out, k, platform)] = v;
+  }
+  return out;
+}
+
 /**
  * Runs a short-lived tool (git, ...) without a shell. A non-zero exit is NOT an error: it is
  * reported through `code`. Only a failure to spawn (missing binary, bad cwd) rejects.
@@ -32,12 +56,17 @@ export function execTool(
   opts: ExecToolOptions,
 ): Promise<ExecToolResult> {
   return new Promise((resolve, reject) => {
+    const platform = opts.platform ?? process.platform;
+    const env = layerEnv(process.env, opts.env, platform);
+    // A bare name resolves against the PATH the child gets, not only this process's.
+    const spawnable = spawnCommandFor(cmd, args, platform, opts.toSpawn, { env });
     const child = execFile(
-      cmd,
-      [...args],
+      spawnable.command,
+      spawnable.args,
       {
         cwd: opts.cwd,
-        env: { ...process.env, ...opts.env },
+        env,
+        shell: false,
         timeout: opts.timeoutMs,
         killSignal: "SIGKILL",
         maxBuffer: MAX_BUFFER,

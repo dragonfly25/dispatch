@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{NODE_PATH}}",
+            "args": ["{{HOOK_PATH}}", "claude-code", "SessionStart"],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{NODE_PATH}}",
+            "args": ["{{HOOK_PATH}}", "claude-code", "PreToolUse"],
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

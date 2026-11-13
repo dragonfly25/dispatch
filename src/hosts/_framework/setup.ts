@@ -7,6 +7,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { EditOp, HostIntegration, HostPlanContext } from "../../core/contracts.js";
 import { type InstallPaths, renderLauncherScript } from "../../platform/launcher.js";
+import { launcherFileName, type OsPlatform } from "../../platform/os.js";
 import { applyOp, type CommandRunner, parseCliSpec, revertEntry } from "./edits.js";
 import { sha256 } from "./fsutil.js";
 import { parseJsonEntrySpec } from "./json-entry.js";
@@ -20,6 +21,8 @@ export interface SetupContext {
   hosts: readonly HostIntegration[];
   /** Dispatch-owned tools to provision (e.g. the isolated browser), planned after the launcher. */
   tools?: readonly { id: string; ops: EditOp[] }[];
+  /** Launcher flavour (`dispatch` sh script or `dispatch.cmd`); default `process.platform`. */
+  platform?: OsPlatform;
 }
 
 /** A planned setup: the ops in apply order and the preview shown before anything is written. */
@@ -37,26 +40,29 @@ export interface SetupPlan {
   groups: { host: string; ops: EditOp[] }[];
 }
 
-/** Absolute path of the launcher, `<dispatchHome>/bin/dispatch`. */
-export function launcherPath(dispatchHome: string): string {
-  return join(dispatchHome, "bin", "dispatch");
+/** Absolute path of the launcher, `<dispatchHome>/bin/dispatch` (Windows: `dispatch.cmd`). */
+export function launcherPath(
+  dispatchHome: string,
+  platform: OsPlatform = process.platform,
+): string {
+  return join(dispatchHome, "bin", launcherFileName(platform));
 }
 
 /** The {@link HostPlanContext} handed to host integrations. */
 export function hostPlanContext(ctx: SetupContext): HostPlanContext {
   return {
     home: ctx.home,
-    launcherPath: launcherPath(ctx.dispatchHome),
+    launcherPath: launcherPath(ctx.dispatchHome, ctx.platform),
     nodePath: ctx.install.nodePath,
     hookPath: ctx.install.hookPath,
   };
 }
 
-/** The new-file op that installs the launcher (mode 0755). */
+/** The new-file op that installs the launcher (mode 0755; the mode is a no-op on Windows). */
 export function launcherOp(ctx: SetupContext): EditOp {
-  const content = renderLauncherScript(ctx.install);
+  const content = renderLauncherScript(ctx.install, ctx.platform);
   return {
-    file: launcherPath(ctx.dispatchHome),
+    file: launcherPath(ctx.dispatchHome, ctx.platform),
     kind: "new-file",
     signature: "dispatch-launcher",
     content,

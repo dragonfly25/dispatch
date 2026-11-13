@@ -479,7 +479,7 @@ Token-saving rules:
 13. **Command set.** Added `setup`, `trust`, `wait`, `cancel` and `gc`. `watch` is replaced by `logs --follow`, and `status --history` is dropped.
 14. **UC8 semantics.** Shadow mode recomputes decisions on real recorded snapshots; consumption figures are labelled "estimated".
 15. **State storage** uses SQLite.
-16. **Windows** is unsupported in v0.1.
+16. **Windows** is unsupported in v0.1. *Amended after v0.1.0: native Windows support (STATUS.md, "Windows support").*
 17. **`doctor` spends no quota by default.** The live task runs only with `--live`.
 
 ## 8. Definition of done

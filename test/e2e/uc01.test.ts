@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { adapterPlatformBlocker } from "../../src/adapters/platform.js";
 import {
   createWorld,
   parseJson,
@@ -119,12 +120,21 @@ describe("[UC1] first setup on an existing repo", () => {
 
     const doctor = w.dispatch(["doctor", "--json"]);
     expect(doctor.code, doctor.stdout + doctor.stderr).toBe(0);
-    const report = parseJson<{ checks: { id: string; status: string }[] }>(doctor);
+    const report = parseJson<{ checks: { id: string; status: string; message: string }[] }>(doctor);
     const failing = report.checks.filter((c) => c.status === "fail");
     expect(failing).toEqual([]);
     const ids = report.checks.map((c) => c.id);
-    for (const id of ["claude.binary", "codex.binary", "antigravity.binary", "repo.trust"]) {
+    // Native Windows: claude and agy cannot run there; doctor warns (with the reason) instead of
+    // probing their binaries, and the runner routes around them.
+    const blocked = process.platform === "win32" ? ["claude", "antigravity"] : [];
+    const usable = ["claude", "codex", "antigravity"].filter((p) => !blocked.includes(p));
+    for (const id of [...usable.map((p) => `${p}.binary`), "repo.trust"]) {
       expect(ids).toContain(id);
+    }
+    for (const p of blocked) {
+      const check = report.checks.find((c) => c.id === `${p}.platform`);
+      expect(check?.status, p).toBe("warn");
+      expect(check?.message).toContain(adapterPlatformBlocker(p, "win32"));
     }
     expect(report.checks.find((c) => c.id === "claude-code.plugin")?.status).toBe("ok");
 
@@ -132,8 +142,11 @@ describe("[UC1] first setup on an existing repo", () => {
     const live = w.dispatch(["doctor", "--live", "--yes", "--json"]);
     expect(live.code, live.stdout + live.stderr).toBe(0);
     const liveReport = parseJson<{ checks: { id: string; status: string }[] }>(live);
-    for (const id of ["live.claude", "live.codex", "live.antigravity"]) {
-      expect(liveReport.checks.find((c) => c.id === id)?.status, id).toBe("ok");
+    for (const p of usable) {
+      expect(liveReport.checks.find((c) => c.id === `live.${p}`)?.status, p).toBe("ok");
+    }
+    for (const p of blocked) {
+      expect(liveReport.checks.find((c) => c.id === `live.${p}`)?.status, p).toBe("warn");
     }
 
     const status = w.dispatch(["status", "--json"]);
@@ -200,7 +213,8 @@ describe("[UC1] first setup on an existing repo", () => {
     expect(config).toMatch(/plan: plus/);
     expect(config).toMatch(/tos_acknowledged: true/);
     expect(config).toMatch(/^\s*#/m); // commented, not a bare dump
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows: privacy comes from the profile ACL, mode bits are not meaningful.
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
 
     // The answers are what the rest of Dispatch sees.
     const status = parseJson<{ profile: string; instances: { id: string; enabled: boolean }[] }>(

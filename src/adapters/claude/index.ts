@@ -9,6 +9,7 @@
  *   `claude` (internal parse state).
  */
 import type { Adapter, AdapterCapabilities } from "../../core/contracts.js";
+import type { OsPlatform } from "../../platform/os.js";
 import { finalizeClaude } from "./finalize.js";
 import { buildClaudeInvocation } from "./invocation.js";
 import { parseClaudeLine } from "./parse.js";
@@ -49,14 +50,19 @@ export const CLAUDE_CAPABILITIES: AdapterCapabilities = {
 
 /**
  * Creates the claude adapter. Pass `pool` to report the billing pool of the instance it serves
- * (`ProviderInstance.pool`); it defaults to "subscription".
+ * (`ProviderInstance.pool`); it defaults to "subscription". `platform` (default
+ * `process.platform`) pins the OS the probe env and the invocation are built for (native Windows
+ * is refused); tests use it to check the POSIX argv on any host.
  */
-export function createClaudeAdapter(opts: { pool?: AdapterCapabilities["pool"] } = {}): Adapter {
+export function createClaudeAdapter(
+  opts: { pool?: AdapterCapabilities["pool"]; platform?: OsPlatform } = {},
+): Adapter {
   const caps: AdapterCapabilities = { ...CLAUDE_CAPABILITIES, pool: opts.pool ?? "subscription" };
+  const { platform } = opts;
   return {
     caps,
-    probe: (instance, deps) => probeClaude(instance, deps, caps.cliRange),
-    buildInvocation: buildClaudeInvocation,
+    probe: (instance, deps) => probeClaude(instance, deps, caps.cliRange, process.env, platform),
+    buildInvocation: (args) => buildClaudeInvocation(args, platform),
     parseLine: parseClaudeLine,
     finalize: finalizeClaude,
   };

@@ -77,10 +77,13 @@ describe("buildPatch: collect [UC13]", () => {
     expect(r.rejected).toEqual([]);
     expect(r.patch).toMatchObject({ applies: true, needsReview: false, rejectedPaths: [] });
     expect(r.patch.path).toBe(join(s.runDir, "patch.diff"));
-    expect((await stat(r.patch.path)).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") expect((await stat(r.patch.path)).mode & 0o777).toBe(0o600);
     expect(r.patch.diffstat).toContain("new/file.ts");
     expect(r.patch.diffstat).toContain("rename {old => new}/name.txt (100%)");
-    expect(r.patch.diffstat).toContain("mode change 100644 => 100755 run.sh");
+    // Windows: git runs with core.fileMode=false there, so a chmod is not a change.
+    const modes = process.platform !== "win32";
+    if (modes) expect(r.patch.diffstat).toContain("mode change 100644 => 100755 run.sh");
     expect(r.files.map((f) => `${f.status} ${f.path}`).sort()).toEqual([
       "A img.bin",
       "A new/file.ts",
@@ -88,7 +91,7 @@ describe("buildPatch: collect [UC13]", () => {
       "D gone.txt",
       "D old/name.txt",
       "M a.txt",
-      "M run.sh",
+      ...(modes ? ["M run.sh"] : []),
     ]);
     const text = await readFile(r.patch.path, "utf8");
     expect(text).toContain("GIT binary patch");
@@ -103,7 +106,9 @@ describe("buildPatch: collect [UC13]", () => {
     expect(await readFile(join(s.repo, "img.bin"))).toEqual(await readFile(join(w, "img.bin")));
     expect(existsSync(join(s.repo, "gone.txt"))).toBe(false);
     expect(await readFile(join(s.repo, "new/name.txt"), "utf8")).toBe(big);
-    expect((await stat(join(s.repo, "run.sh"))).mode & 0o111).not.toBe(0);
+    if (process.platform !== "win32") {
+      expect((await stat(join(s.repo, "run.sh"))).mode & 0o111).not.toBe(0);
+    }
   });
 
   it("includes changes the agent committed inside the worktree", async () => {
@@ -273,6 +278,19 @@ describe("buildPatch: filter [SEC-patch]", () => {
     expect(r.empty).toBe(true);
     expect(r.patch.rejectedPaths).toEqual(["db/migrations/002.sql"]);
     expect(existsSync(r.patch.path)).toBe(false);
+  });
+
+  it("a bootstrapped path git already ignores (a Windows junction is a directory to git) is no error", async () => {
+    const s = await setup();
+    // A real directory matched by `node_modules/`, as git sees a junction on Windows.
+    await put(s.wt.path, { "node_modules/pkg/index.js": "x\n", "a.txt": "edited\n" });
+    const r = await buildPatch({
+      worktree: { ...s.wt, bootstrapped: ["node_modules"] },
+      repoPath: s.repo,
+      runDir: s.runDir,
+      policy: noPolicy,
+    });
+    expect(r.files.map((f) => f.path)).toEqual(["a.txt"]);
   });
 
   it("excludes bootstrapped symlinks from the patch", async () => {

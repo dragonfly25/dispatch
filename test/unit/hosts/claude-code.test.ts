@@ -17,9 +17,12 @@ import {
   createClaudeCodeIntegration,
   PLUGIN_ID,
 } from "../../../src/hosts/claude-code/integration.js";
+import { cliPathBesideHook, hostInvocation } from "../../../src/platform/invocation.js";
+import { launcherFileName } from "../../../src/platform/os.js";
 import { createCommandRunner } from "../../../src/runner/command.js";
 import { fakeClaudeRunner } from "../../support/fake-host.js";
 import { createFakes, type FakesContext } from "../../support/index.js";
+import { shimFileName } from "../../support/shims.js";
 import { type TempHome, tempHome } from "../../support/temp.js";
 
 let h: TempHome;
@@ -31,6 +34,11 @@ afterEach(() => {
 });
 
 const NONE = { isExecutableFile: () => false, realpath: (p: string) => p };
+const WIN = process.platform === "win32";
+/** A fixture absolute path in the running platform's form (`/a/b` or `C:\\a\\b`). */
+const abs = (p: string): string => (WIN ? `C:${p.replaceAll("/", "\\")}` : p);
+const NODE = abs("/opt/node/bin/node");
+const HOOK = abs("/opt/d/hook.mjs");
 
 /** A claude integration whose `claude` is the fake on PATH (or nothing when `fs` is NONE). */
 function host(extraEnv: Record<string, string> = {}, withFake = true): HostIntegration {
@@ -39,16 +47,16 @@ function host(extraEnv: Record<string, string> = {}, withFake = true): HostInteg
   return createClaudeCodeIntegration({ env: () => env, ...(withFake ? {} : { fs: NONE }) });
 }
 
-function ctx(hosts: HostIntegration[], hookPath = "/opt/d/hook.mjs"): SetupContext {
+function ctx(hosts: HostIntegration[], hookPath = HOOK): SetupContext {
   return {
     home: h.home,
     dispatchHome: h.dispatchHome,
-    install: { nodePath: "/opt/node/bin/node", cliPath: "/opt/d/cli.mjs", hookPath },
+    install: { nodePath: NODE, cliPath: abs("/opt/d/cli.mjs"), hookPath },
     hosts,
   };
 }
 
-const claudeBin = (): string => join(fakes?.binDir ?? "", "claude");
+const claudeBin = (): string => join(fakes?.binDir ?? "", shimFileName("claude"));
 const bundle = (): string => join(h.dispatchHome, "hosts", "claude-code");
 
 describe("claude-code plan and setup [UC1]", () => {
@@ -72,7 +80,7 @@ describe("claude-code plan and setup [UC1]", () => {
     expect(plan.preview).toBe(
       [
         "Dispatch setup will make these changes:",
-        `  - create ${join(h.dispatchHome, "bin", "dispatch")} (mode 0755)`,
+        `  - create ${join(h.dispatchHome, "bin", launcherFileName())} (mode 0755)`,
         `  - create ${join(bundle(), ".claude-plugin", "marketplace.json")} (mode 0644)`,
         `  - create ${join(plugin, ".claude-plugin", "plugin.json")} (mode 0644)`,
         `  - create ${join(plugin, "agents", "dispatch.md")} (mode 0644)`,
@@ -98,7 +106,15 @@ describe("claude-code plan and setup [UC1]", () => {
       confirm: true,
       runner: fakeClaudeRunner(h.home),
     });
-    const launcher = join(h.dispatchHome, "bin", "dispatch");
+    // POSIX: the launcher path; Windows: the quoted node and cli (Claude Code's Bash is Git Bash).
+    const launcher = hostInvocation(
+      {
+        launcherPath: join(h.dispatchHome, "bin", launcherFileName()),
+        nodePath: NODE,
+        cliPath: cliPathBesideHook(HOOK),
+      },
+      "bash",
+    );
     const plugin = join(bundle(), "plugins", "dispatch");
     const agent = readFileSync(join(plugin, "agents", "dispatch.md"), "utf8");
     expect(agent).toContain(`${launcher} run --detach --json --task '<task>'`);
@@ -107,19 +123,31 @@ describe("claude-code plan and setup [UC1]", () => {
     expect(agent).toContain("EXTERNAL_AGENT_OUTPUT");
     expect(agent).not.toMatch(/\{\{/);
     const hooks = JSON.parse(readFileSync(join(plugin, "hooks", "hooks.json"), "utf8"));
-    const command = hooks.hooks.SessionStart[0].hooks[0].command as string;
-    expect(command).toContain(
-      "exec '/opt/node/bin/node' '/opt/d/hook.mjs' claude-code SessionStart",
-    );
     expect(Object.keys(hooks.hooks)).toEqual(["SessionStart", "PreToolUse"]);
     const pre = hooks.hooks.PreToolUse[0];
     expect(pre.matcher).toBe(CLAUDE_AGENT_MATCHER); // [UC2] hard mode
-    expect(pre.hooks[0]).toEqual({
-      type: "command",
-      command: command.replace(/SessionStart$/, "PreToolUse"),
-      timeout: 5,
-    });
-    expect(command.startsWith('[ -n "$DISPATCH_DEPTH" ] && exit 0;')).toBe(true);
+    if (WIN) {
+      // Exec form: no shell parses the paths.
+      for (const event of ["SessionStart", "PreToolUse"]) {
+        expect(hooks.hooks[event][0].hooks[0]).toEqual({
+          type: "command",
+          command: NODE,
+          args: [HOOK, "claude-code", event],
+          timeout: 5,
+        });
+      }
+    } else {
+      const command = hooks.hooks.SessionStart[0].hooks[0].command as string;
+      expect(command).toContain(
+        "exec '/opt/node/bin/node' '/opt/d/hook.mjs' claude-code SessionStart",
+      );
+      expect(pre.hooks[0]).toEqual({
+        type: "command",
+        command: command.replace(/SessionStart$/, "PreToolUse"),
+        timeout: 5,
+      });
+      expect(command.startsWith('[ -n "$DISPATCH_DEPTH" ] && exit 0;')).toBe(true);
+    }
     expect(
       JSON.parse(readFileSync(join(bundle(), ".claude-plugin", "marketplace.json"), "utf8")).name,
     ).toBe("dispatch-local");
@@ -297,19 +325,23 @@ describe("claude-code plan and setup [UC1]", () => {
 
   it("detects by config dir alone, or by binary alone; plans nothing without a binary", async () => {
     h = tempHome();
-    const c = { home: h.home, launcherPath: "/l", nodePath: "/n", hookPath: "/h" };
+    const c = { home: h.home, launcherPath: abs("/l"), nodePath: abs("/n"), hookPath: abs("/h") };
     mkdirSync(join(h.home, ".claude"));
     const dirOnly = host({}, false);
     expect(await dirOnly.detect(c)).toBe(true);
     expect(dirOnly.plan(c)).toEqual([]);
+    const other = join(h.home, "other");
+    // A well-known install dir: Homebrew on POSIX, the native installer's dir on Windows.
+    const bin = WIN ? join(other, ".local", "bin", "claude.exe") : "/opt/homebrew/bin/claude";
     const binOnly = createClaudeCodeIntegration({
-      env: () => ({ HOME: join(h.home, "other"), PATH: "/nonexistent" }),
-      fs: { isExecutableFile: (p) => p === "/opt/homebrew/bin/claude", realpath: (p) => p },
+      env: () => ({ HOME: other, PATH: "/nonexistent" }),
+      fs: { isExecutableFile: (p) => p === bin, realpath: (p) => p },
     });
-    expect(await binOnly.detect({ ...c, home: join(h.home, "other") })).toBe(true);
+    expect(await binOnly.detect({ ...c, home: other })).toBe(true);
     expect(
-      binOnly.plan({ ...c, launcherPath: join(h.dispatchHome, "bin", "dispatch") })[5]?.file,
-    ).toBe("/opt/homebrew/bin/claude");
+      binOnly.plan({ ...c, launcherPath: join(h.dispatchHome, "bin", launcherFileName()) })[5]
+        ?.file,
+    ).toBe(bin);
   });
 });
 
@@ -340,14 +372,15 @@ describe("claude-code self detection and instances [UC12]", () => {
   });
 
   it("CLAUDE_CONFIG_DIR picks the instance; relative or empty values are ignored", () => {
-    expect(claudeInstanceOf({}, "/h")).toEqual({ configDir: "/h/.claude", isDefault: true });
+    const dflt = join("/h", ".claude");
+    expect(claudeInstanceOf({}, "/h")).toEqual({ configDir: dflt, isDefault: true });
     expect(claudeInstanceOf({ CLAUDE_CONFIG_DIR: "/h/.claude" }, "/h").isDefault).toBe(true);
     expect(claudeInstanceOf({ CLAUDE_CONFIG_DIR: "/h/.claude-alt" }, "/h")).toEqual({
       configDir: "/h/.claude-alt",
       isDefault: false,
     });
-    expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: "rel/dir" }, "/h")).toBe("/h/.claude");
-    expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: "" }, "/h")).toBe("/h/.claude");
+    expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: "rel/dir" }, "/h")).toBe(dflt);
+    expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: "" }, "/h")).toBe(dflt);
   });
 
   it("setup under claude-alt snapshots and undoes that instance's files", async () => {

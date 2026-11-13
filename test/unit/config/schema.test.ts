@@ -15,18 +15,19 @@ import {
 
 describe("paths", () => {
   it("DISPATCH_HOME wins over HOME; neither is a usage error", () => {
-    expect(dispatchHome({ HOME: "/h" })).toBe("/h/.dispatch");
+    // Native separators: `\h\.dispatch` on Windows.
+    expect(dispatchHome({ HOME: "/h" })).toBe(join("/h", ".dispatch"));
     expect(dispatchHome({ HOME: "/h", DISPATCH_HOME: "/d" })).toBe("/d");
-    expect(globalConfigPath({ DISPATCH_HOME: "/d" })).toBe("/d/config.yaml");
+    expect(globalConfigPath({ DISPATCH_HOME: "/d" })).toBe(join("/d", "config.yaml"));
     expect(() => dispatchHome({})).toThrow(/HOME/);
   });
 
   it("repo paths live under .dispatch/", () => {
     expect(repoPaths("/r")).toEqual({
-      dir: "/r/.dispatch",
-      config: "/r/.dispatch/config.yaml",
-      profiles: "/r/.dispatch/profiles",
-      mappings: "/r/.dispatch/mappings",
+      dir: join("/r", ".dispatch"),
+      config: join("/r", ".dispatch", "config.yaml"),
+      profiles: join("/r", ".dispatch", "profiles"),
+      mappings: join("/r", ".dispatch", "mappings"),
     });
   });
 
