@@ -9,10 +9,11 @@ import {
   type LoadAppContextOptions,
   loadAppContext,
 } from "../app/context.js";
-import { dispatchHome } from "../config/paths.js";
+import { dispatchHome, homeVarsText } from "../config/paths.js";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import type { HostRegistry } from "../hosts/_framework/registry.js";
+import { homeDir } from "../platform/os.js";
 import type { ResolveFs } from "../platform/resolve.js";
 import { INTERACTIVE_READER_TIMEOUT_MS } from "../quota/provider.js";
 import { fromHostLines } from "./host.js";
@@ -67,7 +68,12 @@ export async function collectChecks(opts: CollectOptions): Promise<Collected> {
   const lines: DoctorLine[] = [platformLine()];
   lines.push(
     home === null
-      ? mkLine("fail", "system", "launcher", "cannot locate the Dispatch home: HOME is not set")
+      ? mkLine(
+          "fail",
+          "system",
+          "launcher",
+          `cannot locate the Dispatch home: ${homeVarsText()} is not set`,
+        )
       : launcherLine(home),
   );
   lines.push(...configLines(ctx, loadError, env));
@@ -95,7 +101,7 @@ export async function collectChecks(opts: CollectOptions): Promise<Collected> {
   }
 
   if (home !== null) {
-    const hostCtx = { home: env.HOME ?? "", dispatchHome: home, env };
+    const hostCtx = { home: homeDir(env) ?? "", dispatchHome: home, env };
     for (const r of await opts.registry.runDoctorChecks(hostCtx)) {
       const { id, status, message, fix } = r;
       lines.push(mkLine(status, "host", id, message, fix ? { fix } : {}));

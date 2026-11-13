@@ -388,6 +388,36 @@ describe("executeTask", () => {
     expect(r.summary).toMatch(/codex: failed \(.*binary/);
   });
 
+  it("[win32] routes around an adapter that cannot run on the OS, with the reason logged", async () => {
+    const { run, fakes } = setup({
+      action: FALLBACK,
+      overrides: { platform: "win32", hostSelf: null },
+      scenarios: { codex: [{ scenario: "success_edit", file: "a.txt", content: "a\n" }] },
+    });
+    const r = await run();
+    valid(r);
+    expect(r.externalAgent?.instance).toBe("codex");
+    expect(r.decisions[0]?.chain.find((c) => c.ruleId === "claude")?.effect).toBe(
+      "filtered: disabled",
+    );
+    expect(fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
+    const log = readFileSync(r.log.path, "utf8");
+    expect(log).toContain('"type":"platform.unsupported"');
+    expect(log).toContain("WSL2");
+  });
+
+  it("[win32] returns to the host with the reason when only blocked adapters are left", async () => {
+    const { run, fakes } = setup({
+      action: { type: "provider", instance: "claude" },
+      overrides: { platform: "win32", hostSelf: null },
+    });
+    const r = await run();
+    valid(r);
+    expect(r.status).toBe("returned_to_host");
+    expect(r.summary).toMatch(/not available on this OS: claude: .*WSL2/);
+    expect(fakes.readLog({ kind: "run" })).toEqual([]);
+  });
+
   it("returns the task to the host when routing itself fails", async () => {
     const { run, deps } = setup({});
     deps.quota.snapshot = async () => {
@@ -666,6 +696,12 @@ describe("web access [UC2]", () => {
     expect(r.externalAgent?.instance).toBe("claude");
     const [call] = fakes.readLog({ cli: "claude", kind: "run" });
     expect(call?.args[(call?.args.indexOf("--allowedTools") ?? 0) + 1]).toBe("WebSearch");
+  });
+
+  it("[win32] a failed web plan still names the instances left out on this OS", async () => {
+    const off = setup({ exec: { forwardWeb: false }, overrides: { platform: "win32" } });
+    const r = await browse(off.deps, "search");
+    expect(r.summary).toMatch(/web forwarding is off .*\(not available on this OS: claude: /);
   });
 
   it("returns to host when web forwarding is off or no enabled provider can give web", async () => {

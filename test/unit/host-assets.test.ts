@@ -13,6 +13,8 @@ const KNOWN = new Set([
   "VERSION",
   "HOOK_COMMAND_SESSION_START",
   "HOOK_COMMAND_PRE_TOOL_USE",
+  "NODE_PATH",
+  "HOOK_PATH",
 ]);
 
 const TEMPLATES = [
@@ -20,7 +22,9 @@ const TEMPLATES = [
   "claude-code/plugin.json",
   "claude-code/agents/dispatch.md",
   "claude-code/hooks/hooks.json",
+  "claude-code/hooks/hooks.windows.json",
   "codex/skills/dispatch/SKILL.md",
+  "codex/skills/dispatch/SKILL.windows.md",
   "codex/hooks.fragment.json",
   "codex/dispatch.rules.tmpl",
 ];
@@ -41,6 +45,8 @@ const values = {
   HOOK_COMMAND_SESSION_START:
     '[ -n "$DISPATCH_DEPTH" ] && exit 0; exec /abs/node /abs/hook.mjs claude SessionStart',
   HOOK_COMMAND_PRE_TOOL_USE: "exec /abs/node /abs/hook.mjs codex PreToolUse",
+  NODE_PATH: "C:\\Program Files\\nodejs\\node.exe",
+  HOOK_PATH: "C:\\Users\\o'neil\\dist\\hook.mjs",
 };
 
 describe("host asset templates [UC2][UC3][UC9]", () => {
@@ -102,5 +108,27 @@ describe("host asset templates [UC2][UC3][UC9]", () => {
     expect(rules).toContain('decision = "allow"');
     expect(rules).not.toMatch(/forbidden|prompt/);
     expect(rules).toContain('["/home/u/.dispatch/bin/dispatch", "install"]');
+  });
+});
+
+describe("Windows host asset templates", () => {
+  it("claude hooks.windows.json is exec form: node as command, hook/host/event as args", () => {
+    const hooks = JSON.parse(render("claude-code/hooks/hooks.windows.json", values));
+    for (const [event, i] of [
+      ["SessionStart", 0],
+      ["PreToolUse", 0],
+    ] as const) {
+      const hk = hooks.hooks[event][i].hooks[0];
+      expect(hk.command).toBe(values.NODE_PATH);
+      expect(hk.args).toEqual([values.HOOK_PATH, "claude-code", event]);
+    }
+    expect(hooks.hooks.PreToolUse[0].matcher).toBe("Agent|Task");
+  });
+
+  it("the Windows Codex skill passes the task in a file and states the sandbox caveat", () => {
+    const skill = read("codex/skills/dispatch/SKILL.windows.md");
+    expect(skill).toContain("{{LAUNCHER}} run --detach --json --task-file");
+    expect(skill).not.toContain("--task '");
+    expect(skill).toContain("outside the sandbox");
   });
 });

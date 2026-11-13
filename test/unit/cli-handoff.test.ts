@@ -191,8 +191,11 @@ describe("dispatch run --handoff [UC2][SEC-handoff]", () => {
       { mode: 0o600 },
     );
     expect(readHandoffRun(home.dispatchHome, "R2")).not.toBeNull();
-    chmodSync(join(dir, "R2.json"), 0o644);
-    expect(readHandoffRun(home.dispatchHome, "R2")).toBeNull();
+    if (process.platform !== "win32") {
+      // Windows: mode bits do not reflect ACLs, so isOwnerOnly cannot see this.
+      chmodSync(join(dir, "R2.json"), 0o644);
+      expect(readHandoffRun(home.dispatchHome, "R2")).toBeNull();
+    }
     expect(readHandoffRun(home.dispatchHome, "../R2")).toBeNull();
   });
 

@@ -10,6 +10,7 @@ import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { build } from "tsup";
+import { envGet, isWindows, type OsPlatform, WINDOWS_BASE_ENV } from "../../src/platform/os.js";
 
 export const ROOT = resolve(import.meta.dirname, "../..");
 export const FS_TRACE = join(import.meta.dirname, "fs-trace.cjs");
@@ -61,7 +62,26 @@ export interface NodeRun {
 }
 
 /**
- * Runs `node [--require fs-trace.cjs] <script> ...args` with exactly `env` (nothing inherited).
+ * `env` plus, on Windows, the `WINDOWS_BASE_ENV` system variables of this process that `env` does
+ * not set (node cannot start without SYSTEMROOT & co.). Unchanged on POSIX.
+ */
+export function withWindowsBase(
+  env: Record<string, string>,
+  platform: OsPlatform = process.platform,
+  source: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  if (!isWindows(platform)) return env;
+  const out = { ...env };
+  for (const key of WINDOWS_BASE_ENV) {
+    const value = envGet(source, key, platform);
+    if (value !== undefined && envGet(out, key, platform) === undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Runs `node [--require fs-trace.cjs] <script> ...args` with exactly `env` (nothing inherited;
+ * on Windows the system variables of {@link withWindowsBase} are added).
  * `trace` names the file the fs-trace preload writes to.
  */
 export function runNode(
@@ -70,7 +90,7 @@ export function runNode(
   opts: { cwd: string; env: Record<string, string>; trace?: string; input?: string },
 ): NodeRun {
   const pre = opts.trace ? ["--require", FS_TRACE] : [];
-  const env = opts.trace ? { ...opts.env, FS_TRACE_OUT: opts.trace } : opts.env;
+  const env = withWindowsBase(opts.trace ? { ...opts.env, FS_TRACE_OUT: opts.trace } : opts.env);
   const r: SpawnSyncReturns<string> = spawnSync(
     process.execPath,
     ["--disable-warning=ExperimentalWarning", ...pre, script, ...args],

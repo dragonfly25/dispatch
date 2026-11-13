@@ -2,6 +2,7 @@ import { Command, CommanderError } from "commander";
 import pkg from "../../package.json" with { type: "json" };
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
+import { CODEX_WINDOWS_NO_RULES, codexRulesSupported } from "../hosts/codex/integration.js";
 import { CODEX_SANDBOX_MESSAGE, codexSandboxActive } from "../platform/host.js";
 import { currentInstallPaths } from "../platform/launcher.js";
 import { assertSupportedPlatform } from "../platform/platform.js";
@@ -80,7 +81,10 @@ export async function runCli(
     }
     // `doctor` is exempt: it is how the user finds out why the rule did not match (--from-host).
     if (codexSandboxActive(ctx.env) && !INFO_ONLY.has(args[0] ?? "") && args[0] !== "doctor") {
-      io.err(`dispatch: ${CODEX_SANDBOX_MESSAGE}\n`);
+      const message = codexRulesSupported(ctx.platform as NodeJS.Platform)
+        ? CODEX_SANDBOX_MESSAGE
+        : `running inside the Codex sandbox: ${CODEX_WINDOWS_NO_RULES}`;
+      io.err(`dispatch: ${message}\n`);
       return ExitCode.REJECTED;
     }
     await program.parseAsync([...args], { from: "user" });

@@ -1,16 +1,18 @@
 /**
  * Where Dispatch config files live (plan §2 "Config", spec §10).
  *
- * - Global: `$DISPATCH_HOME` or `$HOME/.dispatch`, holding `config.yaml` and optional
+ * - Global: `$DISPATCH_HOME` or `<home>/.dispatch` (`<home>`: `$HOME`; on Windows also
+ *   `%USERPROFILE%`), holding `config.yaml` and optional
  *   user-wide `profiles/*.yaml` and `mappings/*.yaml`.
  * - Repo: `<worktree>/.dispatch/{config.yaml,profiles/*.yaml,mappings/*.yaml}`.
  * - Built-in defaults: `assets/` at the package root (works from `src/` and from `dist/`).
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
+import { envGet, homeDir, isWindows, type OsPlatform } from "../platform/os.js";
 
 /** Environment variables Dispatch reads to locate its home. */
 export type PathEnv = Readonly<Record<string, string | undefined>>;
@@ -23,24 +25,32 @@ export const CONFIG_FILE = "config.yaml";
 export const PROFILES_DIR = "profiles";
 export const MAPPINGS_DIR = "mappings";
 
-/** Dispatch's global home: `$DISPATCH_HOME`, else `$HOME/.dispatch`. */
-export function dispatchHome(env: PathEnv): string {
-  const explicit = env.DISPATCH_HOME;
+/** The variables that locate the user's home on `platform`, for error messages. */
+export function homeVarsText(platform: OsPlatform = process.platform): string {
+  return isWindows(platform) ? "HOME nor USERPROFILE" : "HOME";
+}
+
+/**
+ * Dispatch's global home: `$DISPATCH_HOME`, else `<home>/.dispatch` where `<home>` comes from
+ * {@link homeDir} (`HOME`; on Windows also `USERPROFILE`, then `HOMEDRIVE`+`HOMEPATH`).
+ */
+export function dispatchHome(env: PathEnv, platform: OsPlatform = process.platform): string {
+  const explicit = envGet(env, "DISPATCH_HOME", platform);
   if (explicit) return explicit;
-  const home = env.HOME;
+  const home = homeDir(env, platform);
   if (!home) {
     throw new DispatchError(
-      "cannot locate the Dispatch home: neither DISPATCH_HOME nor HOME is set",
+      `cannot locate the Dispatch home: neither DISPATCH_HOME nor ${homeVarsText(platform)} is set`,
       ExitCode.USAGE,
       "config.no_home",
     );
   }
-  return join(home, REPO_DIR);
+  return (isWindows(platform) ? win32.join : join)(home, REPO_DIR);
 }
 
 /** Path of the global config file. */
-export function globalConfigPath(env: PathEnv): string {
-  return join(dispatchHome(env), CONFIG_FILE);
+export function globalConfigPath(env: PathEnv, platform: OsPlatform = process.platform): string {
+  return join(dispatchHome(env, platform), CONFIG_FILE);
 }
 
 /** Paths of the repo policy folder and its parts, given the worktree root. */

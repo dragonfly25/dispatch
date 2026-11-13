@@ -18,14 +18,17 @@ import { ExitCode, type RunResult } from "../../src/core/contracts.js";
 import { newRunId } from "../../src/core/ids.js";
 import { detectHost } from "../../src/platform/host.js";
 import {
+  CANCEL_FILE,
   CANCELLED,
   type DetachDeps,
+  requestCancel,
   startDetached,
   superviseRun,
   TASK_FILE,
 } from "../../src/runner/detach.js";
 import { ProbeCache } from "../../src/runner/lifecycle.js";
 import type { RunResultWithNetwork } from "../../src/runner/orchestrate.js";
+import { killTree } from "../../src/runner/tree.js";
 import { cancelRun, SUPERVISOR_LOST, waitForRun } from "../../src/runner/wait.js";
 import { SqliteStateStore } from "../../src/state/store.js";
 import { bundleHelper } from "../helpers/bundle.js";
@@ -53,13 +56,14 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => rmSync(bundle.dir, { recursive: true, force: true }));
 
-/** Alive and not a zombie. */
+/** Alive and not a zombie (Windows has no zombies: the existence check is enough). */
 function running(pid: number): boolean {
   try {
     process.kill(pid, 0);
   } catch {
     return false;
   }
+  if (process.platform === "win32") return true;
   const stat = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout;
   return stat.trim() !== "" && !stat.trim().startsWith("Z");
 }
@@ -88,11 +92,7 @@ let store: SqliteStateStore | undefined;
 const pgids: number[] = [];
 afterEach(() => {
   for (const g of pgids.splice(0)) {
-    try {
-      process.kill(-g, "SIGKILL");
-    } catch {
-      // gone
-    }
+    killTree(g, { force: true }); // POSIX: the fake's process group; Windows: taskkill /T /F
   }
   store?.close();
   fakes?.dispose();
@@ -126,7 +126,7 @@ function setup(scenarios: FakeScenarioMap) {
     autonomy: "worktree" as const,
     timeoutMs: 60_000,
   };
-  const cli = async (args: string[], extra: Record<string, string> = {}) => {
+  const cli = async (args: string[], extra: Record<string, string> = {}, cwd?: string) => {
     let out = "";
     const io = {
       out: (t: string) => {
@@ -137,7 +137,7 @@ function setup(scenarios: FakeScenarioMap) {
       },
     };
     const e = { ...env, ...extra };
-    const program = buildProgram(io, {}, {}, { cwd: repo?.dir ?? "", env: e });
+    const program = buildProgram(io, {}, {}, { cwd: cwd ?? repo?.dir ?? "", env: e });
     const code = await runCli(args, io, program, { platform: process.platform, env: e });
     return { code, out };
   };
@@ -275,6 +275,28 @@ describe("detach / wait / cancel (real processes)", () => {
       expect(s.repo.git("worktree", "list").split("\n")).toHaveLength(1);
       // Cancelling a finished run is a no-op.
       expect((await cancelRun(s.waitDeps, runId)).summary).toBe(CANCELLED);
+    },
+    TEST_MS,
+  );
+
+  it(
+    "cancel from outside the repo finds the run dir recorded with the run",
+    async () => {
+      const s = setup(slow(200, 250));
+      const { runId } = await startDetached(s.deps, s.task, { repoPath: s.repo.dir });
+      const agent = await agentStarted(s.fakes);
+      await waitFor(() => s.store.listLeases().length === 1, 30_000);
+      const runDir = s.store.getRunDir(runId);
+      expect(runDir).not.toBeNull();
+      const supervisor = (await s.store.getRun(runId))?.pid ?? 0;
+      const out = await s.cli(["cancel", runId, "--json"], {}, s.home.dispatchHome);
+      expect(out.code).toBe(ExitCode.OK);
+      expect(JSON.parse(out.out)).toMatchObject({ runId, summary: CANCELLED });
+      expect(existsSync(join(runDir ?? "", CANCEL_FILE))).toBe(true);
+      await expectGone(agent.pid);
+      await expectGone(supervisor);
+      expect(s.store.listLeases()).toEqual([]);
+      expect(s.repo.git("worktree", "list").split("\n")).toHaveLength(1);
     },
     TEST_MS,
   );
@@ -432,6 +454,37 @@ describe("supervisor (in process)", () => {
       signals.emit("SIGHUP");
       expect(running(agent.pid)).toBe(true);
       signals.emit("SIGTERM");
+      const r = await done;
+      expect(r).toMatchObject({ status: "completed", outcome: "failed", summary: CANCELLED });
+      expect((await s.store.getRun(runId))?.result?.summary).toBe(CANCELLED);
+      await expectGone(agent.pid);
+      expect(s.store.listLeases()).toEqual([]);
+      expect(signals.listenerCount("SIGTERM")).toBe(0);
+    },
+    TEST_MS,
+  );
+
+  it(
+    "a cancel request file cancels the run like SIGTERM (the portable channel used on Windows)",
+    async () => {
+      const s = setup(slow(200, 250));
+      const { runId, runDir } = await recorded(s);
+      const signals = new EventEmitter();
+      const done = superviseRun(
+        {
+          signals: signals as unknown as Pick<NodeJS.Process, "on" | "off">,
+          heartbeatMs: 20,
+          cancelPollMs: 20,
+          build: async (p) => {
+            const ctx = loadAppContext({ cwd: p.repoPath, env: s.env });
+            return { ...runnerDeps(ctx, { probes: new ProbeCache() }), close: () => ctx.close() };
+          },
+        },
+        runId,
+        runDir,
+      );
+      const agent = await agentStarted(s.fakes);
+      expect(requestCancel(runDir)).toBe(true);
       const r = await done;
       expect(r).toMatchObject({ status: "completed", outcome: "failed", summary: CANCELLED });
       expect((await s.store.getRun(runId))?.result?.summary).toBe(CANCELLED);

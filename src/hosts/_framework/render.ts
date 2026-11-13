@@ -9,17 +9,34 @@ import { assetsDir } from "../../config/paths.js";
 import type { EditOp, HostIntegration, HostPlanContext } from "../../core/contracts.js";
 import { ExitCode } from "../../core/contracts.js";
 import { DispatchError } from "../../core/errors.js";
+import { cliPathBesideHook, type HostShell, hostInvocation } from "../../platform/invocation.js";
 import { renderHookCommand } from "../../platform/launcher.js";
+import type { OsPlatform } from "../../platform/os.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { sha256 } from "./fsutil.js";
 
 /** Placeholder values understood by the host templates (see docs/spikes/hosts-prototype.md §4). */
 export interface TemplateValues {
+  /**
+   * How the model calls Dispatch: the launcher path on POSIX; on Windows the quoted node and cli
+   * for the host's shell (see `src/platform/invocation.ts`).
+   */
   LAUNCHER: string;
   WAIT_TIMEOUT: string;
   VERSION: string;
   HOOK_COMMAND_SESSION_START: string;
   HOOK_COMMAND_PRE_TOOL_USE: string;
+  /** Absolute node and hook entry, for exec-form hooks (Claude Code on Windows). */
+  NODE_PATH: string;
+  HOOK_PATH: string;
+}
+
+/** Options of {@link templateValues}. */
+export interface TemplateOptions {
+  /** Default `process.platform`. */
+  platform?: OsPlatform;
+  /** The shell the host's model runs commands in (Windows only; default bash). */
+  shell?: HostShell;
 }
 
 /**
@@ -44,15 +61,27 @@ export function renderTemplate(
 export function templateValues(
   ctx: HostPlanContext,
   host: Pick<HostIntegration, "id" | "waitTimeoutSec">,
+  opts: TemplateOptions = {},
 ): TemplateValues {
+  const platform = opts.platform ?? process.platform;
   const hook = (event: string) =>
-    renderHookCommand({ nodePath: ctx.nodePath, hookPath: ctx.hookPath, host: host.id, event });
+    renderHookCommand(
+      { nodePath: ctx.nodePath, hookPath: ctx.hookPath, host: host.id, event },
+      platform,
+    );
+  const paths = {
+    launcherPath: ctx.launcherPath,
+    nodePath: ctx.nodePath,
+    cliPath: cliPathBesideHook(ctx.hookPath, platform),
+  };
   return {
-    LAUNCHER: ctx.launcherPath,
+    LAUNCHER: hostInvocation(paths, opts.shell ?? "bash", platform),
     WAIT_TIMEOUT: String(host.waitTimeoutSec),
     VERSION: pkg.version,
     HOOK_COMMAND_SESSION_START: hook("SessionStart"),
     HOOK_COMMAND_PRE_TOOL_USE: hook("PreToolUse"),
+    NODE_PATH: ctx.nodePath,
+    HOOK_PATH: ctx.hookPath,
   };
 }
 
@@ -68,7 +97,7 @@ export function renderHostAsset(
 
 /**
  * The Dispatch home (`~/.dispatch` or `$DISPATCH_HOME`), derived from the launcher path
- * `<home>/bin/dispatch` so host integrations need nothing beyond {@link HostPlanContext}.
+ * `<home>/bin/dispatch` (`dispatch.cmd` on Windows) so host integrations need nothing beyond {@link HostPlanContext}.
  */
 export function dispatchHomeOf(ctx: HostPlanContext): string {
   return dirname(dirname(ctx.launcherPath));
@@ -115,6 +144,8 @@ export interface PresenceOptions {
   dir: string;
   env: Readonly<Record<string, string | undefined>>;
   fs?: ResolveFs;
+  /** Default `process.platform`. */
+  platform?: OsPlatform;
 }
 
 /**
@@ -123,6 +154,10 @@ export interface PresenceOptions {
  */
 export function hostPresent(opts: PresenceOptions): boolean {
   if (existsSync(join(opts.home, opts.dir))) return true;
-  const resolveOpts = opts.fs ? { env: opts.env, fs: opts.fs } : { env: opts.env };
+  const resolveOpts = {
+    env: opts.env,
+    ...(opts.fs ? { fs: opts.fs } : {}),
+    ...(opts.platform ? { platform: opts.platform } : {}),
+  };
   return resolveBinary(opts.binary, resolveOpts) !== null;
 }

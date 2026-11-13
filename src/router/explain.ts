@@ -3,6 +3,7 @@
  * depends only on its arguments, so it is snapshot-tested.
  */
 import type { Decision, DecisionInput, RuleTrace } from "../core/contracts.js";
+import type { InstanceExclusion } from "./capability.js";
 import { parseRoutingConfig } from "./decide.js";
 import { quotaView } from "./filters.js";
 
@@ -18,11 +19,14 @@ const isResolution = (t: RuleTrace) =>
  * Renders `decision` for `input`: requested model → tier (with the rule), rule chain, candidates
  * and filters, chosen targets with model/effort and their source, quota used (value, reliability,
  * source), the reason, and one line per alternative profile when `alternatives` is given.
+ * `unavailable` lists instances taken out of routing before the decision (shown as "disabled" in
+ * the candidates), with the reason (e.g. the adapter does not run on this OS).
  */
 export function renderExplain(
   input: DecisionInput,
   decision: Decision,
   alternatives?: Record<string, Decision>,
+  unavailable: readonly InstanceExclusion[] = [],
 ): string {
   const cfg = parseRoutingConfig(input.routing);
   const { task, host } = input;
@@ -42,6 +46,10 @@ export function renderExplain(
 
   const filters = decision.chain.filter((t) => t.layer === "filter");
   lines.push("Candidates:", ...(filters.length ? filters.map(traceLine) : ["  (none)"]));
+  if (unavailable.length) {
+    lines.push("Unavailable (disabled for this decision):");
+    for (const u of unavailable) lines.push(`  ${u.id}: ${u.reason}`);
+  }
 
   lines.push(`Decision: ${decision.action} (${decision.mode})`);
   const winner = [...rules].reverse().find((t) => t.matched);

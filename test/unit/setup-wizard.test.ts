@@ -119,7 +119,10 @@ describe("setup --non-interactive writes the global config [UC1]", () => {
     expect(eff.issues).toEqual([]);
 
     expect(k.config()).toMatch(/^main_host: claude-code$/m);
-    expect(statSync(k.configPath).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(k.configPath).mode & 0o777).toBe(0o600);
+    }
     // Non-interactive never starts a CLI.
     expect(k.fakeCalls()).toEqual([]);
   });
@@ -260,7 +263,10 @@ describe("setup --reconfigure", () => {
     expect(text).not.toMatch(/plan: plus/);
     expect(text).toMatch(/^main_host: codex$/m);
     expect(text).toMatch(/^autonomy: read-only$/m);
-    expect(statSync(k.configPath).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(k.configPath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("round-trips a generated config without losing its documentation", async () => {
@@ -612,15 +618,22 @@ describe("install on a fresh HOME runs setup first [UC1]", () => {
 });
 
 describe("global config file", () => {
-  it("is written atomically with mode 0600; 'create' refuses a file that appeared", async () => {
-    const k = harness();
-    expect(await k.run("setup", "--non-interactive", "--yes")).toBe(0);
-    expect(() => writeGlobalConfig(k.configPath, "version: 1\n", "create")).toThrow(
-      /already exists/,
-    );
-    chmodSync(k.configPath, 0o644);
-    writeGlobalConfig(k.configPath, "version: 1\n", "update");
-    expect(statSync(k.configPath).mode & 0o777).toBe(0o600);
-    expect(readdirSync(h.dispatchHome).filter((n) => n.endsWith(".tmp"))).toEqual([]);
-  });
+  // Windows: mode bits do not reflect ACLs.
+  it.skipIf(process.platform === "win32")(
+    "is written atomically with mode 0600; 'create' refuses a file that appeared",
+    async () => {
+      const k = harness();
+      expect(await k.run("setup", "--non-interactive", "--yes")).toBe(0);
+      expect(() => writeGlobalConfig(k.configPath, "version: 1\n", "create")).toThrow(
+        /already exists/,
+      );
+      chmodSync(k.configPath, 0o644);
+      writeGlobalConfig(k.configPath, "version: 1\n", "update");
+      // Windows: mode bits do not reflect ACLs.
+      if (process.platform !== "win32") {
+        expect(statSync(k.configPath).mode & 0o777).toBe(0o600);
+      }
+      expect(readdirSync(h.dispatchHome).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+    },
+  );
 });

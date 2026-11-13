@@ -23,7 +23,11 @@ import {
 
 const bundles = useBundles();
 
-const hasPython = spawnSync("python3", ["--version"], { encoding: "utf8" }).status === 0;
+// Windows installs usually name the interpreter `python` (`python3` may be a Store stub).
+const python = ["python3", "python"].find(
+  (cmd) => spawnSync(cmd, ["--version"], { encoding: "utf8" }).status === 0,
+);
+const hasPython = python !== undefined;
 const script = resolve(import.meta.dirname, "../helpers/uc10_client.py");
 
 describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framework", () => {
@@ -36,9 +40,13 @@ describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framewo
       scenarios: { ...EDIT_CODEX, ...CLAUDE_QUOTA_UNREAD },
     });
     const before = snapshotTree(w.repo.dir);
-    const r = w.exec("python3", ["-I", script, process.execPath, bundles().cli, w.repo.dir], {
-      env: { CLAUDECODE: "1", CODEX_THREAD_ID: "leaked-from-the-test-runner" },
-    });
+    const r = w.exec(
+      python as string,
+      ["-I", script, process.execPath, bundles().cli, w.repo.dir],
+      {
+        env: { CLAUDECODE: "1", CODEX_THREAD_ID: "leaked-from-the-test-runner" },
+      },
+    );
     expect(r.stderr).toBe("");
     expect(r.code).toBe(0);
     const out = JSON.parse(r.stdout);

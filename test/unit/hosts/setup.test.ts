@@ -16,6 +16,7 @@ import {
   writeManifest,
 } from "../../../src/hosts/_framework/index.js";
 import { manifestPath } from "../../../src/hosts/_framework/manifest.js";
+import { launcherFileName } from "../../../src/platform/os.js";
 import {
   CODEX_RULES_GRANT,
   fakeClaudeHost,
@@ -53,8 +54,11 @@ describe("planSetup / applySetup / uninstallGlobal", () => {
     expect(plan.preview).toMatch(/Hosts not found .*codex, claude-code/);
     await applySetup(plan, { dispatchHome: h.dispatchHome, confirm: true });
     expect(readdirSync(h.home).sort()).toEqual([".dispatch"]);
-    const launcher = join(h.dispatchHome, "bin", "dispatch");
-    expect(statSync(launcher).mode & 0o777).toBe(0o755);
+    const launcher = join(h.dispatchHome, "bin", launcherFileName());
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(launcher).mode & 0o777).toBe(0o755);
+    }
     expect(readFileSync(launcher, "utf8")).toContain('exec "/opt/node/bin/node"');
   });
 
@@ -128,13 +132,18 @@ describe("planSetup / applySetup / uninstallGlobal", () => {
     ).toContain("'/opt/d/hook.mjs' claude-code SessionStart");
     expect(
       readFileSync(join(h.home, ".agents", "skills", "dispatch", "SKILL.md"), "utf8"),
-    ).toContain(`${join(h.dispatchHome, "bin", "dispatch")} wait <runId> --json --timeout 280`);
+    ).toContain(
+      `${join(h.dispatchHome, "bin", launcherFileName())} wait <runId> --json --timeout 280`,
+    );
     const manifest = readManifest(h.dispatchHome);
     expect(manifest.entries).toHaveLength(plan.ops.length);
     expect(manifest.entries.find((e) => e.kind === "rules-file")?.trustGrant).toBe(
       CODEX_RULES_GRANT,
     );
-    expect(statSync(manifestPath(h.dispatchHome)).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(manifestPath(h.dispatchHome)).mode & 0o777).toBe(0o600);
+    }
 
     // Idempotent re-run.
     const again = await applySetup(await planSetup(ctx(hosts)), {
@@ -240,6 +249,8 @@ describe("render helpers", () => {
       VERSION: "0",
       HOOK_COMMAND_SESSION_START: "",
       HOOK_COMMAND_PRE_TOOL_USE: "",
+      NODE_PATH: "/n/node",
+      HOOK_PATH: "/n/hook.mjs",
     };
     const [op] = assetOps(values, [{ template: "a.md", dest: "/d/a.md" }], join(h.home, "t"));
     expect(op).toMatchObject({
@@ -288,7 +299,7 @@ describe("registry and doctor checks", () => {
     ]);
     await applySetup(await planSetup(ctx([])), { dispatchHome: h.dispatchHome, confirm: true });
     expect((await manifestCheck.run(dctx)).status).toBe("ok");
-    writeFileSync(join(h.dispatchHome, "bin", "dispatch"), "tampered");
+    writeFileSync(join(h.dispatchHome, "bin", launcherFileName()), "tampered");
     expect(await manifestCheck.run(dctx)).toMatchObject({
       status: "warn",
       fix: "dispatch setup --refresh",

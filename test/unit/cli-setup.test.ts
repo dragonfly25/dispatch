@@ -8,6 +8,7 @@ import {
   registerSetupCommands,
   type SetupCommandDeps,
 } from "../../src/cli/setup.js";
+import { createCodexIntegration } from "../../src/hosts/codex/integration.js";
 import { fakeCodexHost } from "../support/fake-host.js";
 import { type TempHome, tempHome } from "../support/temp.js";
 
@@ -127,5 +128,38 @@ describe("dispatch setup / uninstall --global [UC1][UC14]", () => {
     expect(d.install().hookPath).toMatch(/hook\.mjs$/);
     expect(Array.isArray(d.hosts())).toBe(true);
     expect(typeof d.runner(h.home).run).toBe("function");
+  });
+});
+
+describe("dispatch setup on Windows (platform win32 injected)", () => {
+  const install = () => ({
+    nodePath: "C:\\nodejs\\node.exe",
+    cliPath: "C:\\d\\cli.mjs",
+    hookPath: "C:\\d\\hook.mjs",
+  });
+
+  it("takes the home from USERPROFILE, writes dispatch.cmd and warns that Codex gets no rule", async () => {
+    h = tempHome();
+    mkdirSync(join(h.home, ".codex"));
+    const { HOME: _home, ...rest } = h.env;
+    const env = { ...rest, USERPROFILE: h.home };
+    const NONE = { isExecutableFile: () => false, realpath: (p: string) => p };
+    const codex = createCodexIntegration({ env: () => env, fs: NONE, platform: "win32" });
+    const { io, run } = cli({ env, install, hosts: () => [codex], platform: "win32" });
+    expect(await run("setup", "--yes")).toBe(0);
+    expect(io.stderr).toContain("no Codex rule is installed on Windows");
+    expect(readFileSync(join(h.dispatchHome, "bin", "dispatch.cmd"), "utf8")).toContain(
+      '"C:\\nodejs\\node.exe" --disable-warning=ExperimentalWarning "C:\\d\\cli.mjs" %*\r\n',
+    );
+    expect(existsSync(join(h.home, ".codex", "rules", "dispatch.rules"))).toBe(false);
+    expect(await run("uninstall", "--global")).toBe(0);
+    expect(existsSync(join(h.dispatchHome, "bin", "dispatch.cmd"))).toBe(false);
+  });
+
+  it("names both variables when neither HOME nor USERPROFILE is set", async () => {
+    h = tempHome();
+    const { io, run } = cli({ env: {}, platform: "win32" });
+    expect(await run("setup", "--yes")).toBe(2);
+    expect(io.stderr).toMatch(/HOME and USERPROFILE are not set/);
   });
 });

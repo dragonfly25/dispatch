@@ -7,7 +7,9 @@
  */
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { join } from "node:path";
+import { isPathInside, pathApi } from "../config/pathkey.js";
+import { envGet, homeDir, type OsPlatform } from "../platform/os.js";
 
 /** File name of the hook cache inside the Dispatch home. */
 export const HOOK_CACHE_FILE = "hook-cache.json";
@@ -95,10 +97,15 @@ export interface HookCache {
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** `$DISPATCH_HOME`, else `$HOME/.dispatch`; null when neither is set. */
-export function hookDispatchHome(env: Env): string | null {
-  if (env.DISPATCH_HOME) return env.DISPATCH_HOME;
-  return env.HOME ? join(env.HOME, ".dispatch") : null;
+/**
+ * `$DISPATCH_HOME`, else `<home>/.dispatch` (`HOME`; on Windows also `USERPROFILE`); null when
+ * neither is set.
+ */
+export function hookDispatchHome(env: Env, platform: OsPlatform = process.platform): string | null {
+  const explicit = envGet(env, "DISPATCH_HOME", platform);
+  if (explicit) return explicit;
+  const home = homeDir(env, platform);
+  return home ? pathApi(platform).join(home, ".dispatch") : null;
 }
 
 /** True for `undefined` or an array of strings. */
@@ -216,11 +223,18 @@ export function browserFor(cache: HookCache, cwd: string, agent: string): true |
   return true;
 }
 
-/** The trusted repo containing `cwd` (the longest matching root), or null. */
-export function trustedRepoFor(cache: HookCache, cwd: string): TrustedRepo | null {
+/**
+ * The trusted repo containing `cwd` (the longest matching root), or null. On Windows the match
+ * ignores case and `/` vs `\`.
+ */
+export function trustedRepoFor(
+  cache: HookCache,
+  cwd: string,
+  platform: OsPlatform = process.platform,
+): TrustedRepo | null {
   let best: TrustedRepo | null = null;
   for (const r of cache.trustedRepos) {
-    const inside = cwd === r.root || cwd.startsWith(r.root.endsWith(sep) ? r.root : r.root + sep);
+    const inside = isPathInside(cwd, r.root, platform);
     if (inside && (best === null || r.root.length > best.root.length)) best = r;
   }
   return best;

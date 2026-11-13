@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { isWindows, type OsPlatform } from "../../src/platform/os.js";
 
 const created = new Set<string>();
 process.on("exit", () => {
@@ -17,7 +18,8 @@ process.on("exit", () => {
 });
 
 function makeTempDir(prefix: string, parent: string = tmpdir()): string {
-  const dir = realpathSync(mkdtempSync(join(parent, prefix))); // resolves macOS /var -> /private/var
+  // Native realpath resolves macOS /var -> /private/var and Windows 8.3 names (RUNNER~1).
+  const dir = realpathSync.native(mkdtempSync(join(parent, prefix)));
   created.add(dir);
   return dir;
 }
@@ -33,14 +35,17 @@ export interface TempHome {
   home: string;
   /** `<home>/.dispatch`; not created, Dispatch creates it on first use. */
   dispatchHome: string;
-  /** Env overrides to spread into the code under test: HOME, USERPROFILE, DISPATCH_HOME, CODEX_HOME, XDG_*. */
+  /**
+   * Env overrides to spread into the code under test: HOME, USERPROFILE, DISPATCH_HOME, CODEX_HOME,
+   * XDG_*, and on Windows APPDATA/LOCALAPPDATA (so nothing falls back to the real profile).
+   */
   env: Record<string, string>;
   /** Removes the directory (also done automatically when the test process exits). */
   cleanup(): void;
 }
 
 /** Creates a temp HOME and the env overrides that point every tool at it. */
-export function tempHome(): TempHome {
+export function tempHome(platform: OsPlatform = process.platform): TempHome {
   const home = makeTempDir("dispatch-home-");
   const dispatchHome = join(home, ".dispatch");
   return {
@@ -54,6 +59,12 @@ export function tempHome(): TempHome {
       XDG_CONFIG_HOME: join(home, ".config"),
       XDG_DATA_HOME: join(home, ".local", "share"),
       XDG_STATE_HOME: join(home, ".local", "state"),
+      ...(isWindows(platform)
+        ? {
+            APPDATA: join(home, "AppData", "Roaming"),
+            LOCALAPPDATA: join(home, "AppData", "Local"),
+          }
+        : {}),
     },
     cleanup: () => removeTempDir(home),
   };

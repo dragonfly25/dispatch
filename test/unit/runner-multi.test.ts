@@ -1,5 +1,5 @@
 /** WP23 runner multi, in process: fanout (UC7), wait/cancel logic, idempotency keys, exit codes. */
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { loadAppContext } from "../../src/app/context.js";
 import { runnerDeps } from "../../src/app/runner.js";
 import { renderRunResult } from "../../src/cli/commands/run.js";
 import { renderRun } from "../../src/cli/commands/runs.js";
+import { buildProgram, runCli } from "../../src/cli/program.js";
 import type { ExecutionConfig } from "../../src/config/load.js";
 import { systemClock } from "../../src/core/clock.js";
 import {
@@ -18,7 +19,7 @@ import {
 } from "../../src/core/contracts.js";
 import { DispatchError } from "../../src/core/errors.js";
 import type { RoutingConfig, Rule } from "../../src/core/routing.js";
-import { CANCELLED, idempotencyKey } from "../../src/runner/detach.js";
+import { CANCEL_FILE, CANCELLED, idempotencyKey } from "../../src/runner/detach.js";
 import { fanoutChildId } from "../../src/runner/fanout.js";
 import { SELF_PID_START } from "../../src/runner/lease.js";
 import { ProbeCache } from "../../src/runner/lifecycle.js";
@@ -28,6 +29,7 @@ import {
   cancelRun,
   defaultWaitSeconds,
   findRunDir,
+  locateRunDir,
   SUPERVISOR_LOST,
   supervisorAlive,
   type WaitDeps,
@@ -342,6 +344,150 @@ describe("cancel", () => {
       },
     });
     expect(r.summary).toBe("cancelled by supervisor");
+  });
+});
+
+describe("cancel locates the run directory independently of the cwd", () => {
+  const tmp = (prefix: string) => {
+    const d = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    return d;
+  };
+
+  it("`dispatch cancel` from another cwd writes the request into the recorded run dir", async () => {
+    const home = tmp("dispatch-cancel-home-");
+    const repo = tmp("dispatch-cancel-repo-");
+    const elsewhere = tmp("dispatch-cancel-cwd-");
+    const runDir = join(repo, ".dispatch", "state", "runs", "x1");
+    mkdirSync(runDir, { recursive: true });
+    mkdirSync(join(home, "state"), { recursive: true });
+    const db = join(home, "state", "dispatch.db");
+    const seed = SqliteStateStore.open(db);
+    await running(seed, "x1", null); // supervisor not started yet: no signal is sent
+    seed.setRunDir("x1", runDir);
+    seed.close();
+
+    let out = "";
+    const io = {
+      out: (t: string) => {
+        out += t;
+      },
+      err: (t: string) => {
+        out += t;
+      },
+    };
+    const env = { HOME: home, DISPATCH_HOME: home, PATH: process.env.PATH ?? "" };
+    const program = buildProgram(io, {}, {}, { cwd: elsewhere, env });
+    const code = await runCli(["cancel", "x1", "--json"], io, program, {
+      platform: process.platform,
+      env,
+    });
+    expect(code).toBe(ExitCode.OK);
+    expect(existsSync(join(runDir, CANCEL_FILE))).toBe(true);
+    const r = JSON.parse(out) as RunResult;
+    expect(r).toMatchObject({ summary: CANCELLED, log: { path: join(runDir, "events.jsonl") } });
+  });
+
+  it("rows without a recorded dir still cancel through the cwd lookup", async () => {
+    const { store, clock } = storeAt();
+    const dir = tmp("dispatch-cancel-old-");
+    await running(store, "old1", null);
+    expect(store.getRunDir("old1")).toBeNull();
+    const r = await cancelRun({ store, clock, runDir: () => dir }, "old1");
+    expect(r.summary).toBe(CANCELLED);
+    expect(existsSync(join(dir, CANCEL_FILE))).toBe(true);
+    expect(r.log.path).toBe(join(dir, "events.jsonl"));
+  });
+
+  it("ignores a recorded dir that is gone or does not name the run", async () => {
+    const { store } = storeAt();
+    const fallback = tmp("dispatch-cancel-fb-");
+    await running(store, "g1");
+    store.setRunDir("g1", join(fallback, "nope", "g1"));
+    expect(locateRunDir({ store, runDir: () => fallback }, "g1")).toBe(fallback);
+    const other = join(fallback, "other");
+    mkdirSync(other);
+    store.setRunDir("g1", other);
+    expect(locateRunDir({ store, runDir: () => null }, "g1")).toBeNull();
+  });
+
+  it("win32: never force-kills before the grace when the run dir is known", async () => {
+    const { store } = storeAt();
+    const runDir = join(tmp("dispatch-cancel-win-"), "w1");
+    mkdirSync(runDir);
+    await running(store, "w1", 4545);
+    store.setRunDir("w1", runDir);
+    const start = Date.now();
+    const killedAt: number[] = [];
+    let alive = true;
+    const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
+    const notices: string[] = [];
+    const r = await cancelRun(deps, "w1", {
+      platform: "win32",
+      graceMs: 120,
+      env: { SystemRoot: "C:\\Windows" },
+      kill: () => {
+        throw new Error("no POSIX signal on win32");
+      },
+      run: () => {
+        killedAt.push(Date.now() - start);
+        alive = false;
+        return 0;
+      },
+      onNotice: (m) => notices.push(m),
+    });
+    expect(existsSync(join(runDir, CANCEL_FILE))).toBe(true);
+    expect(killedAt).toHaveLength(1);
+    expect(killedAt[0]).toBeGreaterThanOrEqual(115); // ms rounding of Date.now
+    expect(notices).toEqual([]);
+    expect(r.summary).toBe(CANCELLED);
+  });
+
+  it("win32: a supervisor that honours the request within the grace is never force-killed", async () => {
+    const { store } = storeAt();
+    const runDir = join(tmp("dispatch-cancel-win-"), "w2");
+    mkdirSync(runDir);
+    await running(store, "w2", 4646);
+    store.setRunDir("w2", runDir);
+    let alive = true;
+    setTimeout(() => {
+      alive = !existsSync(join(runDir, CANCEL_FILE));
+    }, 30);
+    const ran: string[] = [];
+    const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
+    const r = await cancelRun(deps, "w2", {
+      platform: "win32",
+      graceMs: 5_000,
+      run: (cmd) => {
+        ran.push(cmd);
+        return 0;
+      },
+    });
+    expect(ran).toEqual([]);
+    expect(r.summary).toBe(CANCELLED);
+  });
+
+  it("win32: without a run dir it still waits the grace and says so", async () => {
+    const { store } = storeAt();
+    await running(store, "w3", 4747);
+    const start = Date.now();
+    const killedAt: number[] = [];
+    let alive = true;
+    const notices: string[] = [];
+    const deps: WaitDeps = { store, clock: systemClock, isAlive: () => alive, pollMs: 5 };
+    await cancelRun(deps, "w3", {
+      platform: "win32",
+      graceMs: 80,
+      env: { SystemRoot: "C:\\Windows" },
+      run: () => {
+        killedAt.push(Date.now() - start);
+        alive = false;
+        return 0;
+      },
+      onNotice: (m) => notices.push(m),
+    });
+    expect(killedAt[0]).toBeGreaterThanOrEqual(75);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatch(/run directory of w3 not found/);
   });
 });
 

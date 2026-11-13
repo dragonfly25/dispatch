@@ -11,6 +11,9 @@ import { globalConfigPath, parseYaml } from "../../config/index.js";
 import { GlobalConfigFileSchema } from "../../config/schema.js";
 import { browserFor, forwardableMcpFor, forwardWebFor, readHookCache } from "../../hook/cache.js";
 import { listMcpServers } from "../../mcp/resolve.js";
+import { hostInvocation } from "../../platform/invocation.js";
+import { parseLauncherScript } from "../../platform/launcher.js";
+import { isWindows, launcherFileName, type OsPlatform } from "../../platform/os.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { createCommandRunner } from "../../runner/command.js";
 import type {
@@ -38,20 +41,45 @@ export interface ClaudeDoctorDeps {
 const SETUP_FIX = "dispatch setup";
 const REFRESH_FIX = "dispatch setup --refresh";
 
-/** The permission rules the user adds so the `dispatch` sub-agent runs without prompts. */
+/**
+ * The permission rules the user adds so the `dispatch` sub-agent runs without prompts.
+ * `launcher` is the command prefix the sub-agent writes: the launcher path on POSIX, the quoted
+ * node and cli on Windows (`src/platform/invocation.ts`).
+ */
 export function permissionRules(launcher: string): string[] {
   return [`Bash(${launcher} run:*)`, `Bash(${launcher} wait:*)`, `Bash(${launcher} apply:*)`];
 }
 
+/**
+ * The prefix the `dispatch` sub-agent's commands start with: the launcher path on POSIX; on
+ * Windows the bash-quoted node and cli of the installation the launcher names (the sub-agent
+ * calls them directly, see `src/platform/invocation.ts`), or the launcher path when unreadable.
+ */
+export function subagentLauncher(dispatchHome: string, platform: OsPlatform): string {
+  const launcherPath = join(dispatchHome, "bin", launcherFileName(platform));
+  if (!isWindows(platform)) return launcherPath;
+  let exec: ReturnType<typeof parseLauncherScript> = null;
+  try {
+    exec = parseLauncherScript(readFileSync(launcherPath, "utf8"));
+  } catch {
+    return launcherPath;
+  }
+  if (exec === null) return launcherPath;
+  return hostInvocation({ launcherPath, ...exec }, "bash", platform);
+}
+
+const platformOf = (deps: ClaudeDoctorDeps): OsPlatform =>
+  (deps.platform as OsPlatform | undefined) ?? process.platform;
+
 function binaryOf(ctx: DoctorContext, deps: ClaudeDoctorDeps): string | null {
-  return (
-    resolveBinary("claude", { env: ctx.env, ...(deps.fs ? { fs: deps.fs } : {}) })?.path ?? null
-  );
+  const opts = { env: ctx.env, platform: platformOf(deps), ...(deps.fs ? { fs: deps.fs } : {}) };
+  return resolveBinary("claude", opts)?.path ?? null;
 }
 
 /** Claude Code is considered absent when neither its config dir nor its binary exists. */
 function absent(ctx: DoctorContext, deps: ClaudeDoctorDeps): boolean {
-  return !existsSync(claudeConfigDir(ctx.env, ctx.home)) && binaryOf(ctx, deps) === null;
+  const dir = claudeConfigDir(ctx.env, ctx.home, platformOf(deps));
+  return !existsSync(dir) && binaryOf(ctx, deps) === null;
 }
 
 const NOT_FOUND: DoctorResult = {
@@ -148,24 +176,42 @@ function executable(path: string): boolean {
   }
 }
 
+/** A Claude hook handler as rendered: shell form (`command`) or exec form (`command` + `args`). */
+interface HookHandler {
+  command?: unknown;
+  args?: unknown;
+}
+
+/**
+ * The node and hook paths a rendered hook handler runs: the exec form's `command` and first
+ * `args` element (Windows), or the guard of the shell form (POSIX). Null when unrecognised.
+ */
+export function hookPaths(handler: HookHandler | undefined): { node: string; hook: string } | null {
+  if (typeof handler?.command !== "string") return null;
+  if (Array.isArray(handler.args)) {
+    const hook = handler.args[0];
+    return typeof hook === "string" ? { node: handler.command, hook } : null;
+  }
+  const guard = HOOK_GUARD.exec(handler.command);
+  return guard?.[1] && guard[2] ? { node: unquote(guard[1]), hook: unquote(guard[2]) } : null;
+}
+
 /** Paths the rendered files point at that no longer exist (stale after a node upgrade, say). */
-function missingPaths(dispatchHome: string, hooksFile: string): string[] {
+function missingPaths(dispatchHome: string, hooksFile: string, platform: OsPlatform): string[] {
   const missing: string[] = [];
   const hooks = JSON.parse(readFileSync(hooksFile, "utf8")) as {
-    hooks?: { SessionStart?: { hooks?: { command?: string }[] }[] };
+    hooks?: { SessionStart?: { hooks?: HookHandler[] }[] };
   };
-  const command = hooks.hooks?.SessionStart?.[0]?.hooks?.[0]?.command ?? "";
-  const guard = HOOK_GUARD.exec(command);
-  if (guard?.[1] && guard[2]) {
-    const [node, hook] = [unquote(guard[1]), unquote(guard[2])];
-    if (!executable(node)) missing.push(node);
-    if (!existsSync(hook)) missing.push(hook);
+  const paths = hookPaths(hooks.hooks?.SessionStart?.[0]?.hooks?.[0]);
+  if (paths !== null) {
+    if (!executable(paths.node)) missing.push(paths.node);
+    if (!existsSync(paths.hook)) missing.push(paths.hook);
   }
-  const launcher = join(dispatchHome, "bin", "dispatch");
+  const launcher = join(dispatchHome, "bin", launcherFileName(platform));
   if (!existsSync(launcher)) return [...missing, launcher];
-  const exec = /^exec "([^"]+)" .*"([^"]+)" "\$@"$/m.exec(readFileSync(launcher, "utf8"));
-  if (exec?.[1] && !executable(exec[1])) missing.push(exec[1]);
-  if (exec?.[2] && !existsSync(exec[2])) missing.push(exec[2]);
+  const exec = parseLauncherScript(readFileSync(launcher, "utf8"));
+  if (exec !== null && !executable(exec.nodePath)) missing.push(exec.nodePath);
+  if (exec !== null && !existsSync(exec.cliPath)) missing.push(exec.cliPath);
   return missing;
 }
 
@@ -188,7 +234,7 @@ function filesCheck(deps: ClaudeDoctorDeps): DoctorCheck {
       }
       let missing: string[];
       try {
-        missing = missingPaths(ctx.dispatchHome, hooksFile);
+        missing = missingPaths(ctx.dispatchHome, hooksFile, platformOf(deps));
       } catch (err) {
         return {
           status: "warn",
@@ -227,8 +273,9 @@ function permissionCheck(deps: ClaudeDoctorDeps): DoctorCheck {
     id: "claude-code.permission-rule",
     run(ctx) {
       if (absent(ctx, deps)) return NOT_FOUND;
-      const settings = join(claudeConfigDir(ctx.env, ctx.home), "settings.json");
-      const rules = permissionRules(join(ctx.dispatchHome, "bin", "dispatch"));
+      const platform = platformOf(deps);
+      const settings = join(claudeConfigDir(ctx.env, ctx.home, platform), "settings.json");
+      const rules = permissionRules(subagentLauncher(ctx.dispatchHome, platform));
       const have = allowRules(settings) ?? [];
       if (rules.every((r) => have.includes(r))) {
         return { status: "ok", message: "the Dispatch permission rules are in permissions.allow" };
@@ -245,17 +292,19 @@ function permissionCheck(deps: ClaudeDoctorDeps): DoctorCheck {
   };
 }
 
+/** True when a handler runs the Dispatch hook for `claude-code PreToolUse` (either form). */
+function isAgentHook(x: HookHandler): boolean {
+  if (Array.isArray(x.args)) return x.args.slice(-2).join(" ") === "claude-code PreToolUse";
+  return typeof x.command === "string" && x.command.endsWith(" claude-code PreToolUse");
+}
+
 /** True when the rendered hooks.json has the Dispatch PreToolUse entry on the Agent tool. */
 function hasAgentHook(hooksFile: string): boolean {
   const v = JSON.parse(readFileSync(hooksFile, "utf8")) as {
-    hooks?: { PreToolUse?: { matcher?: unknown; hooks?: { command?: unknown }[] }[] };
+    hooks?: { PreToolUse?: { matcher?: unknown; hooks?: HookHandler[] }[] };
   };
   return (v.hooks?.PreToolUse ?? []).some(
-    (e) =>
-      e.matcher === CLAUDE_AGENT_MATCHER &&
-      (e.hooks ?? []).some(
-        (x) => typeof x.command === "string" && x.command.endsWith(" claude-code PreToolUse"),
-      ),
+    (e) => e.matcher === CLAUDE_AGENT_MATCHER && (e.hooks ?? []).some(isAgentHook),
   );
 }
 

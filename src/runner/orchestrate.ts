@@ -8,6 +8,7 @@
  * configuration.
  */
 import { realpath } from "node:fs/promises";
+import { excludePlatformBlocked } from "../adapters/platform.js";
 import { browserReadiness, type Readiness } from "../browser/index.js";
 import type { EffectiveConfig } from "../config/load.js";
 import { dispatchHome as defaultDispatchHome } from "../config/paths.js";
@@ -27,7 +28,13 @@ import type {
 } from "../core/contracts.js";
 import { newRunId } from "../core/ids.js";
 import type { HostDetection } from "../platform/host.js";
-import { decide, ROUTER_VERSION } from "../router/index.js";
+import { homeDir, type OsPlatform } from "../platform/os.js";
+import {
+  decide,
+  describeExclusions,
+  type InstanceExclusion,
+  ROUTER_VERSION,
+} from "../router/index.js";
 import { repoRoot as gitRepoRoot } from "../sandbox/git.js";
 import { decideNetwork, type NetworkDecision, runAgent } from "../sandbox/network.js";
 import type { WorktreeCreateOptions, WorktreeHandle } from "../sandbox/worktree.js";
@@ -101,6 +108,8 @@ export interface RunnerDeps {
   browserReadiness?: () => Readiness;
   /** Node that runs the browser server; default `process.execPath`. */
   nodePath?: string;
+  /** OS the children run on (adapters it cannot run are not routed to); default `process.platform`. */
+  platform?: OsPlatform;
 }
 
 /** Per-call options of {@link executeTask}. */
@@ -146,14 +155,21 @@ export interface ExecuteOptions {
 /** A run result plus the sandbox network decision (structural superset of the frozen RunResult). */
 export type RunResultWithNetwork = RunResult & { sandboxNetwork?: NetworkDecision };
 
+/** `reason` followed by the instances left out on this OS, when any. */
+function withExclusions(reason: string, excluded: readonly InstanceExclusion[]): string {
+  return excluded.length === 0
+    ? reason
+    : `${reason} (not available on this OS: ${describeExclusions(excluded)})`;
+}
+
 /** The isolated browser's readiness for this run (injected, else checked on disk). */
 function readinessOf(deps: RunnerDeps, dispatchHome: string): Readiness {
   if (deps.browserReadiness) return deps.browserReadiness();
   return browserReadiness({
     enabled: deps.config.execution.browser === true,
     dispatchHome,
-    platform: process.platform,
-    home: deps.env.HOME,
+    platform: deps.platform ?? process.platform,
+    home: homeDir(deps.env),
   });
 }
 
@@ -259,17 +275,25 @@ export async function executeTask(
       return await finish(rejected(err.message));
     }
 
+    // Adapters that cannot run on this OS (claude, agy on native Windows) are routed around like
+    // an unavailable provider; the reasons reach the run log and, when nothing is left, the result.
+    const os = excludePlatformBlocked(deps.config.routing, deps.platform ?? process.platform);
+    if (os.excluded.length > 0) {
+      log.write({ type: "platform.unsupported", instances: os.excluded });
+    }
+    const withOs = (reason: string) => withExclusions(reason, os.excluded);
+
     const mcp = planMcp({
       wanted: opts.mcpServers ?? [],
       forwardMcp: exec.forwardMcp === true,
       repoRoot,
       env: deps.env,
-      routing: deps.config.routing,
+      routing: os.routing,
       ...(deps.resolveMcp ? { resolve: deps.resolveMcp } : {}),
     });
     if (!mcp.ok) {
       log.write({ type: "mcp.unavailable", reason: mcp.reason });
-      return await finish(toHost(null, mcp.reason));
+      return await finish(toHost(null, withOs(mcp.reason)));
     }
     if (mcp.servers.length > 0) {
       log.write({
@@ -286,7 +310,7 @@ export async function executeTask(
     });
     if (!web.ok) {
       log.write({ type: "web.unavailable", reason: web.reason });
-      return await finish(toHost(null, web.reason));
+      return await finish(toHost(null, withOs(web.reason)));
     }
     if (web.web !== undefined) {
       log.write({ type: "web.forward", access: web.web, excludedInstances: web.excluded });
@@ -310,7 +334,7 @@ export async function executeTask(
     });
     if (!browser.ok) {
       log.write({ type: "browser.unavailable", reason: browser.reason });
-      return await finish(toHost(null, browser.reason));
+      return await finish(toHost(null, withOs(browser.reason)));
     }
     if (browser.browser !== undefined) {
       log.write({
@@ -348,7 +372,7 @@ export async function executeTask(
     });
 
     if (decision.action === "reject") return await finish(rejected(decision.reason));
-    if (decision.action === "host") return await finish(toHost(null, decision.reason));
+    if (decision.action === "host") return await finish(toHost(null, withOs(decision.reason)));
 
     const rc: RunContext = {
       deps,
@@ -383,7 +407,7 @@ export async function executeTask(
     const reason = controller.signal.aborted
       ? `interrupted; ${why || "no attempt started"}`
       : `all delegation targets exhausted: ${why}`;
-    return await finish(toHost(lastOutcome, reason));
+    return await finish(toHost(lastOutcome, withOs(reason)));
   } catch (err) {
     // E.g. an invalid routing config or a quota provider bug: the task still goes back (§2.7).
     const message = err instanceof Error ? err.message : String(err);

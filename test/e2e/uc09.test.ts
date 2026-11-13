@@ -61,7 +61,8 @@ const claudeAgent = (cwd: string) =>
     cwd,
   });
 
-describe("[UC9] collaborator without Dispatch", () => {
+// POSIX-only: simulates a GUI host with `/usr/bin/env -i PATH=/usr/bin:/bin /bin/sh -c`.
+describe.skipIf(process.platform === "win32")("[UC9] collaborator without Dispatch", () => {
   it("[UC9][AC5] a fresh clone of a repo with .dispatch/ is silent for Claude Code and Codex hooks", () => {
     // The owner: installs and commits the shared policy.
     const owner = createWorld({ global: THREE_PROVIDERS });

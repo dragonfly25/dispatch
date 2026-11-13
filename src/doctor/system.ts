@@ -14,13 +14,15 @@ import {
 import { dirname, join } from "node:path";
 import type { AppContext } from "../app/context.js";
 import { globalConfigPath } from "../config/paths.js";
+import { parseLauncherScript } from "../platform/launcher.js";
+import { launcherFileName, type OsPlatform } from "../platform/os.js";
 import { assertSupportedPlatform } from "../platform/platform.js";
 import { type DoctorLine, mkLine } from "./types.js";
 
 const MIN_NODE: [number, number] = [22, 13];
 const REFRESH = "dispatch setup --refresh";
 
-/** `platform`: macOS or Linux, on a supported Node. */
+/** `platform`: macOS, Linux or Windows (win32), on a supported Node. */
 export function platformLine(
   platform = process.platform,
   nodeVersion = process.version,
@@ -43,8 +45,6 @@ export function platformLine(
   return mkLine("ok", "system", "platform", `${platform}, node ${nodeVersion}`);
 }
 
-const LAUNCHER_EXEC = /^exec "([^"]+)"(?: [^"\s]+)* "([^"]+)" "\$@"$/m;
-
 function executable(path: string): boolean {
   try {
     accessSync(path, constants.X_OK);
@@ -55,23 +55,26 @@ function executable(path: string): boolean {
 }
 
 /**
- * `launcher`: `<dispatchHome>/bin/dispatch` exists and the node, cli and hook paths it names still
- * exist (they go stale after a Node upgrade or an npm reinstall).
+ * `launcher`: `<dispatchHome>/bin/dispatch` (`dispatch.cmd` on Windows) exists and the node, cli
+ * and hook paths it names still exist (they go stale after a Node upgrade or an npm reinstall).
  */
-export function launcherLine(dispatchHome: string): DoctorLine {
-  const launcher = join(dispatchHome, "bin", "dispatch");
+export function launcherLine(
+  dispatchHome: string,
+  platform: OsPlatform = process.platform,
+): DoctorLine {
+  const launcher = join(dispatchHome, "bin", launcherFileName(platform));
   if (!existsSync(launcher)) {
     return mkLine("warn", "system", "launcher", `${launcher} does not exist (setup has not run)`, {
       fix: "dispatch setup",
     });
   }
-  const m = LAUNCHER_EXEC.exec(readFileSync(launcher, "utf8"));
-  if (!m?.[1] || !m[2]) {
+  const parsed = parseLauncherScript(readFileSync(launcher, "utf8"));
+  if (parsed === null) {
     return mkLine("warn", "system", "launcher", `${launcher} has an unrecognised format`, {
       fix: REFRESH,
     });
   }
-  const [node, cli] = [m[1], m[2]];
+  const [node, cli] = [parsed.nodePath, parsed.cliPath];
   const hook = join(dirname(cli), "hook.mjs");
   const data = { launcher, node, cli, hook };
   const gone = [

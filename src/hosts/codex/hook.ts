@@ -30,6 +30,8 @@ import {
   readHookCache,
   trustedRepoFor,
 } from "../../hook/cache.js";
+import { runningInvocation } from "../../platform/invocation.js";
+import { isWindows, type OsPlatform } from "../../platform/os.js";
 
 /** Default `wait --timeout` (s): just under one 300 s unified-exec poll (docs/spikes/codex.md). */
 export const CODEX_WAIT_TIMEOUT_SEC = 280;
@@ -67,6 +69,19 @@ const CALL_FORM =
   "pipes, ;, &&, $, backticks, redirects or heredocs (otherwise the command runs sandboxed " +
   "and Dispatch refuses it)";
 
+/** Windows: no rule lets Dispatch leave the sandbox, and the task goes in a file (PowerShell). */
+const CALL_FORM_WINDOWS =
+  "as one PowerShell command on its own, with exactly that prefix and no other command; write " +
+  "the task to .dispatch/inbox/<name>.md first. Dispatch needs network: if the run fails " +
+  "without it, ask to run the same command outside the sandbox";
+
+/** How the model starts a run: the call prefix, the task argument and the call-form rules. */
+function callParts(launcher: string, platform: OsPlatform, task: string) {
+  return isWindows(platform)
+    ? { l: launcher, taskArg: "--task-file .dispatch/inbox/<name>.md", form: CALL_FORM_WINDOWS }
+    : { l: shellArg(launcher), taskArg: `--task '${task}'`, form: CALL_FORM };
+}
+
 /** How to wait, including the write_stdin hint (docs/spikes/hosts-prototype.md finding 10). */
 function waitText(l: string): string {
   return (
@@ -88,9 +103,17 @@ export function redirects(cache: HookCache): boolean {
   return cache.policy.hardMode && cache.policy.hardInterception === true;
 }
 
-/** The SessionStart `additionalContext`: the cached policy, when and how to delegate. */
-export function codexPolicyText(cache: HookCache, launcher: string): string {
-  const l = shellArg(launcher);
+/**
+ * The SessionStart `additionalContext`: the cached policy, when and how to delegate. `launcher`
+ * is the launcher path on POSIX and the ready PowerShell call prefix on Windows
+ * (`runningInvocation`).
+ */
+export function codexPolicyText(
+  cache: HookCache,
+  launcher: string,
+  platform: OsPlatform = process.platform,
+): string {
+  const { l, taskArg, form } = callParts(launcher, platform, "<task>");
   const summary = cache.policy.summary.trim().slice(0, MAX_SUMMARY);
   return [
     `Dispatch is active in this repository (profile: ${cache.policy.profile}).`,
@@ -99,7 +122,7 @@ export function codexPolicyText(cache: HookCache, launcher: string): string {
       "through Dispatch instead of being done in this session, unless the user says otherwise. " +
       "Work the policy keeps on or pins to the host stays in this session.",
     "How (see the `dispatch` skill): run " +
-      `\`${l} run --detach --json --task '<task>' [--task-type T] [--path P]...\` ${CALL_FORM}, ` +
+      `\`${l} run --detach --json ${taskArg} [--task-type T] [--path P]...\` ${form}, ` +
       waitText(l),
     redirects(cache)
       ? "Native sub-agent spawns (spawn_agent) are redirected to Dispatch in this repository."
@@ -111,14 +134,18 @@ export function codexPolicyText(cache: HookCache, launcher: string): string {
 }
 
 /** The PreToolUse deny reason: restate the task, run the launcher, wait (spec §2.7 fallback). */
-export function redirectReason(launcher: string): string {
-  const l = shellArg(launcher);
+export function redirectReason(launcher: string, platform: OsPlatform = process.platform): string {
+  const { l, taskArg, form } = callParts(
+    launcher,
+    platform,
+    "<the sub-agent task, in your own words>",
+  );
   return [
     "Dispatch: native sub-agents are redirected to Dispatch in this repository. Do not retry " +
       "spawn_agent. Dispatch cannot read the spawn message, so restate the sub-agent's task " +
       "yourself, complete and self-contained.",
-    `Run \`${l} run --detach --json --task '<the sub-agent task, in your own words>'\` ` +
-      `${CALL_FORM}, read runId from its JSON output, ${waitText(l)}`,
+    `Run \`${l} run --detach --json ${taskArg}\` ` +
+      `${form}, read runId from its JSON output, ${waitText(l)}`,
     RESULT_TEXT,
   ].join(" ");
 }
@@ -145,7 +172,7 @@ function trustedContext(input: HookInput, env: Env): { cache: HookCache; launche
   ) {
     return null;
   }
-  return { cache, launcher: join(home, "bin", "dispatch") };
+  return { cache, launcher: runningInvocation(home, "powershell") };
 }
 
 const shortString = (v: unknown): string | null =>

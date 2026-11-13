@@ -28,6 +28,7 @@ import {
 describe("real-CLI guard [AC1]", () => {
   it("[AC1] the committed shims exist and are executable", () => {
     expect(() => assertFakeShimsInstalled()).not.toThrow();
+    if (process.platform === "win32") return; // no exec bit; the .cmd extension makes it runnable
     for (const cli of FAKE_CLIS) expect(statSync(join(FAKES_BIN, cli)).mode & 0o111).not.toBe(0);
   });
 
@@ -40,21 +41,25 @@ describe("real-CLI guard [AC1]", () => {
     });
   });
 
-  it("[AC1] assertNoRealCli throws when a real or foreign CLI would be picked", async () => {
-    await withFakes({}, ({ env, stateDir }) => {
-      expect(() => assertNoRealCli({ PATH: "/usr/bin:/bin" })).toThrow(/not on PATH|resolves to/);
-      const decoyDir = join(stateDir, "decoy");
-      mkdirSync(decoyDir);
-      writeFileSync(join(decoyDir, "claude"), "#!/bin/sh\necho real\n");
-      chmodSync(join(decoyDir, "claude"), 0o755);
-      const path = `${decoyDir}:${env.PATH}`;
-      expect(() => assertNoRealCli({ PATH: path })).toThrow(/claude: resolves to/);
-      symlinkSync(join(decoyDir, "claude"), join(decoyDir, "codex"));
-      expect(() => assertNoRealCli({ PATH: `${decoyDir}:${env.PATH}` })).toThrow(
-        /codex: resolves to/,
-      );
-    });
-  });
+  // POSIX layout (sh decoys, exec bit); the Windows layout is covered in "Windows fake layout".
+  it.skipIf(process.platform === "win32")(
+    "[AC1] assertNoRealCli throws when a real or foreign CLI would be picked",
+    async () => {
+      await withFakes({}, ({ env, stateDir }) => {
+        expect(() => assertNoRealCli({ PATH: "/usr/bin:/bin" })).toThrow(/not on PATH|resolves to/);
+        const decoyDir = join(stateDir, "decoy");
+        mkdirSync(decoyDir);
+        writeFileSync(join(decoyDir, "claude"), "#!/bin/sh\necho real\n");
+        chmodSync(join(decoyDir, "claude"), 0o755);
+        const path = `${decoyDir}:${env.PATH}`;
+        expect(() => assertNoRealCli({ PATH: path })).toThrow(/claude: resolves to/);
+        symlinkSync(join(decoyDir, "claude"), join(decoyDir, "codex"));
+        expect(() => assertNoRealCli({ PATH: `${decoyDir}:${env.PATH}` })).toThrow(
+          /codex: resolves to/,
+        );
+      });
+    },
+  );
 
   it("[AC1] createFakes/dispose manage the lifecycle manually and options extend env", () => {
     const fakes = createFakes({}, { env: { EXTRA: "1" } });
@@ -94,7 +99,9 @@ describe("tempHome / tempRepo [AC1]", () => {
     expect(repo.git("log", "-1", "--format=%ae")).toBe("test@example.invalid");
     expect(repo.git("branch", "--show-current")).toBe("main");
     expect(repo.git("status", "--porcelain")).toBe("");
-    expect(statSync(join(repo.dir, "bin/run.sh")).mode & 0o111).not.toBe(0);
+    if (process.platform !== "win32") {
+      expect(statSync(join(repo.dir, "bin/run.sh")).mode & 0o111).not.toBe(0);
+    }
     repo.write("new.txt", "n");
     expect(repo.git("status", "--porcelain")).toBe("?? new.txt");
     expect(repo.commitAll("second")).toMatch(/^[0-9a-f]{40}$/);
@@ -112,26 +119,30 @@ describe("tempHome / tempRepo [AC1]", () => {
 });
 
 describe("snapshotTree / treeHash [AC1]", () => {
-  it("[AC1] records sha256, mode, symlink targets and empty dirs, skipping .git/objects", () => {
-    const repo = tempRepo({
-      files: { "a.txt": "a", "sub/b.sh": { content: "b", mode: 0o755 }, l: { symlink: "a.txt" } },
-    });
-    mkdirSync(join(repo.dir, "empty"));
-    const snap = snapshotTree(repo.dir);
-    expect(snap["a.txt"]).toMatchObject({ type: "file", mode: 0o644 });
-    expect(snap["a.txt"]?.sha256).toMatch(/^[0-9a-f]{64}$/);
-    expect(snap["sub/b.sh"]?.mode).toBe(0o755);
-    expect(snap.l).toEqual({ type: "symlink", target: "a.txt" });
-    expect(snap.empty?.type).toBe("dir");
-    expect(snap[".git/HEAD"]?.type).toBe("file");
-    expect(Object.keys(snap).some((k) => k.startsWith(".git/objects"))).toBe(false);
-    expect(Object.keys(snapshotTree(repo.dir, { exclude: [/^\.git/, "sub"] })).sort()).toEqual([
-      "a.txt",
-      "empty",
-      "l",
-    ]);
-    repo.cleanup();
-  });
+  // POSIX permission bits (Windows reports 0o666/0o444 only).
+  it.skipIf(process.platform === "win32")(
+    "[AC1] records sha256, mode, symlink targets and empty dirs, skipping .git/objects",
+    () => {
+      const repo = tempRepo({
+        files: { "a.txt": "a", "sub/b.sh": { content: "b", mode: 0o755 }, l: { symlink: "a.txt" } },
+      });
+      mkdirSync(join(repo.dir, "empty"));
+      const snap = snapshotTree(repo.dir);
+      expect(snap["a.txt"]).toMatchObject({ type: "file", mode: 0o644 });
+      expect(snap["a.txt"]?.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(snap["sub/b.sh"]?.mode).toBe(0o755);
+      expect(snap.l).toEqual({ type: "symlink", target: "a.txt" });
+      expect(snap.empty?.type).toBe("dir");
+      expect(snap[".git/HEAD"]?.type).toBe("file");
+      expect(Object.keys(snap).some((k) => k.startsWith(".git/objects"))).toBe(false);
+      expect(Object.keys(snapshotTree(repo.dir, { exclude: [/^\.git/, "sub"] })).sort()).toEqual([
+        "a.txt",
+        "empty",
+        "l",
+      ]);
+      repo.cleanup();
+    },
+  );
 
   it("[AC1] treeHash is stable across read-only git commands and changes on any edit", () => {
     const repo = tempRepo();

@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Native Windows support (win32; WSL keeps the Linux path). Binaries resolve through `PATHEXT` and
+  npm cmd-shims start as `node <script>` (never through `cmd.exe`); process trees stop with
+  `taskkill /T`; detached runs cancel through a `cancel.request` file; the child env allow-list
+  adds the Windows system variables; home falls back to `USERPROFILE`; worktree bootstrap uses
+  junctions. Launcher `~/.dispatch/bin/dispatch.cmd`, Claude Code hooks in exec form (needs
+  Claude Code 2.1.139+ and Git for Windows), Codex hooks as a PowerShell script, no Codex rules
+  file on Windows. Delegated codex runs use `windows.sandbox="elevated"`; delegated claude and agy
+  are refused on Windows (no OS sandbox / unverified) and routed around. `cancel` now finds the run
+  directory from the run record (state migration v2), not from the cwd. CI adds `windows-latest` test and
+  pack-smoke jobs. Threat model T17; facts in `docs/spikes/windows.md`.
 - Isolated browser for delegated agents: custom agents that list the Claude desktop browser tools
   (`mcp__Claude_Browser__*`) are delegated to codex with a Dispatch-owned Playwright MCP server
   (`dispatch_browser`): the installed Google Chrome, `--isolated --headless`, a temporary empty
@@ -60,6 +70,9 @@ All notable changes to this project are documented here. The format follows
   stale handoffs, expired passthrough entries and old handoff-run records.
 
 ### Changed
+- README reworked: a step-by-step sequence diagram of a delegated task, the three ways a task
+  reaches Dispatch with examples, knobs moved to a collapsed table, a routing flowchart, command,
+  Windows and troubleshooting tables.
 - `hosts.claude-code.intercept` defaults to `auto` (general-purpose plus eligible custom agents);
   `"*"` now means every eligible type (built-ins without an agent file are no longer redirected).
 - The claude reverse model table classifies `*fable*` as `max`.
@@ -70,6 +83,7 @@ All notable changes to this project are documented here. The format follows
   provider are delegated through Dispatch unless the user says otherwise.
 
 ### Fixed
+- Codex `SKILL.md` named a nonexistent `--prompt-file` flag; it now uses `--task-file`.
 - Antigravity probe: `agy --help` flags are read from stderr as well as stdout. agy 1.5.3 prints its
   whole help on stderr, so `dispatch doctor` warned "`--help` listed no flags" and the required
   isolation flags were never verified.

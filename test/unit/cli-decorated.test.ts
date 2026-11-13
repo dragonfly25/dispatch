@@ -205,6 +205,18 @@ describe("setup plan preview", () => {
     expect(`${p.changes}${p.grants}`).not.toContain(ESC);
   });
 
+  it("Codex without a rules file (Windows) grants only the hooks", () => {
+    const hooksOnly = {
+      ...plan,
+      groups: [{ host: "codex", ops: [op("/home/me/.codex/hooks.json", "runs the hooks")] }],
+    };
+    const p = renderPlanPreview(hooksOnly, null, { home: "/home/me" });
+    expect(p.grants).toContain(
+      "  Codex runs the Dispatch hooks once you approve them with /hooks.",
+    );
+    expect(p.grants).not.toContain("outside its sandbox");
+  });
+
   it("decorated: colors and a warning symbol on the grants; nothing to grant gives no block", () => {
     const p = renderPlanPreview(plan, null, { ui, home: "/home/me" });
     expect(p.grants).toContain("⚠");

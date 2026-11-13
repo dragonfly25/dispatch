@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DispatchError } from "../core/errors.js";
 import { type ExecToolResult, execTool } from "../runner/exec.js";
 
@@ -117,13 +117,16 @@ export async function worktreeRemove(repo: string, path: string): Promise<void> 
   await git(repo, ["worktree", "remove", "--force", path]);
 }
 
-/** Paths of all worktrees registered for the repository (the main one first). */
+/**
+ * Paths of all worktrees registered for the repository (the main one first), in the platform's
+ * spelling (git for Windows prints `C:/x/y`; `resolve` turns that into `C:\\x\\y`).
+ */
 export async function worktreeList(repo: string): Promise<string[]> {
   const out = await git(repo, ["worktree", "list", "--porcelain", "-z"]);
   return out
     .split("\0")
     .filter((l) => l.startsWith("worktree "))
-    .map((l) => l.slice("worktree ".length));
+    .map((l) => resolve(l.slice("worktree ".length)));
 }
 
 /** Drops administrative records of worktrees whose directory is gone. */

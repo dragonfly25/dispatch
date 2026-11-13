@@ -252,6 +252,23 @@ export class SqliteStateStore implements StateStore {
       );
   }
 
+  /**
+   * Records the absolute run directory of `runId` (written by `run --detach`, read by `cancel` so
+   * it does not depend on the cwd it is started from). Redacted like every other write. Not part of {@link RunRecord} (frozen).
+   */
+  setRunDir(runId: string, dir: string): void {
+    const res = this.db
+      .prepare("UPDATE runs SET run_dir = ? WHERE run_id = ?")
+      .run(this.#clean(dir), runId);
+    if (Number(res.changes) === 0) throw new Error(`unknown run: ${runId}`);
+  }
+
+  /** The run directory recorded with {@link setRunDir}; null for unknown runs and older rows. */
+  getRunDir(runId: string): string | null {
+    const row = this.db.prepare("SELECT run_dir FROM runs WHERE run_id = ?").get(runId);
+    return row ? strOrNull(row.run_dir) : null;
+  }
+
   /** Newest runs first, optionally filtered by status. `limit` defaults to 50. */
   listRuns(options: ListRunsOptions = {}): RunRecord[] {
     const limit = options.limit ?? 50;

@@ -1,5 +1,6 @@
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
+import { envGet } from "../platform/os.js";
 
 /** Name of the environment variable that carries the nesting depth. */
 export const DEPTH_ENV = "DISPATCH_DEPTH";
@@ -26,7 +27,7 @@ export class RecursionRejectedError extends DispatchError {
  * infinitely deep, so a corrupted variable refuses instead of silently allowing recursion.
  */
 export function currentDepth(env: Readonly<Record<string, string | undefined>>): number {
-  const raw = env[DEPTH_ENV]?.trim();
+  const raw = envGet(env, DEPTH_ENV)?.trim();
   if (raw === undefined || raw === "") return 0;
   return /^\d+$/.test(raw) ? Number(raw) : Number.POSITIVE_INFINITY;
 }

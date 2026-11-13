@@ -43,6 +43,7 @@ const SESSION = "00000000-0000-4000-8000-000000000001";
 // ---------------------------------------------------------------- logging
 
 function currentPgid() {
+  if (process.platform === "win32") return null; // no process groups
   try {
     const stat = fs.readFileSync("/proc/self/stat", "utf8");
     return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
@@ -425,7 +426,9 @@ const scenarios = {
       await write(process.stderr, "fake-cli recurse: no command and DISPATCH_RECURSE_CMD unset\n");
       return 97;
     }
-    const r = spawnSync("/bin/sh", ["-c", command], {
+    // Windows: Git for Windows' sh.exe from PATH (the commands are sh syntax in every test).
+    const sh = process.platform === "win32" ? "sh" : "/bin/sh";
+    const r = spawnSync(sh, ["-c", command], {
       cwd,
       encoding: "utf8",
       timeout: sc.timeoutMs ?? 30000,

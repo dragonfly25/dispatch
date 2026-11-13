@@ -10,6 +10,7 @@ import {
   policyText,
   sessionStartResponse,
 } from "../../../src/hosts/claude-code/hook.js";
+import { launcherFileName } from "../../../src/platform/os.js";
 import { type TempHome, tempHome } from "../../support/temp.js";
 
 let h: TempHome;
@@ -136,7 +137,7 @@ describe.skipIf(!existsSync(dist))("dist/hook.mjs claude-code SessionStart [UC9]
     const out = JSON.parse(r.out);
     expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(out.hookSpecificOutput.additionalContext).toContain(
-      `${join(h.dispatchHome, "bin", "dispatch")} wait <runId> --json --timeout 100`,
+      `${join(h.dispatchHome, "bin", launcherFileName())} wait <runId> --json --timeout 100`,
     );
   });
 

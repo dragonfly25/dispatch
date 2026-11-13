@@ -23,6 +23,15 @@ const GRANT_SUMMARY: Record<string, string> = {
     "Codex may run the Dispatch launcher outside its sandbox, and runs the Dispatch hooks once you approve them with /hooks.",
 };
 
+/** Codex summary when the plan installs no rules file (Windows): hooks only. */
+const CODEX_HOOKS_ONLY_SUMMARY = "Codex runs the Dispatch hooks once you approve them with /hooks.";
+
+/** The one-line summary of a host's grants (Codex without a rules file grants hooks only). */
+function grantSummary(host: string, files: readonly string[]): string | undefined {
+  if (host === "codex" && !files.some((f) => f.endsWith(".rules"))) return CODEX_HOOKS_ONLY_SUMMARY;
+  return GRANT_SUMMARY[host];
+}
+
 /** The global config setup is about to write. */
 export interface ConfigPreview {
   path: string;
@@ -78,7 +87,11 @@ export function renderPlanPreview(
   for (const g of plan.groups) {
     const granting = g.ops.filter((op) => op.trustGrant !== null);
     if (granting.length === 0) continue;
-    grants.push(`${lead}${ui.bold(GRANT_SUMMARY[g.host] ?? `${label(g.host)}:`)}`);
+    const summary = grantSummary(
+      g.host,
+      granting.map((op) => op.file),
+    );
+    grants.push(`${lead}${ui.bold(summary ?? `${label(g.host)}:`)}`);
     for (const op of granting) {
       grants.push(
         ui.dim(`    ${tildify(op.file, home)}: ${tildifyText(op.trustGrant ?? "", home)}`),

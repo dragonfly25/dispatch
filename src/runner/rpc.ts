@@ -1,12 +1,15 @@
 /**
  * Minimal newline-delimited JSON-RPC client over a long-lived child's stdio (used by the codex
  * `app-server` quota reader). Responses are correlated by id; notifications and unparsable lines
- * are ignored; requests from the server are answered with "method not found". The child runs in
- * its own process group and the whole group is terminated when the session ends, times out or is
- * aborted.
+ * are ignored; requests from the server are answered with "method not found". The child's process
+ * tree (POSIX: its own process group; Windows: `taskkill /T`) is terminated when the session ends,
+ * times out or is aborted.
  */
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import type { OsPlatform } from "../platform/os.js";
+import { spawnCommandFor, type ToSpawn } from "./spawn.js";
+import { type ProcessTree, processTree, spawnDetachedFor } from "./tree.js";
 
 /** Options of {@link runRpcSession}. */
 export interface RpcSessionOptions {
@@ -23,6 +26,12 @@ export interface RpcSessionOptions {
   politeMs?: number;
   /** Time between SIGTERM and SIGKILL (default 1 000 ms). */
   killGraceMs?: number;
+  /** OS whose spawn shape and tree termination are used (tests). Default `process.platform`. */
+  platform?: OsPlatform;
+  /** Builds the {@link ProcessTree} of the child's pid (tests). Default {@link processTree}. */
+  tree?: (pid: number) => ProcessTree;
+  /** Spawn-shape conversion (tests). Default `toSpawnCommand`. */
+  toSpawn?: ToSpawn;
 }
 
 /** The server answered a request with a JSON-RPC error object. */
@@ -54,15 +63,6 @@ type Json = Record<string, unknown>;
 const isObject = (v: unknown): v is Json =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** Sends `signal` to the child's process group; ignores groups that are already gone. */
-function signalGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch {
-    // ESRCH: nothing left in the group.
-  }
-}
-
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms).unref());
 
 /**
@@ -74,14 +74,23 @@ export async function runRpcSession<T>(
   opts: RpcSessionOptions,
   body: (session: RpcSession) => Promise<T>,
 ): Promise<T> {
-  const child = spawn(opts.binary, [...opts.argv], {
+  const platform = opts.platform ?? process.platform;
+  const cmd = spawnCommandFor(opts.binary, opts.argv, platform, opts.toSpawn);
+  const child = spawn(cmd.command, cmd.args, {
     cwd: opts.cwd,
     env: { ...opts.env },
-    detached: true,
+    detached: spawnDetachedFor(platform),
+    shell: false,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  let hasExited = false;
+  const exited = new Promise<void>((resolve) =>
+    child.once("exit", () => {
+      hasExited = true;
+      resolve();
+    }),
+  );
   let fail!: (err: Error) => void;
   const dead = new Promise<never>((_, reject) => {
     fail = reject;
@@ -163,24 +172,33 @@ export async function runRpcSession<T>(
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onAbort);
-    await terminate(child.pid, exited, child.stdin, ok, opts);
+    const pid = child.pid;
+    const tree =
+      pid === undefined ? undefined : (opts.tree ?? ((p) => processTree(p, { platform })))(pid);
+    await terminate(tree, exited, () => hasExited, child.stdin, ok, opts);
   }
 }
 
-/** Ends the session: stdin EOF (when healthy), then SIGTERM, then SIGKILL of the whole group. */
+/**
+ * Ends the session: stdin EOF (when healthy), then a polite request to the whole tree, then a
+ * forced kill. A tree that cannot outlive its root (Windows) is left alone once the root exited.
+ */
 async function terminate(
-  pid: number | undefined,
+  tree: ProcessTree | undefined,
   exited: Promise<void>,
+  hasExited: () => boolean,
   stdin: NodeJS.WritableStream,
   polite: boolean,
   opts: RpcSessionOptions,
 ): Promise<void> {
-  if (pid === undefined) return;
+  if (tree === undefined) return;
+  const gone = () => hasExited() && !tree.outlivesRoot;
   if (polite) {
     stdin.end();
     await Promise.race([exited, delay(opts.politeMs ?? 300)]);
   }
-  signalGroup(pid, "SIGTERM");
-  await Promise.race([exited, delay(opts.killGraceMs ?? 1_000)]);
-  signalGroup(pid, "SIGKILL");
+  if (gone()) return;
+  if (tree.terminate()) await Promise.race([exited, delay(opts.killGraceMs ?? 1_000)]);
+  if (gone()) return;
+  tree.kill();
 }

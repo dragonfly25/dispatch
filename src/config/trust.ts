@@ -6,9 +6,13 @@
  *   path of a repo share one identity.
  * - Policy set: `.dispatch/config.yaml`, `profiles/*.yaml`, `mappings/*.yaml`, sorted.
  * - Hash: sha256 over `relpath \0 byteLength \0 bytes` of each file. Each file is read ONCE
- *   (O_NOFOLLOW) into a buffer; the same buffers are hashed and later parsed, so a file
+ *   (O_NOFOLLOW; Windows has no such flag: lstat before and fstat after the open must name the
+ *   same non-link file) into a buffer; the same buffers are hashed and later parsed, so a file
  *   swapped after hashing cannot change the policy that is applied.
- * - Any symlink inside `.dispatch/` makes the repo untrusted.
+ * - Any symlink inside `.dispatch/` makes the repo untrusted (on Windows, junctions too: Node's
+ *   lstat reports them as symbolic links).
+ * - Windows: the id comes from the native realpath (canonical drive-letter and name case) and is
+ *   looked up in `trusted_repos` case-insensitively, so `c:\repo` and `C:\Repo` share a trust.
  */
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -30,6 +34,8 @@ import { dirname, join, resolve } from "node:path";
 import { isMap, parseDocument } from "yaml";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
+import { isWindows, type OsPlatform } from "../platform/os.js";
+import { pathKey } from "./pathkey.js";
 import {
   CONFIG_FILE,
   globalConfigPath,
@@ -48,9 +54,21 @@ export interface RepoLocation {
   id: string;
 }
 
+/**
+ * realpath used for repo identities. Windows: the native resolver (GetFinalPathNameByHandle),
+ * which also canonicalises the case of every component; POSIX: Node's default.
+ */
+function realpathFor(platform: OsPlatform): (p: string) => string {
+  return isWindows(platform) ? realpathSync.native : realpathSync;
+}
+
 /** Finds the enclosing git checkout of `cwd`, or `null` when there is none. */
-export function findRepo(cwd: string): RepoLocation | null {
-  let dir = realpathSync(cwd);
+export function findRepo(
+  cwd: string,
+  platform: OsPlatform = process.platform,
+): RepoLocation | null {
+  const real = realpathFor(platform);
+  let dir = real(cwd);
   for (;;) {
     const dotGit = join(dir, ".git");
     const st = lstatOrNull(dotGit);
@@ -65,7 +83,7 @@ export function findRepo(cwd: string): RepoLocation | null {
       const common = existsSync(commonFile)
         ? resolve(gitDir, readFileSync(commonFile, "utf8").trim())
         : gitDir;
-      return { worktreeRoot: dir, id: realpathSync(common) };
+      return { worktreeRoot: dir, id: real(common) };
     }
     const parent = dirname(dir);
     if (parent === dir) return null;
@@ -99,9 +117,14 @@ export interface PolicySet {
   symlink: string | null;
 }
 
-/** Test seam: called after the set is read and hashed, before anything parses it. */
+/** Test seams. */
 export interface TrustHooks {
+  /** Called after the set is read and hashed, before anything parses it. */
   afterHash?(set: PolicySet): void;
+  /** Platform whose rules apply (default `process.platform`). */
+  platform?: OsPlatform;
+  /** File operations of the no-follow read (default: `node:fs`). */
+  fs?: NoFollowFs;
 }
 
 /** Reads and hashes the policy set of a checkout. Missing `.dispatch/` = empty set. */
@@ -118,7 +141,7 @@ export function readPolicySet(worktreeRoot: string, hooks?: TrustHooks): PolicyS
       }
     }
     for (const rel of rels.sort()) {
-      const bytes = readNoFollow(join(worktreeRoot, rel));
+      const bytes = readNoFollow(join(worktreeRoot, rel), hooks?.platform, hooks?.fs);
       if (bytes) files.push({ rel, bytes });
     }
   }
@@ -147,29 +170,98 @@ function findSymlink(root: string, rel: string): string | null {
   return null;
 }
 
-/** Reads a regular file without following a final symlink; null when absent. */
-function readNoFollow(path: string): Buffer | null {
+/** The `node:fs` calls {@link readNoFollow} makes (a test seam). */
+export interface NoFollowFs {
+  lstatSync(path: string, opts: { bigint: true }): FileIdentity;
+  openSync(path: string, flags: number): number;
+  fstatSync(fd: number, opts: { bigint: true }): FileIdentity & { size: bigint };
+  readSync(fd: number, buf: Buffer, off: number, len: number, pos: number): number;
+  closeSync(fd: number): void;
+}
+
+/** What identifies a file across lstat and fstat. */
+export interface FileIdentity {
+  dev: bigint;
+  ino: bigint;
+  isFile(): boolean;
+  isSymbolicLink(): boolean;
+}
+
+const nodeFs: NoFollowFs = { lstatSync, openSync, fstatSync, readSync, closeSync };
+
+function cannotRead(path: string, cause: unknown): DispatchError {
+  return new DispatchError(`cannot read ${path}`, ExitCode.USAGE, "config.trust", { cause });
+}
+
+/**
+ * Opens `path` for reading without following a final symlink, or returns null when absent.
+ * POSIX: `O_NOFOLLOW` (a link fails with ELOOP). Windows has no `O_NOFOLLOW` (Node's constant is
+ * undefined, so the flag would silently be 0): the path is lstat'ed first (a symlink or junction
+ * is refused), opened, and the open handle must have the same volume and file index as the
+ * lstat'ed entry, so a link swapped in between is refused too.
+ */
+function openNoFollow(path: string, platform: OsPlatform, fs: NoFollowFs): number | null {
+  const absent = (err: unknown) => {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR";
+  };
+  if (!isWindows(platform)) {
+    try {
+      return fs.openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    } catch (err) {
+      if (absent(err)) return null;
+      throw cannotRead(path, err);
+    }
+  }
+  let before: FileIdentity;
   let fd: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    before = fs.lstatSync(path, { bigint: true });
+    if (before.isSymbolicLink()) throw Object.assign(new Error("symbolic link"), { code: "ELOOP" });
+    fd = fs.openSync(path, constants.O_RDONLY);
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    throw new DispatchError(`cannot read ${path}`, ExitCode.USAGE, "config.trust", { cause: err });
+    if (absent(err)) return null;
+    throw cannotRead(path, err);
   }
   try {
-    const st = fstatSync(fd);
+    const after = fs.fstatSync(fd, { bigint: true });
+    if (after.dev !== before.dev || after.ino !== before.ino) {
+      throw cannotRead(
+        path,
+        Object.assign(new Error("file replaced while opening"), { code: "ELOOP" }),
+      );
+    }
+  } catch (err) {
+    fs.closeSync(fd);
+    throw err instanceof DispatchError ? err : cannotRead(path, err);
+  }
+  return fd;
+}
+
+/**
+ * Reads a regular file without following a final symlink (see {@link openNoFollow}); null when
+ * absent or not a regular file. Exported for tests.
+ */
+export function readNoFollow(
+  path: string,
+  platform: OsPlatform = process.platform,
+  fs: NoFollowFs = nodeFs,
+): Buffer | null {
+  const fd = openNoFollow(path, platform, fs);
+  if (fd === null) return null;
+  try {
+    const st = fs.fstatSync(fd, { bigint: true });
     if (!st.isFile()) return null;
-    const buf = Buffer.alloc(st.size);
+    const buf = Buffer.alloc(Number(st.size));
     let off = 0;
     while (off < buf.length) {
-      const n = readSync(fd, buf, off, buf.length - off, off);
+      const n = fs.readSync(fd, buf, off, buf.length - off, off);
       if (n === 0) break;
       off += n;
     }
     return buf.subarray(0, off);
   } finally {
-    closeSync(fd);
+    fs.closeSync(fd);
   }
 }
 
@@ -191,17 +283,34 @@ export function checkTrust(
   trusted: Readonly<Record<string, TrustedRepo>>,
   hooks?: TrustHooks,
 ): TrustState {
-  const repo = findRepo(cwd);
+  const platform = hooks?.platform ?? process.platform;
+  const repo = findRepo(cwd, platform);
   if (!repo) return { status: "none", repo, policy: null, changed: [] };
   const policy = readPolicySet(repo.worktreeRoot, hooks);
   if (policy.symlink) return { status: "symlink", repo, policy, changed: [] };
   if (policy.files.length === 0) return { status: "none", repo, policy, changed: [] };
-  const entry = trusted[repo.id];
+  const entry = trustedEntry(trusted, repo.id, platform);
   if (!entry) return { status: "untrusted", repo, policy, changed: [] };
   if (entry.hash === policy.hash) return { status: "trusted", repo, policy, changed: [] };
   const names = new Set([...Object.keys(entry.files), ...Object.keys(policy.fileHashes)]);
   const changed = [...names].filter((n) => entry.files[n] !== policy.fileHashes[n]).sort();
   return { status: "changed", repo, policy, changed };
+}
+
+/**
+ * The `trusted_repos` entry of repo `id`: exact key first; on Windows also any key naming the
+ * same path ({@link pathKey}: case and separators ignored).
+ */
+export function trustedEntry(
+  trusted: Readonly<Record<string, TrustedRepo>>,
+  id: string,
+  platform: OsPlatform = process.platform,
+): TrustedRepo | undefined {
+  if (Object.hasOwn(trusted, id)) return trusted[id];
+  if (!isWindows(platform)) return undefined;
+  const key = pathKey(id, platform);
+  const hit = Object.keys(trusted).find((k) => pathKey(k, platform) === key);
+  return hit === undefined ? undefined : trusted[hit];
 }
 
 /**

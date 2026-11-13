@@ -15,6 +15,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { launcherFileName } from "../../src/platform/os.js";
 import {
   createWorld,
   HELP,
@@ -140,7 +141,7 @@ function codexWorld(globalExtra = "") {
   return {
     w,
     codex,
-    launcher: join(w.home.dispatchHome, "bin", "dispatch"),
+    launcher: join(w.home.dispatchHome, "bin", launcherFileName()),
     command: (event: "SessionStart" | "PreToolUse") => hooks[event]?.[0]?.hooks[0]?.command ?? "",
     matcher: hooks.PreToolUse?.[0]?.matcher,
   };
@@ -185,101 +186,123 @@ describe("[UC3] hard interception: the Codex host", () => {
     expect(w.repo.git("status", "--porcelain")).toBe("?? .dispatch/");
   });
 
-  it("[UC3] a native spawn in a trusted repo is denied with a reason naming run --detach and wait", () => {
-    const { w, command, launcher } = codexWorld();
-    for (const tool of ["spawn_agent", "collaborationspawn_agent", "Agent"]) {
-      const r = fire(w, command("PreToolUse"), spawn(w.repo.dir, tool));
-      expect(r.code, `${tool}: ${r.stderr}`).toBe(0);
-      const out = JSON.parse(r.stdout).hookSpecificOutput;
-      expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
-      const reason = denyReason(r.stdout);
-      expect(reason).toContain("Do not retry spawn_agent");
-      expect(reason).toContain(`${launcher} run --detach --json --task '`);
-      expect(reason).toContain(`${launcher} wait <runId> --json --timeout 280`);
-      expect(reason).toContain("EXTERNAL_AGENT_OUTPUT");
-    }
-    // Other tools are none of its business.
-    expect(fire(w, command("PreToolUse"), spawn(w.repo.dir, "shell")).stdout).toBe("");
-  });
+  // POSIX-only: fires the hook command through `env -i ... /bin/sh -c` like a GUI host.
+  it.skipIf(process.platform === "win32")(
+    "[UC3] a native spawn in a trusted repo is denied with a reason naming run --detach and wait",
+    () => {
+      const { w, command, launcher } = codexWorld();
+      for (const tool of ["spawn_agent", "collaborationspawn_agent", "Agent"]) {
+        const r = fire(w, command("PreToolUse"), spawn(w.repo.dir, tool));
+        expect(r.code, `${tool}: ${r.stderr}`).toBe(0);
+        const out = JSON.parse(r.stdout).hookSpecificOutput;
+        expect(out).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
+        const reason = denyReason(r.stdout);
+        expect(reason).toContain("Do not retry spawn_agent");
+        expect(reason).toContain(`${launcher} run --detach --json --task '`);
+        expect(reason).toContain(`${launcher} wait <runId> --json --timeout 280`);
+        expect(reason).toContain("EXTERNAL_AGENT_OUTPUT");
+      }
+      // Other tools are none of its business.
+      expect(fire(w, command("PreToolUse"), spawn(w.repo.dir, "shell")).stdout).toBe("");
+    },
+  );
 
-  it("[UC3] the denial is silent outside a trusted repo, in a Dispatch child, and when hard mode is off", () => {
-    const { w, command } = codexWorld();
-    const elsewhere = join(w.home.home, "other-project");
-    mkdirSync(elsewhere);
-    for (const [label, r] of [
-      ["untrusted dir", fire(w, command("PreToolUse"), spawn(elsewhere))],
-      ["dispatch child", fire(w, command("PreToolUse"), spawn(w.repo.dir), ["DISPATCH_DEPTH=1"])],
-      ["no tool", fire(w, command("PreToolUse"), {})],
-    ] as const) {
-      expect({ label, code: r.code, out: r.stdout, err: r.stderr }).toEqual({
-        label,
-        code: 0,
-        out: "",
-        err: "",
+  // POSIX-only: fires the hook command through `env -i ... /bin/sh -c` like a GUI host.
+  it.skipIf(process.platform === "win32")(
+    "[UC3] the denial is silent outside a trusted repo, in a Dispatch child, and when hard mode is off",
+    () => {
+      const { w, command } = codexWorld();
+      const elsewhere = join(w.home.home, "other-project");
+      mkdirSync(elsewhere);
+      for (const [label, r] of [
+        ["untrusted dir", fire(w, command("PreToolUse"), spawn(elsewhere))],
+        ["dispatch child", fire(w, command("PreToolUse"), spawn(w.repo.dir), ["DISPATCH_DEPTH=1"])],
+        ["no tool", fire(w, command("PreToolUse"), {})],
+      ] as const) {
+        expect({ label, code: r.code, out: r.stdout, err: r.stderr }).toEqual({
+          label,
+          code: 0,
+          out: "",
+          err: "",
+        });
+      }
+      const soft = codexWorld("hosts:\n  codex: { hard: false }\n");
+      const r = fire(soft.w, soft.command("PreToolUse"), spawn(soft.w.repo.dir));
+      expect({ code: r.code, out: r.stdout }).toEqual({ code: 0, out: "" });
+      // ... but SessionStart still injects the policy there.
+      const start = fire(soft.w, soft.command("SessionStart"), {
+        hook_event_name: "SessionStart",
+        source: "startup",
+        cwd: soft.w.repo.dir,
       });
-    }
-    const soft = codexWorld("hosts:\n  codex: { hard: false }\n");
-    const r = fire(soft.w, soft.command("PreToolUse"), spawn(soft.w.repo.dir));
-    expect({ code: r.code, out: r.stdout }).toEqual({ code: 0, out: "" });
-    // ... but SessionStart still injects the policy there.
-    const start = fire(soft.w, soft.command("SessionStart"), {
-      hook_event_name: "SessionStart",
-      source: "startup",
-      cwd: soft.w.repo.dir,
-    });
-    expect(JSON.parse(start.stdout).hookSpecificOutput.additionalContext).toContain(
-      "Dispatch is active in this repository",
-    );
-  });
+      expect(JSON.parse(start.stdout).hookSpecificOutput.additionalContext).toContain(
+        "Dispatch is active in this repository",
+      );
+    },
+  );
 
-  it("[UC3] the launcher in the deny reason is the one the rules file allows; doctor sees the hooks fire", () => {
-    const { w, codex, command, launcher } = codexWorld();
-    const reason = denyReason(fire(w, command("PreToolUse"), spawn(w.repo.dir)).stdout);
-    const rules = readFileSync(join(codex, "rules", "dispatch.rules"), "utf8");
-    // Every launcher path in the reason is exactly the rule's pattern head (absolute, no ~/PATH).
-    const named = [...reason.matchAll(/(\/\S*\/bin\/dispatch) (run|wait)/g)].map((m) => m[1]);
-    expect(named.length).toBeGreaterThanOrEqual(2);
-    for (const path of named) expect(path).toBe(launcher);
-    expect(rules).toContain(`pattern = ["${launcher}", ["run", "wait", "cancel", "status"]]`);
+  // POSIX-only: fires the hook command through `env -i ... /bin/sh -c` like a GUI host.
+  it.skipIf(process.platform === "win32")(
+    "[UC3] the launcher in the deny reason is the one the rules file allows; doctor sees the hooks fire",
+    () => {
+      const { w, codex, command, launcher } = codexWorld();
+      const reason = denyReason(fire(w, command("PreToolUse"), spawn(w.repo.dir)).stdout);
+      const rules = readFileSync(join(codex, "rules", "dispatch.rules"), "utf8");
+      // Every launcher path in the reason is exactly the rule's pattern head (absolute, no ~/PATH).
+      const named = [...reason.matchAll(/(\/\S*\/bin\/dispatch) (run|wait)/g)].map((m) => m[1]);
+      expect(named.length).toBeGreaterThanOrEqual(2);
+      for (const path of named) expect(path).toBe(launcher);
+      expect(rules).toContain(`pattern = ["${launcher}", ["run", "wait", "cancel", "status"]]`);
 
-    type Checks = { checks: { id: string; status: string }[] };
-    const doctor = () => parseJson<Checks>(w.dispatch(["doctor", "--json"])).checks;
-    // Before any session: the heartbeat is missing and doctor asks for the /hooks approval.
-    const before = doctor();
-    expect(before.find((c) => c.id === "codex.rules-launcher")?.status).toBe("ok");
-    expect(before.find((c) => c.id === "codex.hooks-trusted")?.status).toBe("warn");
-    // A SessionStart (what Codex runs once the hooks are approved) leaves the heartbeat.
-    fire(w, command("SessionStart"), {
-      hook_event_name: "SessionStart",
-      cwd: w.repo.dir,
-      session_id: "s1",
-    });
-    const after = doctor();
-    expect(after.find((c) => c.id === "codex.hooks-trusted")?.status).toBe("ok");
-    expect(after.find((c) => c.id === "codex.files")?.status).toBe("ok");
-  });
+      type Checks = { checks: { id: string; status: string }[] };
+      const doctor = () => parseJson<Checks>(w.dispatch(["doctor", "--json"])).checks;
+      // Before any session: the heartbeat is missing and doctor asks for the /hooks approval.
+      const before = doctor();
+      expect(before.find((c) => c.id === "codex.rules-launcher")?.status).toBe("ok");
+      expect(before.find((c) => c.id === "codex.hooks-trusted")?.status).toBe("warn");
+      // A SessionStart (what Codex runs once the hooks are approved) leaves the heartbeat.
+      fire(w, command("SessionStart"), {
+        hook_event_name: "SessionStart",
+        cwd: w.repo.dir,
+        session_id: "s1",
+      });
+      const after = doctor();
+      expect(after.find((c) => c.id === "codex.hooks-trusted")?.status).toBe("ok");
+      expect(after.find((c) => c.id === "codex.files")?.status).toBe("ok");
+    },
+  );
 
-  it("[UC3] from the denied spawn to the result: the model runs the launcher and gets claude's patch", () => {
-    const { w, command, launcher } = codexWorld();
-    w.fakes.setScenarios({
-      ...HELP,
-      claude: [{ scenario: "success_edit", file: "math.js", content: "claude edit\n" }],
-    });
-    const denied = fire(w, command("PreToolUse"), spawn(w.repo.dir));
-    expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
-    // What the model then runs (host = Codex; the rule matched, so CODEX_SANDBOX is not set).
-    const env = { CODEX_THREAD_ID: "019e-uc3", CODEX_VERSION: "0.167.0" };
-    const start = w.exec(launcher, ["run", "--detach", "--json", "--task", "add sub to math.js"], {
-      env,
-    });
-    expect(start.code, start.stderr).toBe(0);
-    const { runId } = parseJson<{ runId: string }>(start);
-    const done = w.exec(launcher, ["wait", runId, "--json", "--timeout", "60"], { env });
-    expect(done.code, done.stderr).toBe(0);
-    expect(parseJson<{ status: string; externalAgent: { instance: string } }>(done)).toMatchObject({
-      status: "completed",
-      externalAgent: { instance: "claude" },
-    });
-    expect(w.fakes.readLog({ cli: "codex", kind: "run" })).toEqual([]);
-  });
+  // POSIX-only: fires the hook command through `env -i ... /bin/sh -c` like a GUI host.
+  it.skipIf(process.platform === "win32")(
+    "[UC3] from the denied spawn to the result: the model runs the launcher and gets claude's patch",
+    () => {
+      const { w, command, launcher } = codexWorld();
+      w.fakes.setScenarios({
+        ...HELP,
+        claude: [{ scenario: "success_edit", file: "math.js", content: "claude edit\n" }],
+      });
+      const denied = fire(w, command("PreToolUse"), spawn(w.repo.dir));
+      expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+      // What the model then runs (host = Codex; the rule matched, so CODEX_SANDBOX is not set).
+      const env = { CODEX_THREAD_ID: "019e-uc3", CODEX_VERSION: "0.167.0" };
+      const start = w.exec(
+        launcher,
+        ["run", "--detach", "--json", "--task", "add sub to math.js"],
+        {
+          env,
+        },
+      );
+      expect(start.code, start.stderr).toBe(0);
+      const { runId } = parseJson<{ runId: string }>(start);
+      const done = w.exec(launcher, ["wait", runId, "--json", "--timeout", "60"], { env });
+      expect(done.code, done.stderr).toBe(0);
+      expect(
+        parseJson<{ status: string; externalAgent: { instance: string } }>(done),
+      ).toMatchObject({
+        status: "completed",
+        externalAgent: { instance: "claude" },
+      });
+      expect(w.fakes.readLog({ cli: "codex", kind: "run" })).toEqual([]);
+    },
+  );
 });

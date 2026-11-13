@@ -17,6 +17,7 @@ import {
   createClaudeCodeIntegration,
   PLUGIN_ID,
 } from "../../../src/hosts/claude-code/integration.js";
+import { launcherFileName } from "../../../src/platform/os.js";
 import { createCommandRunner } from "../../../src/runner/command.js";
 import { fakeClaudeRunner } from "../../support/fake-host.js";
 import { createFakes, type FakesContext } from "../../support/index.js";
@@ -72,7 +73,7 @@ describe("claude-code plan and setup [UC1]", () => {
     expect(plan.preview).toBe(
       [
         "Dispatch setup will make these changes:",
-        `  - create ${join(h.dispatchHome, "bin", "dispatch")} (mode 0755)`,
+        `  - create ${join(h.dispatchHome, "bin", launcherFileName())} (mode 0755)`,
         `  - create ${join(bundle(), ".claude-plugin", "marketplace.json")} (mode 0644)`,
         `  - create ${join(plugin, ".claude-plugin", "plugin.json")} (mode 0644)`,
         `  - create ${join(plugin, "agents", "dispatch.md")} (mode 0644)`,
@@ -98,7 +99,7 @@ describe("claude-code plan and setup [UC1]", () => {
       confirm: true,
       runner: fakeClaudeRunner(h.home),
     });
-    const launcher = join(h.dispatchHome, "bin", "dispatch");
+    const launcher = join(h.dispatchHome, "bin", launcherFileName());
     const plugin = join(bundle(), "plugins", "dispatch");
     const agent = readFileSync(join(plugin, "agents", "dispatch.md"), "utf8");
     expect(agent).toContain(`${launcher} run --detach --json --task '<task>'`);
@@ -308,7 +309,8 @@ describe("claude-code plan and setup [UC1]", () => {
     });
     expect(await binOnly.detect({ ...c, home: join(h.home, "other") })).toBe(true);
     expect(
-      binOnly.plan({ ...c, launcherPath: join(h.dispatchHome, "bin", "dispatch") })[5]?.file,
+      binOnly.plan({ ...c, launcherPath: join(h.dispatchHome, "bin", launcherFileName()) })[5]
+        ?.file,
     ).toBe("/opt/homebrew/bin/claude");
   });
 });

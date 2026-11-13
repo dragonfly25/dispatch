@@ -6,6 +6,7 @@
 import { accessSync, constants, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseJsonc } from "jsonc-parser";
+import { launcherFileName, type OsPlatform } from "../../platform/os.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
 import { readTextOrNull, sha256 } from "../_framework/fsutil.js";
 import type {
@@ -16,13 +17,22 @@ import type {
 } from "../_framework/index.js";
 import { readManifest } from "../_framework/index.js";
 import { readHeartbeat } from "./hook.js";
-import { codexHomeDir, codexPaths } from "./integration.js";
+import {
+  CODEX_WINDOWS_NO_RULES,
+  codexHomeDir,
+  codexPaths,
+  codexRulesSupported,
+} from "./integration.js";
 
 /** Injectable dependencies of the checks. */
 export interface CodexDoctorDeps {
   fs?: ResolveFs;
   now?: () => Date;
+  /** Default `process.platform`. */
+  platform?: OsPlatform;
 }
+
+const platformOf = (deps: CodexDoctorDeps): OsPlatform => deps.platform ?? process.platform;
 
 /** A heartbeat older than this many days is reported as stale. */
 export const HEARTBEAT_MAX_AGE_DAYS = 7;
@@ -35,13 +45,15 @@ const NOT_FOUND: DoctorResult = { status: "ok", message: "Codex not found; nothi
 
 /** Codex is considered absent when neither its home nor its binary exists. */
 function absent(ctx: DoctorContext, deps: CodexDoctorDeps): boolean {
-  if (existsSync(codexHomeDir(ctx.env, ctx.home))) return false;
-  return resolveBinary("codex", { env: ctx.env, ...(deps.fs ? { fs: deps.fs } : {}) }) === null;
+  const platform = platformOf(deps);
+  if (existsSync(codexHomeDir(ctx.env, ctx.home, platform))) return false;
+  const opts = { env: ctx.env, platform, ...(deps.fs ? { fs: deps.fs } : {}) };
+  return resolveBinary("codex", opts) === null;
 }
 
 /** The manifest entries setup recorded for the Codex files. */
-function codexEntries(ctx: DoctorContext): ManifestEntry[] {
-  const p = codexPaths(ctx.env, ctx.home);
+function codexEntries(ctx: DoctorContext, deps: CodexDoctorDeps): ManifestEntry[] {
+  const p = codexPaths(ctx.env, ctx.home, platformOf(deps));
   const files = new Set([p.skill, p.rules, p.hooks]);
   return readManifest(ctx.dispatchHome).entries.filter((e) => files.has(e.file));
 }
@@ -76,7 +88,7 @@ function filesCheck(deps: CodexDoctorDeps): DoctorCheck {
     id: "codex.files",
     run(ctx) {
       if (absent(ctx, deps)) return NOT_FOUND;
-      const entries = codexEntries(ctx);
+      const entries = codexEntries(ctx, deps);
       if (entries.length === 0) {
         return {
           status: "warn",
@@ -84,9 +96,12 @@ function filesCheck(deps: CodexDoctorDeps): DoctorCheck {
           fix: SETUP_FIX,
         };
       }
-      const p = codexPaths(ctx.env, ctx.home);
+      const p = codexPaths(ctx.env, ctx.home, platformOf(deps));
       const recorded = new Set(entries.map((e) => e.file));
-      const unrecorded = [p.skill, p.rules, p.hooks].filter((f) => !recorded.has(f));
+      const expected = codexRulesSupported(platformOf(deps))
+        ? [p.skill, p.rules, p.hooks]
+        : [p.skill, p.hooks];
+      const unrecorded = expected.filter((f) => !recorded.has(f));
       const hooks = entries.filter((e) => e.kind === "json-entry").length;
       const broken = [...unrecorded, ...brokenEntries(entries)];
       if (hooks < 2 && !unrecorded.includes(p.hooks)) broken.push(`${p.hooks} (hook entry)`);
@@ -128,7 +143,10 @@ function rulesLauncherCheck(deps: CodexDoctorDeps): DoctorCheck {
     id: "codex.rules-launcher",
     run(ctx) {
       if (absent(ctx, deps)) return NOT_FOUND;
-      const file = codexPaths(ctx.env, ctx.home).rules;
+      if (!codexRulesSupported(platformOf(deps))) {
+        return { status: "warn", message: CODEX_WINDOWS_NO_RULES };
+      }
+      const file = codexPaths(ctx.env, ctx.home, platformOf(deps)).rules;
       const text = readTextOrNull(file);
       if (text === null) {
         return { status: "warn", message: `${file} does not exist`, fix: SETUP_FIX };
@@ -144,7 +162,7 @@ function rulesLauncherCheck(deps: CodexDoctorDeps): DoctorCheck {
           fix: REFRESH_FIX,
         };
       }
-      const current = join(ctx.dispatchHome, "bin", "dispatch");
+      const current = join(ctx.dispatchHome, "bin", launcherFileName(platformOf(deps)));
       if (launcher !== current) {
         return {
           status: "warn",
@@ -166,7 +184,7 @@ function hooksTrustedCheck(deps: CodexDoctorDeps): DoctorCheck {
     id: "codex.hooks-trusted",
     run(ctx) {
       if (absent(ctx, deps)) return NOT_FOUND;
-      if (!codexEntries(ctx).some((e) => e.kind === "json-entry")) {
+      if (!codexEntries(ctx, deps).some((e) => e.kind === "json-entry")) {
         return { status: "warn", message: "the Dispatch hooks are not installed", fix: SETUP_FIX };
       }
       const beat = readHeartbeat(ctx.dispatchHome);

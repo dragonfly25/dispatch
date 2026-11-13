@@ -254,9 +254,12 @@ function parseArgs(argv) {
 function runVitest() {
   const dir = mkdtempSync(join(tmpdir(), "dispatch-acceptance-"));
   const file = join(dir, "vitest.json");
+  // vitest's own entry under this node: no `pnpm` lookup, which on Windows is a .cmd that
+  // spawnSync cannot start without a shell.
+  const vitest = join(ROOT, "node_modules", "vitest", "vitest.mjs");
   const r = spawnSync(
-    "pnpm",
-    ["exec", "vitest", "run", "--reporter=json", `--outputFile=${file}`],
+    process.execPath,
+    [vitest, "run", "--reporter=json", `--outputFile=${file}`],
     { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"], env: process.env },
   );
   try {

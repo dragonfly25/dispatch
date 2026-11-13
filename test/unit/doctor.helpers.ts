@@ -6,6 +6,7 @@ import { buildProgram, runCli } from "../../src/cli/program.js";
 import type { DoctorLine, DoctorReport } from "../../src/doctor/types.js";
 import { HostRegistry } from "../../src/hosts/_framework/registry.js";
 import { renderLauncherScript } from "../../src/platform/launcher.js";
+import { launcherFileName } from "../../src/platform/os.js";
 import {
   createFakes,
   type FakeScenarioMap,
@@ -101,10 +102,11 @@ export function doctorHarness(
     mkdirSync(dirname(cli), { recursive: true });
     writeFileSync(cli, "");
     writeFileSync(join(dirname(cli), "hook.mjs"), "");
-    const launcher = join(home.dispatchHome, "bin", "dispatch");
+    // Windows: `dispatch.cmd`, executable by its extension (chmod changes nothing there).
+    const launcher = join(home.dispatchHome, "bin", launcherFileName());
     mkdirSync(dirname(launcher), { recursive: true });
     writeFileSync(launcher, renderLauncherScript({ nodePath: process.execPath, cliPath: cli }));
-    chmodSync(launcher, 0o755);
+    if (process.platform !== "win32") chmodSync(launcher, 0o755);
   }
   // A registry without the claude-code checks, so tests see only the lines they care about.
   const registry = new HostRegistry();

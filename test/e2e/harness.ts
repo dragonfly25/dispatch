@@ -5,10 +5,12 @@
  * names them in its header and adds the end-to-end check of the spec's "Verifica".
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { type RunResult, RunResultSchema } from "../../src/core/contracts.js";
+import { isWindows } from "../../src/platform/os.js";
+import { toSpawnCommand } from "../../src/platform/spawnable.js";
 import { type Bundles, buildBundles, type NodeRun, runNode } from "../security/harness.js";
 import {
   createFakes,
@@ -19,6 +21,7 @@ import {
   tempHome,
   tempRepo,
 } from "../support/index.js";
+import { writeNodeShim } from "../support/shims.js";
 
 export type { NodeRun } from "../security/harness.js";
 export { snapshotTree } from "../support/index.js";
@@ -95,7 +98,10 @@ export interface World {
     args: string[],
     opts?: { cwd?: string; env?: Record<string, string>; input?: string },
   ): NodeRun;
-  /** Runs any executable (e.g. the installed launcher) with the world's environment. */
+  /**
+   * Runs any executable (e.g. the installed launcher) with the world's environment. A Windows
+   * `.cmd` npm shim is unwrapped to `node <script>` the way Dispatch spawns it (never via cmd.exe).
+   */
   exec(
     file: string,
     args: string[],
@@ -152,7 +158,10 @@ export function createWorld(o: WorldOptions = {}): World {
     env,
     dispatch,
     exec(file, args, opts = {}) {
-      const r = spawnSync(file, args, {
+      const cmd = /\.(cmd|bat)$/i.test(file)
+        ? toSpawnCommand(file, args)
+        : { command: file, args: [...args] };
+      const r = spawnSync(cmd.command, cmd.args, {
         cwd: opts.cwd ?? repo.dir,
         env: { ...env, ...(opts.env ?? {}) },
         encoding: "utf8",
@@ -194,13 +203,9 @@ const SHIM = join(import.meta.dirname, "claude-plugin-shim.mjs");
 export function useClaudePluginShim(world: World): void {
   const dir = join(world.fakes.stateDir, "..", "shim-bin");
   mkdirSync(dir, { recursive: true });
-  const q = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
-  const script = join(dir, "claude");
-  writeFileSync(
-    script,
-    `#!/bin/sh\nFAKE_REAL_CLAUDE=${q(join(world.fakes.binDir, "claude"))} exec ${q(process.execPath)} ${q(SHIM)} "$@"\n`,
-  );
-  chmodSync(script, 0o755);
+  // On Windows the fake is reached through its `.mjs` entry (a `.cmd` cannot be spawned directly).
+  const real = join(world.fakes.binDir, isWindows() ? "claude.mjs" : "claude");
+  writeNodeShim(dir, "claude", SHIM, { FAKE_REAL_CLAUDE: real });
   world.env.PATH = `${dir}${delimiter}${world.env.PATH ?? ""}`;
 }
 

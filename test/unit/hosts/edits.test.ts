@@ -35,7 +35,10 @@ describe("new-file / rules-file", () => {
       const file = join(h.home, ".codex", "rules", "dispatch.rules");
       const { status, entry } = await applyOp(fileOp(file, "rule\n", kind), undefined);
       expect(status).toBe("applied");
-      expect(statSync(file).mode & 0o777).toBe(0o755);
+      // Windows: mode bits do not reflect ACLs.
+      if (process.platform !== "win32") {
+        expect(statSync(file).mode & 0o777).toBe(0o755);
+      }
       expect(entry).toMatchObject({ createdFile: true, sha256: sha256("rule\n") });
       expect(entry.createdDirs).toEqual([join(h.home, ".codex"), join(h.home, ".codex", "rules")]);
       expect(entry.trustGrant).toBe(kind === "rules-file" ? "grant" : null);
@@ -100,7 +103,10 @@ describe("new-file / rules-file", () => {
     symlinkSync(real, link);
     atomicWrite(link, '{"a":1}');
     expect(readFileSync(real, "utf8")).toBe('{"a":1}');
-    expect(statSync(real).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(real).mode & 0o777).toBe(0o600);
+    }
     expect(() => atomicWrite(join(h.home, "no", "dir", "f"), "x")).toThrow();
   });
 });

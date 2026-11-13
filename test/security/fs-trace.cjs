@@ -7,6 +7,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { syncBuiltinESMExports } = require("node:module");
+const { fileURLToPath } = require("node:url");
 
 const out = process.env.FS_TRACE_OUT;
 if (out) {
@@ -15,7 +16,7 @@ if (out) {
   const norm = (p) => {
     if (typeof p === "number") return null; // an fd: its path was recorded when it was opened
     try {
-      const s = p instanceof URL ? p.pathname : Buffer.isBuffer(p) ? p.toString() : String(p);
+      const s = p instanceof URL ? fileURLToPath(p) : Buffer.isBuffer(p) ? p.toString() : String(p);
       return path.resolve(s);
     } catch {
       return null;

@@ -28,6 +28,7 @@ import {
   HandoffError,
   loadHandoff,
 } from "../../hosts/claude-code/handoff.js";
+import { homeDir } from "../../platform/os.js";
 import {
   executeTask,
   type RunnerStore,
@@ -360,7 +361,7 @@ export function registerRun(program: Command, deps: CliDeps): void {
             ? { ...checked.data, sandboxNetwork: result.sandboxNetwork }
             : checked.data;
           if (opts.json) printJson(io, shown);
-          else io.out(renderRunResult(shown, { ui: outUi(io), home: deps.env.HOME }));
+          else io.out(renderRunResult(shown, { ui: outUi(io), home: homeDir(deps.env) }));
           const code = exitCodeForResult(checked.data);
           if (code !== ExitCode.OK) throw new ExitRequest(code);
         } catch (err) {

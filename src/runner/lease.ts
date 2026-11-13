@@ -5,6 +5,7 @@
 import { performance } from "node:perf_hooks";
 import type { Clock } from "../core/contracts.js";
 import type { SqliteStateStore } from "../state/store.js";
+import { pidExists } from "./tree.js";
 
 /** Heartbeat period of a held lease (the store reaps leases older than 30 s). */
 export const LEASE_HEARTBEAT_MS = 5_000;
@@ -22,12 +23,7 @@ export const SELF_PID_START = String(Math.round(performance.timeOrigin));
  */
 export function isProcessAlive(pid: number, pidStart: string): boolean {
   if (pid === process.pid) return pidStart === SELF_PID_START;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
+  return pidExists(pid); // signal 0: an existence check on Windows too
 }
 
 /** Options of {@link acquireLease}. */

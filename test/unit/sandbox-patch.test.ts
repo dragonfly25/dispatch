@@ -77,7 +77,8 @@ describe("buildPatch: collect [UC13]", () => {
     expect(r.rejected).toEqual([]);
     expect(r.patch).toMatchObject({ applies: true, needsReview: false, rejectedPaths: [] });
     expect(r.patch.path).toBe(join(s.runDir, "patch.diff"));
-    expect((await stat(r.patch.path)).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") expect((await stat(r.patch.path)).mode & 0o777).toBe(0o600);
     expect(r.patch.diffstat).toContain("new/file.ts");
     expect(r.patch.diffstat).toContain("rename {old => new}/name.txt (100%)");
     expect(r.patch.diffstat).toContain("mode change 100644 => 100755 run.sh");
@@ -103,7 +104,9 @@ describe("buildPatch: collect [UC13]", () => {
     expect(await readFile(join(s.repo, "img.bin"))).toEqual(await readFile(join(w, "img.bin")));
     expect(existsSync(join(s.repo, "gone.txt"))).toBe(false);
     expect(await readFile(join(s.repo, "new/name.txt"), "utf8")).toBe(big);
-    expect((await stat(join(s.repo, "run.sh"))).mode & 0o111).not.toBe(0);
+    if (process.platform !== "win32") {
+      expect((await stat(join(s.repo, "run.sh"))).mode & 0o111).not.toBe(0);
+    }
   });
 
   it("includes changes the agent committed inside the worktree", async () => {

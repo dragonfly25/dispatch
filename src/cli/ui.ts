@@ -7,6 +7,8 @@
  * and uses ASCII marks, so piped, scripted and test output stays plain text without ANSI codes.
  */
 import { styleText } from "node:util";
+import { relativeToHome, samePathKey } from "../config/pathkey.js";
+import { isWindows, type OsPlatform } from "../platform/os.js";
 import type { CliIo } from "./io.js";
 
 /** Check / step status shown with a symbol. */
@@ -82,16 +84,45 @@ export function decorationEnabled(
   return stream.isTTY === true;
 }
 
-/** Shows `path` relative to `home` as `~/…` (unchanged when outside it or `home` is unknown). */
-export function tildify(path: string, home: string | undefined): string {
+/**
+ * Shows `path` relative to `home` as `~/…` (Windows: `~\…`, matching case-insensitively and
+ * either separator); unchanged when outside it or `home` is unknown.
+ */
+export function tildify(
+  path: string,
+  home: string | undefined,
+  platform: OsPlatform = process.platform,
+): string {
+  if (isWindows(platform)) {
+    if (!home) return path;
+    const rel = relativeToHome(path, home, platform);
+    if (rel !== null) return `~\\${rel}`;
+    return samePathKey(path, home, platform) ? "~" : path;
+  }
   if (!home || home === "/") return path;
   const base = home.endsWith("/") ? home.slice(0, -1) : home;
   if (path === base) return "~";
   return path.startsWith(`${base}/`) ? `~${path.slice(base.length)}` : path;
 }
 
-/** Replaces every `home/` path prefix inside free text with `~/`. */
-export function tildifyText(text: string, home: string | undefined): string {
+/**
+ * Replaces every `home/` path prefix inside free text with `~/`. Windows: every `home\` or
+ * `home/` prefix, in any letter case, becomes `~` plus the separator that followed it.
+ */
+export function tildifyText(
+  text: string,
+  home: string | undefined,
+  platform: OsPlatform = process.platform,
+): string {
+  if (isWindows(platform)) {
+    const base = home?.replace(/[\\/]+$/, "");
+    if (!base) return text;
+    const pattern = base
+      .split(/[\\/]+/)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("[\\\\/]+");
+    return text.replace(new RegExp(`${pattern}([\\\\/])`, "gi"), "~$1");
+  }
   if (!home || home === "/") return text;
   const base = home.endsWith("/") ? home.slice(0, -1) : home;
   return text.split(`${base}/`).join("~/");

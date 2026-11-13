@@ -14,7 +14,6 @@
  * recorded: Claude's SessionStart carries no `model` (docs/spikes/hosts-prototype.md finding 4).
  */
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
 import type { HookInput, HookResponse } from "../../core/contracts.js";
 import {
   browserFor,
@@ -25,6 +24,8 @@ import {
   readHookCache,
   trustedRepoFor,
 } from "../../hook/cache.js";
+import { runningInvocation } from "../../platform/invocation.js";
+import { isWindows, type OsPlatform } from "../../platform/os.js";
 import { agentDirs, eligibility, findAgent } from "./agents.js";
 import {
   consumePassthrough,
@@ -111,10 +112,15 @@ function interceptedWhat(list: readonly string[]): string {
 /**
  * The text injected into the session: when to delegate (the cached policy summary), how (the
  * `dispatch` sub-agent, or the launcher's `run --detach` + `wait`), which sub-agent calls hard
- * mode redirects, and how to treat the result.
+ * mode redirects, and how to treat the result. `launcher` is the launcher path on POSIX and the
+ * ready bash call prefix on Windows (`runningInvocation`).
  */
-export function policyText(cache: HookCache, launcher: string): string {
-  const l = shellArg(launcher);
+export function policyText(
+  cache: HookCache,
+  launcher: string,
+  platform: OsPlatform = process.platform,
+): string {
+  const l = isWindows(platform) ? launcher : shellArg(launcher);
   const summary = cache.policy.summary.trim().slice(0, MAX_SUMMARY);
   const what = claudeRedirects(cache) ? interceptedWhat(interceptList(cache)) : "";
   return [
@@ -180,7 +186,7 @@ function trustedContext(input: HookInput, env: Env): Trusted | null {
   if (cache === null) return null;
   const repo = trustedRepoFor(cache, canonical(input.cwd)) ?? trustedRepoFor(cache, input.cwd);
   if (repo === null) return null;
-  return { cache, launcher: join(home, "bin", "dispatch"), home, root: repo.root };
+  return { cache, launcher: runningInvocation(home, "bash"), home, root: repo.root };
 }
 
 /**

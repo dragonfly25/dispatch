@@ -163,17 +163,21 @@ describe("codex SessionStart [UC3][UC9]", () => {
     expect(sessionStartResponse(t.start, {})).toEqual({ exitCode: 0 });
   });
 
-  it("an unwritable state dir does not cost the session its context", () => {
-    const t = trusted();
-    mkdirSync(join(h.dispatchHome, "state"));
-    chmodSync(join(h.dispatchHome, "state"), 0o500);
-    try {
-      expect(sessionStartResponse(t.start, t.env).stdout).toContain("additionalContext");
-      expect(() => writeHeartbeat(h.dispatchHome, t.start, new Date())).toThrow();
-    } finally {
-      chmodSync(join(h.dispatchHome, "state"), 0o700);
-    }
-  });
+  // chmod 0500 does not make a directory read-only on Windows.
+  it.skipIf(process.platform === "win32")(
+    "an unwritable state dir does not cost the session its context",
+    () => {
+      const t = trusted();
+      mkdirSync(join(h.dispatchHome, "state"));
+      chmodSync(join(h.dispatchHome, "state"), 0o500);
+      try {
+        expect(sessionStartResponse(t.start, t.env).stdout).toContain("additionalContext");
+        expect(() => writeHeartbeat(h.dispatchHome, t.start, new Date())).toThrow();
+      } finally {
+        chmodSync(join(h.dispatchHome, "state"), 0o700);
+      }
+    },
+  );
 
   it("heartbeat: odd fields become null; garbage files read as null", () => {
     const t = trusted();

@@ -45,15 +45,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
+      # Git for Windows ships core.autocrlf=true in its system config. .gitattributes already pins
+      # LF for the checkout; this also keeps the repos and worktrees the tests create (through
+      # Dispatch's own git calls) byte-exact, so patches and snapshots match on every OS.
+      - name: Disable CRLF conversion (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with: { node-version: "${{ matrix.node }}", cache: pnpm }
       - name: Configure git identity (tests create repos and worktrees)
+        shell: bash
         run: |
           git config --global user.name "Dispatch CI"
           git config --global user.email "ci@dispatch.invalid"
@@ -94,6 +102,38 @@ jobs:
           actual="$("$prefix/bin/dispatch" --version)"
           echo "expected=$expected actual=$actual"
           test "$actual" = "$expected"
+
+  # The same through the npm-generated `dispatch.cmd` on Windows (bin at the prefix root, not
+  # `<prefix>/bin`). PowerShell runs the .cmd the way a Windows user's terminal does.
+  pack-smoke-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Disable CRLF conversion
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm pack --pack-destination "$env:RUNNER_TEMP\pack"
+        shell: pwsh
+      - name: Install the tarball globally and check the version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $prefix = Join-Path $env:RUNNER_TEMP "prefix"
+          $tgz = (Get-ChildItem (Join-Path $env:RUNNER_TEMP "pack") -Filter *.tgz | Select-Object -First 1).FullName
+          npm install -g --prefix $prefix $tgz
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+          $shim = Join-Path $prefix "dispatch.cmd"
+          if (-not (Test-Path $shim)) { throw "npm did not create $shim" }
+          $expected = node -p "require('./package.json').version"
+          $actual = (& $shim --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "dispatch --version exited $LASTEXITCODE" }
+          Write-Output "expected=$expected actual=$actual"
+          if ($actual -ne $expected) { throw "version mismatch" }
 
   # UC1-UC14 and AC1-AC7 by tag (plan section 3 "CI"): runs the whole vitest suite once more with
   # the JSON reporter and prints the pass/fail table in the job summary. Fails on any FAIL row;

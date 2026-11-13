@@ -29,7 +29,10 @@ afterEach(() => {
 
 const ranTasks = (cli: "claude" | "codex" | "agy") => h.fakes.readLog({ cli, kind: "run" });
 
-describe("doctor: checks", () => {
+// The matrix probes the claude and antigravity fakes, which doctor does not probe on native
+// Windows (adapterPlatformBlocker: a `warn` line instead); doctor-windows.test.ts covers win32
+// with an injected platform, and test/e2e/uc01.test.ts runs doctor end to end there.
+describe.skipIf(process.platform === "win32")("doctor: checks", () => {
   it("[UC1] an all-green matrix: every enabled provider passes, nothing fails, exit 0", async () => {
     h = doctorHarness();
     h.config(ENABLE_AGY);
@@ -372,10 +375,11 @@ describe("doctor: system lines", () => {
     expect(code).toBe(4);
   });
 
-  it("the platform line rejects Windows and an old Node", () => {
+  it("the platform line rejects an unsupported OS and an old Node", () => {
     expect(platformLine("darwin", "v22.13.0").status).toBe("ok");
     expect(platformLine("linux", "v24.1.0").status).toBe("ok");
-    expect(platformLine("win32", "v22.13.0")).toMatchObject({ status: "fail" });
+    expect(platformLine("win32", "v22.13.0").status).toBe("ok");
+    expect(platformLine("freebsd", "v22.13.0")).toMatchObject({ status: "fail" });
     expect(platformLine("darwin", "v22.12.0")).toMatchObject({ status: "fail" });
     expect(platformLine("darwin", "v20.1.0").message).toContain(">= 22.13");
   });

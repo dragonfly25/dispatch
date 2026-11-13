@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { REQUIRED_FLAGS as AGY_REQUIRED_FLAGS } from "../adapters/agy/invocation.js";
 import { CLAUDE_REQUIRED_FLAGS } from "../adapters/claude/invocation.js";
 import { REQUIRED_DISABLED_FEATURES } from "../adapters/codex/invocation.js";
+import { adapterPlatformBlocker } from "../adapters/platform.js";
 import { createAdapter } from "../app/adapters.js";
 import type { AppContext } from "../app/context.js";
 import type { ExecutionInstance } from "../config/load.js";
@@ -20,6 +21,7 @@ import type {
   Spawner,
 } from "../core/contracts.js";
 import { mcpCapableAdapters } from "../mcp/forward.js";
+import { envGet, envKey, isWindows, type OsPlatform, WINDOWS_BASE_ENV } from "../platform/os.js";
 import { type ResolvedBinary, type ResolveFs, resolveBinary } from "../platform/resolve.js";
 import type { ReaderHealth } from "../quota/provider.js";
 import { ClaudeUsageReader } from "../quota/readers/claude-usage.js";
@@ -57,6 +59,8 @@ export interface InstanceCheckDeps {
   spawner: Spawner;
   /** Test seam for binary resolution. */
   resolveFs?: ResolveFs | undefined;
+  /** Platform whose rules apply (binary lookup, child env); default `process.platform`. */
+  platform?: OsPlatform | undefined;
   /** CLI versions with recorded fixtures per adapter id (`assets/fixture-versions.json`); null if unreadable. */
   fixtureVersions: Readonly<Record<string, readonly string[]>> | null;
 }
@@ -131,11 +135,30 @@ export async function checkInstance(
   report.adapter = adapter;
   const caps = adapter.caps;
   const name = BINARY_NAME[inst.adapter] ?? inst.adapter;
+  const platform = deps.platform ?? process.platform;
+
+  const blocker = adapterPlatformBlocker(inst.adapter, platform);
+  if (blocker) {
+    // Not a failure: the runner routes around it like an unavailable provider.
+    add("warn", "platform", `not used on this OS: ${blocker}`, {
+      fix: `disable providers.${inst.id} in ~/.dispatch/config.yaml to silence this`,
+    });
+    return report;
+  }
+  if (inst.adapter === "codex" && isWindows(platform)) {
+    add(
+      "warn",
+      "platform",
+      'delegated codex runs use -c windows.sandbox="elevated", which needs a one-time setup',
+      { fix: "run `codex sandbox setup --elevated` once from an administrator terminal" },
+    );
+  }
 
   try {
     report.binary = resolveBinary(name, {
       configured: inst.binary,
       env: ctx.env,
+      platform,
       ...(deps.resolveFs ? { fs: deps.resolveFs } : {}),
     });
   } catch (err) {
@@ -265,6 +288,26 @@ function loginLine(add: Add, inst: ExecutionInstance, probe: ProbeResult): void 
 
 const SPAWN_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL"];
 
+/**
+ * Env of a quota-free listing probe: `TERM=dumb` plus {@link SPAWN_ENV_KEYS} from `env`. On
+ * Windows the keys are matched case-insensitively (`Path`) and {@link WINDOWS_BASE_ENV} is added,
+ * without which a Windows child cannot start; the parent's spelling of each name is kept.
+ */
+export function listingEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  inst: Pick<ExecutionInstance, "adapter" | "configDir">,
+  platform: OsPlatform = process.platform,
+): Record<string, string> {
+  const out: Record<string, string> = { TERM: "dumb" };
+  const keys = isWindows(platform) ? [...SPAWN_ENV_KEYS, ...WINDOWS_BASE_ENV] : SPAWN_ENV_KEYS;
+  for (const k of keys) {
+    const v = isWindows(platform) ? envGet(env, k, platform) : env[k];
+    if (v !== undefined) out[envKey(env, k, platform)] = v;
+  }
+  if (inst.configDir && inst.adapter === "codex") out.CODEX_HOME = inst.configDir;
+  return out;
+}
+
 /** Runs a quota-free listing command and returns its stdout lines, or null on any failure. */
 async function listing(
   ctx: AppContext,
@@ -273,12 +316,7 @@ async function listing(
   argv: string[],
   spawner: Spawner,
 ): Promise<string[] | null> {
-  const env: Record<string, string> = { TERM: "dumb" };
-  for (const k of SPAWN_ENV_KEYS) {
-    const v = ctx.env[k];
-    if (v !== undefined) env[k] = v;
-  }
-  if (inst.configDir && inst.adapter === "codex") env.CODEX_HOME = inst.configDir;
+  const env = listingEnv(ctx.env, inst);
   const lines: string[] = [];
   try {
     const res = await spawner.spawn({

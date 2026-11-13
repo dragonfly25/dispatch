@@ -2,7 +2,9 @@
  * Dry run: routes a task on a fresh quota snapshot without executing, recording or spawning
  * anything. Backs `explain --task` and `run --dry-run`.
  */
+import { excludePlatformBlocked } from "../adapters/platform.js";
 import type { Decision, DecisionInput, Task } from "../core/contracts.js";
+import type { OsPlatform } from "../platform/os.js";
 import { decide, decideForProfiles, renderExplain } from "../router/index.js";
 import { type AppContext, buildDecisionInput, type DecisionInputOptions } from "./context.js";
 
@@ -21,11 +23,26 @@ export async function dryRun(
   ctx: AppContext,
   task: Task,
   options: DecisionInputOptions = {},
+  platform: OsPlatform = process.platform,
 ): Promise<DryRunResult> {
-  const input = await buildDecisionInput(ctx, task, options);
+  const built = await buildDecisionInput(ctx, task, options);
+  // Same exclusion as a real run: adapters that cannot run on this OS are routed around.
+  const os = excludePlatformBlocked(
+    built.routing as unknown as AppContext["config"]["routing"],
+    platform,
+  );
+  const input: DecisionInput = {
+    ...built,
+    routing: os.routing as unknown as Record<string, unknown>,
+  };
   const decision = decide(input);
   const { activeProfile, profiles } = ctx.config.routing;
   const others = Object.keys(profiles).filter((name) => name !== activeProfile);
   const alternatives = decideForProfiles(input, others);
-  return { input, decision, alternatives, explain: renderExplain(input, decision, alternatives) };
+  return {
+    input,
+    decision,
+    alternatives,
+    explain: renderExplain(input, decision, alternatives, os.excluded),
+  };
 }

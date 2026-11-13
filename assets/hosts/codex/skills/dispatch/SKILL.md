@@ -18,7 +18,7 @@ The launcher is `{{LAUNCHER}}`. A rule lets only this exact command shape run ou
   heredocs. Any of these makes the command run sandboxed and fail with "rule not matched".
 - Quote the task with single quotes. If the task contains `'` but no `$`, backtick, `\` or `"`,
   use double quotes. Otherwise write the task to `.dispatch/inbox/<name>.md` with apply_patch and
-  pass `--prompt-file .dispatch/inbox/<name>.md` instead of `--task`.
+  pass `--task-file .dispatch/inbox/<name>.md` instead of `--task`.
 
 ## Steps
 

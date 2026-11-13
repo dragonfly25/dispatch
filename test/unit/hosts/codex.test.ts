@@ -14,6 +14,7 @@ import {
 import { codexDoctorChecks, rulesLauncher } from "../../../src/hosts/codex/doctor.js";
 import { writeHeartbeat } from "../../../src/hosts/codex/hook.js";
 import {
+  CODEX_WINDOWS_NO_RULES,
   codexHomeDir,
   codexPaths,
   createCodexIntegration,
@@ -254,10 +255,25 @@ describe("[SEC-rules] the rendered dispatch.rules", () => {
       ["wait", "run_1"],
     ]) {
       err = "";
-      const code = await runCli(args, io, undefined, { platform: process.platform, env });
+      const code = await runCli(args, io, undefined, { platform: "darwin", env });
       expect(code).toBe(ExitCode.REJECTED);
       expect(err).toContain(CODEX_SANDBOX_MESSAGE);
     }
+  });
+
+  it("on Windows (no rules file) the refusal explains the per-call approval instead", async () => {
+    let err = "";
+    const io = {
+      out: () => {},
+      err: (t: string) => {
+        err += t;
+      },
+    };
+    const env = { CODEX_SANDBOX: "windows" };
+    const code = await runCli(["run", "--task", "x"], io, undefined, { platform: "win32", env });
+    expect(code).toBe(ExitCode.REJECTED);
+    expect(err).toContain(`running inside the Codex sandbox: ${CODEX_WINDOWS_NO_RULES}`);
+    expect(err).not.toContain(CODEX_SANDBOX_MESSAGE);
   });
 });
 
@@ -393,33 +409,40 @@ describe("codex doctor checks", () => {
     });
   });
 
-  it("edited skill, removed hook entry, stale or foreign launcher → warn with --refresh", async () => {
-    await installed();
-    const p = paths();
-    writeFileSync(p.skill, "edited");
-    writeFileSync(p.hooks, "{}\n");
-    const r = await run();
-    expect(r["codex.files"]).toMatchObject({ status: "warn", fix: "dispatch setup --refresh" });
-    expect(r["codex.files"]?.message).toContain(p.skill);
-    expect(r["codex.files"]?.message).toContain(`${p.hooks} (hook entry)`);
-    // The launcher the rule names is gone.
-    chmodSync(launcher(), 0o600);
-    expect((await run())["codex.rules-launcher"]).toMatchObject({
-      status: "warn",
-      message: /no longer exists or is not executable/,
-    });
-    chmodSync(launcher(), 0o755);
-    // A rule written for another Dispatch home.
-    const other = join(h.home, "other", "dispatch");
-    mkdirSync(join(h.home, "other"));
-    writeFileSync(other, "#!/bin/sh\n", { mode: 0o755 });
-    writeFileSync(p.rules, `prefix_rule(\n    pattern = [${JSON.stringify(other)}, ["run"]],\n)\n`);
-    expect((await run())["codex.rules-launcher"]).toMatchObject({
-      status: "warn",
-      message: /but the launcher is/,
-    });
-    writeFileSync(p.rules, "# nothing\n");
-    expect((await run())["codex.rules-launcher"]).toMatchObject({ message: /names no launcher/ });
-    expect(rulesLauncher('pattern = ["\\x"]')).toBeNull();
-  });
+  // chmod-based "not executable" case: Windows has no exec bit.
+  it.skipIf(process.platform === "win32")(
+    "edited skill, removed hook entry, stale or foreign launcher → warn with --refresh",
+    async () => {
+      await installed();
+      const p = paths();
+      writeFileSync(p.skill, "edited");
+      writeFileSync(p.hooks, "{}\n");
+      const r = await run();
+      expect(r["codex.files"]).toMatchObject({ status: "warn", fix: "dispatch setup --refresh" });
+      expect(r["codex.files"]?.message).toContain(p.skill);
+      expect(r["codex.files"]?.message).toContain(`${p.hooks} (hook entry)`);
+      // The launcher the rule names is gone.
+      chmodSync(launcher(), 0o600);
+      expect((await run())["codex.rules-launcher"]).toMatchObject({
+        status: "warn",
+        message: /no longer exists or is not executable/,
+      });
+      chmodSync(launcher(), 0o755);
+      // A rule written for another Dispatch home.
+      const other = join(h.home, "other", "dispatch");
+      mkdirSync(join(h.home, "other"));
+      writeFileSync(other, "#!/bin/sh\n", { mode: 0o755 });
+      writeFileSync(
+        p.rules,
+        `prefix_rule(\n    pattern = [${JSON.stringify(other)}, ["run"]],\n)\n`,
+      );
+      expect((await run())["codex.rules-launcher"]).toMatchObject({
+        status: "warn",
+        message: /but the launcher is/,
+      });
+      writeFileSync(p.rules, "# nothing\n");
+      expect((await run())["codex.rules-launcher"]).toMatchObject({ message: /names no launcher/ });
+      expect(rulesLauncher('pattern = ["\\x"]')).toBeNull();
+    },
+  );
 });

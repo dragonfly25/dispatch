@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DispatchError } from "../../src/core/errors.js";
 import { type DbPort, openDb } from "../../src/state/db.js";
 import { LATEST_VERSION, MIGRATIONS, migrate, schemaVersion } from "../../src/state/migrations.js";
+import { SqliteStateStore } from "../../src/state/store.js";
 
 let dir: string;
 beforeEach(async () => {
@@ -26,8 +27,11 @@ describe("openDb", () => {
   it("creates parent dir 0700 and file 0600 and applies the pragmas", async () => {
     const path = join(dir, "state", "dispatch.db");
     const db = openDb(path);
-    expect(((await stat(join(dir, "state"))).mode & 0o777).toString(8)).toBe("700");
-    expect(((await stat(path)).mode & 0o777).toString(8)).toBe("600");
+    // Windows: mode bits do not reflect ACLs (chmod there only toggles read-only).
+    if (process.platform !== "win32") {
+      expect(((await stat(join(dir, "state"))).mode & 0o777).toString(8)).toBe("700");
+      expect(((await stat(path)).mode & 0o777).toString(8)).toBe("600");
+    }
     expect(db.prepare("PRAGMA journal_mode").get()?.journal_mode).toBe("wal");
     expect(db.prepare("PRAGMA busy_timeout").get()?.timeout).toBe(5000);
     expect(db.prepare("PRAGMA synchronous").get()?.synchronous).toBe(1); // NORMAL
@@ -106,6 +110,28 @@ describe("migrations", () => {
     expect(migrate(second)).toBe(LATEST_VERSION);
     expect(second.prepare("SELECT run_id FROM idempotency").get()?.run_id).toBe("r");
     second.close();
+  });
+
+  it("v2 adds a nullable runs.run_dir and keeps rows written by v1", () => {
+    const path = join(dir, "v1.db");
+    const v1 = openDb(path);
+    expect(migrate(v1, MIGRATIONS.slice(0, 1))).toBe(1);
+    v1.prepare(
+      `INSERT INTO runs (run_id, status, created_at, updated_at, instance, pid, result_json)
+       VALUES ('old', 'running', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', NULL, 7, NULL)`,
+    ).run();
+    v1.close();
+
+    const store = SqliteStateStore.open(path);
+    try {
+      expect(store.getRunDir("old")).toBeNull();
+      expect(store.getRunDir("missing")).toBeNull();
+      store.setRunDir("old", "/abs/runs/old");
+      expect(store.getRunDir("old")).toBe("/abs/runs/old");
+      expect(() => store.setRunDir("missing", "/x")).toThrow(/unknown run/);
+    } finally {
+      store.close();
+    }
   });
 
   it("applies only pending migrations in order", () => {

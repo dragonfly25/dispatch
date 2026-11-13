@@ -298,7 +298,10 @@ describe("claude-code PreToolUse for custom agents [UC2][SEC-handoff]", () => {
     });
     expect(o.updatedInput.prompt).not.toContain("Summarize src/");
     const file = join(h.dispatchHome, HANDOFF_DIR, `${id}.json`);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    }
     const loaded = loadHandoff(h.dispatchHome, id, NOW + 1000);
     expect(loaded).toEqual({
       version: 1,
@@ -442,8 +445,11 @@ describe("handoff loader and passthrough file [SEC-handoff]", () => {
     expect(existsSync(a.file)).toBe(false);
 
     const b = written();
-    chmodSync(b.file, 0o644);
-    refuse(b.id, NOW, /owner or mode/);
+    // Windows: mode bits do not reflect ACLs, so isOwnerOnly passes there.
+    if (process.platform !== "win32") {
+      chmodSync(b.file, 0o644);
+      refuse(b.id, NOW, /owner or mode/);
+    }
 
     const c = written();
     const target = join(h.home, "elsewhere.json");
@@ -481,7 +487,10 @@ describe("handoff loader and passthrough file [SEC-handoff]", () => {
     for (let i = 0; i < PASSTHROUGH_CAP + 5; i++) addPassthrough(h.dispatchHome, `k${i}`, NOW + i);
     const file = join(h.dispatchHome, PASSTHROUGH_FILE);
     expect(Object.keys(JSON.parse(readFileSync(file, "utf8")))).toHaveLength(PASSTHROUGH_CAP);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows: mode bits do not reflect ACLs.
+    if (process.platform !== "win32") {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    }
     expect(consumePassthrough(h.dispatchHome, "k0", NOW)).toBe(false); // dropped by the cap
     expect(consumePassthrough(h.dispatchHome, "k104", NOW)).toBe(true);
     expect(consumePassthrough(h.dispatchHome, "k104", NOW)).toBe(false);

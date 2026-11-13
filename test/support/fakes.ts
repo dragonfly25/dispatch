@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,8 +10,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
-import { assertNoRealCli, FAKE_CLI_JS, FAKE_CLIS, FAKES_BIN, type FakeCli } from "./guard.js";
+import { join } from "node:path";
+import { envGet, isWindows, type OsPlatform, WINDOWS_BASE_ENV } from "../../src/platform/os.js";
+import {
+  assertNoRealCli,
+  FAKE_CLI_JS,
+  FAKE_CLIS,
+  FAKES_BIN,
+  type FakeCli,
+  fakeShimFiles,
+} from "./guard.js";
 
 export { FAKE_CLIS, type FakeCli } from "./guard.js";
 
@@ -175,14 +184,23 @@ export interface FakeInvocation {
 export interface FakesOptions {
   /** Extra env merged into `env` (before PATH is set). */
   env?: Record<string, string>;
-  /** Start `env` from process.env instead of the minimal {LANG, TMPDIR}. Default false. */
+  /**
+   * Start `env` from process.env instead of the minimal {LANG, TMPDIR} (plus, on Windows, the
+   * system variables of `WINDOWS_BASE_ENV` a child needs to start). Default false.
+   */
   inheritEnv?: boolean;
+  /** Platform whose shim layout and PATH syntax to use (default `process.platform`); for tests. */
+  platform?: OsPlatform;
 }
 
 export interface FakesContext {
   /** Environment for the code under test: PATH has the fake bin dir first. No HOME is set. */
   readonly env: Record<string, string>;
-  /** Per-run directory of symlinks to test/fakes/bin/* plus the `.fake-env` config. */
+  /**
+   * Per-run directory with the fakes plus their config (`.fake-env` for the sh shims,
+   * `.fake-env.json` for the Windows `.mjs` entries). POSIX: symlinks to test/fakes/bin/*.
+   * Windows: copies of `<cli>.cmd` and `<cli>.mjs` (symlinks need privileges there).
+   */
   readonly binDir: string;
   /** FAKE_STATE_DIR: call counters and the `abs.txt` target of escape_writes. */
   readonly stateDir: string;
@@ -200,6 +218,16 @@ const created = new Set<string>();
 process.on("exit", () => {
   for (const dir of created) rmSync(dir, { recursive: true, force: true });
 });
+
+/** The `WINDOWS_BASE_ENV` variables present in process.env (a Windows child cannot start without them). */
+function windowsBaseEnv(platform: OsPlatform): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of WINDOWS_BASE_ENV) {
+    const value = envGet(process.env, key, platform);
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
 
 const shq = (s: string): string => `'${s.replaceAll("'", "'\\''")}'`;
 
@@ -220,7 +248,14 @@ export function createFakes(
   mkdirSync(binDir);
   mkdirSync(stateDir);
   writeFileSync(logPath, "");
-  for (const cli of FAKE_CLIS) symlinkSync(join(FAKES_BIN, cli), join(binDir, cli));
+  const platform = opts.platform ?? process.platform;
+  const win = isWindows(platform);
+  for (const cli of FAKE_CLIS) {
+    for (const file of fakeShimFiles(cli, platform)) {
+      if (win) copyFileSync(join(FAKES_BIN, file), join(binDir, file));
+      else symlinkSync(join(FAKES_BIN, file), join(binDir, file));
+    }
+  }
   const exported: Record<string, string> = {
     FAKE_SCENARIO: scenarioPath,
     FAKE_STATE_DIR: stateDir,
@@ -232,15 +267,24 @@ export function createFakes(
   const lines = Object.entries(exported).map(([k, v]) => `${k}=${shq(v)}; export ${k}`);
   writeFileSync(envFile, `${lines.join("\n")}\n`);
   chmodSync(envFile, 0o644);
+  writeFileSync(join(binDir, ".fake-env.json"), `${JSON.stringify(exported, null, 2)}\n`);
 
-  const basePath = process.env.PATH ?? "/usr/bin:/bin";
+  const basePath = envGet(process.env, "PATH", platform) ?? (win ? "" : "/usr/bin:/bin");
   const base: Record<string, string> = opts.inheritEnv
     ? Object.fromEntries(
         Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined),
       )
-    : { LANG: "C.UTF-8", ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}) };
-  const env = { ...base, ...opts.env, PATH: `${binDir}${delimiter}${basePath}` };
-  assertNoRealCli(env);
+    : {
+        LANG: "C.UTF-8",
+        ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+        ...(win ? windowsBaseEnv(platform) : {}),
+      };
+  const env: Record<string, string> = { ...base, ...opts.env };
+  // Windows env names are case-insensitive: keep a single `PATH` key (drop an inherited `Path`)
+  // so tests can read `env.PATH` and the child never gets two spellings.
+  if (win) for (const k of Object.keys(env)) if (k.toUpperCase() === "PATH") delete env[k];
+  env.PATH = `${binDir}${win ? ";" : ":"}${basePath}`;
+  assertNoRealCli(env, platform);
 
   const ctx: FakesContext = {
     env,

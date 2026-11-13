@@ -102,7 +102,7 @@ describe("codexSandboxActive", () => {
 });
 
 describe("assertSupportedPlatform", () => {
-  it.each(["darwin", "linux"])("accepts %s", (p) => {
+  it.each(["darwin", "linux", "win32"])("accepts %s", (p) => {
     expect(() => assertSupportedPlatform(p)).not.toThrow();
   });
 
@@ -110,18 +110,20 @@ describe("assertSupportedPlatform", () => {
     expect(() => assertSupportedPlatform()).not.toThrow();
   });
 
-  it("rejects win32 with a WSL hint and USAGE exit code", () => {
-    try {
-      assertSupportedPlatform("win32");
-      expect.unreachable();
-    } catch (e) {
-      expect(e).toBeInstanceOf(DispatchError);
-      expect((e as DispatchError).exitCode).toBe(ExitCode.USAGE);
-      expect((e as DispatchError).message).toMatch(/WSL/);
-    }
-  });
-
-  it("rejects other platforms too", () => {
-    expect(() => assertSupportedPlatform("freebsd")).toThrow(/macOS and Linux/);
-  });
+  it.each(["freebsd", "aix", "openbsd", "sunos", "cygwin"])(
+    "rejects %s with USAGE and the supported list",
+    (p) => {
+      try {
+        assertSupportedPlatform(p);
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(DispatchError);
+        expect((e as DispatchError).exitCode).toBe(ExitCode.USAGE);
+        expect((e as DispatchError).code).toBe("platform.unsupported");
+        expect((e as DispatchError).message).toMatch(
+          new RegExp(`"${p}".*macOS, Linux and Windows`),
+        );
+      }
+    },
+  );
 });

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -10,6 +10,9 @@ import type {
   SpawnRequest,
   SpawnResult,
 } from "../../src/core/contracts.js";
+import { spawnCommandFor } from "../../src/runner/spawn.js";
+import { killTree, spawnDetachedFor } from "../../src/runner/tree.js";
+import { writeNodeShim } from "../support/shims.js";
 
 /** Test-only Spawner on child_process (the production one arrives with the supervisor). */
 export class NodeSpawner implements Spawner {
@@ -18,19 +21,18 @@ export class NodeSpawner implements Spawner {
   spawn(req: SpawnRequest): Promise<SpawnResult> {
     this.requests.push(req);
     return new Promise((resolve, reject) => {
-      const child = spawn(req.binary, [...req.argv], {
+      const cmd = spawnCommandFor(req.binary, req.argv);
+      const child = spawn(cmd.command, cmd.args, {
         cwd: req.cwd,
         env: { ...req.env },
-        detached: true,
+        detached: spawnDetachedFor(),
+        windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
       let timedOut = false;
+      // POSIX: SIGKILL to the group; Windows: taskkill /T /F.
       const kill = () => {
-        try {
-          process.kill(-(child.pid as number), "SIGKILL");
-        } catch {
-          // already gone
-        }
+        if (child.pid !== undefined) killTree(child.pid, { force: true });
       };
       const timer =
         req.timeoutMs === undefined
@@ -57,13 +59,15 @@ export class NodeSpawner implements Spawner {
   }
 }
 
-/** Writes an executable node script (a stand-in CLI) and returns its path. */
+/**
+ * Writes a stand-in CLI running the node module `source` and returns its path: a `#!/bin/sh`
+ * shim on POSIX, an npm-shaped `cli.cmd` (unwrapped by `toSpawnCommand`) on Windows.
+ */
 export function writeScript(source: string): string {
   const dir = mkdtempSync(join(tmpdir(), "dispatch-script-"));
-  const file = join(dir, "cli.mjs");
-  writeFileSync(file, `#!${process.execPath}\n${source}\n`);
-  chmodSync(file, 0o755);
-  return file;
+  const file = join(dir, "cli-main.mjs");
+  writeFileSync(file, `${source}\n`);
+  return writeNodeShim(dir, "cli", file);
 }
 
 /** A scripted `codex app-server` that answers `account/rateLimits/read` with `result` (or `body`). */

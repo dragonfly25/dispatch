@@ -91,12 +91,12 @@ describe("dispatch CLI", () => {
 describe("entry gates [UC1][UC10]", () => {
   const ctx = (env: Record<string, string> = {}) => ({ platform: "darwin", env });
 
-  it("exits 2 with a WSL hint on an unsupported platform, even with no args", async () => {
+  it("exits 2 on an unsupported platform, even with no args", async () => {
     for (const args of [["--version"], []]) {
       const { io, sink } = capture();
-      const code = await runCli(args, sink, buildProgram(sink), { platform: "win32", env: {} });
+      const code = await runCli(args, sink, buildProgram(sink), { platform: "freebsd", env: {} });
       expect(code).toBe(2);
-      expect(io.stderr).toMatch(/WSL/);
+      expect(io.stderr).toMatch(/freebsd/);
     }
   });
 

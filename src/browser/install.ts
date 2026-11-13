@@ -30,13 +30,21 @@ export const BROWSER_DETAIL = [
 /** The `signature` of the op in the manifest. */
 export const BROWSER_OP_SIGNATURE = "dispatch-browser-playwright-mcp";
 
-/** The npm CLI script next to `nodePath` (`<bin>/npm` → `npm-cli.js`), or null. */
-export function npmCliFor(nodePath: string, exists = existsSync): string | null {
+/**
+ * The npm CLI script next to `nodePath` (`<bin>/npm` → `npm-cli.js`), or null. On Windows npm
+ * ships as `<node dir>\node_modules\npm\bin\npm-cli.js`; node runs that script directly, never
+ * the `npm.cmd` shim (no batch file, no shell).
+ */
+export function npmCliFor(
+  nodePath: string,
+  exists = existsSync,
+  platform: string = process.platform,
+): string | null {
   const bin = dirname(nodePath);
-  const candidates = [
-    join(bin, "npm"),
-    join(bin, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
-  ];
+  const candidates =
+    platform === "win32"
+      ? [join(bin, "node_modules", "npm", "bin", "npm-cli.js")]
+      : [join(bin, "npm"), join(bin, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js")];
   for (const c of candidates) {
     if (!exists(c)) continue;
     try {
@@ -95,7 +103,10 @@ export function browserInstallOp(input: BrowserOpInput): EditOp {
   };
 }
 
-/** Why the browser cannot be provisioned here, or null. */
+/**
+ * Why the browser cannot be provisioned here, or null. `uid` is undefined on Windows (no
+ * `process.getuid`), so the root check does not apply there.
+ */
 export function provisionBlocker(nodePath: string, uid: number | undefined): string | null {
   if (uid === 0) return "setup runs as root: the isolated browser is never installed as root";
   if (npmCliFor(nodePath) === null) return `npm was not found next to ${nodePath}`;

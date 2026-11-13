@@ -1,0 +1,10 @@
+# Check out every text file with LF on every platform (Windows runners included), so fixtures,
+# snapshots, patches and the POSIX sh shims are byte-identical to what the tests expect.
+* text=auto eol=lf
+
+# Windows batch files (the npm cmd-shim fakes in test/fakes/bin) must keep CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Fixtures are compared byte for byte; never convert them.
+test/fixtures/** -text

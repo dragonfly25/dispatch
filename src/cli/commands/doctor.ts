@@ -8,6 +8,7 @@ import { buildReport, renderLines, renderSummary } from "../../doctor/render.js"
 import { collectChecks, selectLiveTargets } from "../../doctor/run.js";
 import { type DoctorLine, mkLine } from "../../doctor/types.js";
 import { builtinRegistry } from "../../hosts/index.js";
+import { homeDir } from "../../platform/os.js";
 import { defaultSetupDeps } from "../setup.js";
 import { outUi } from "../ui.js";
 import { type CliDeps, printJson } from "./shared.js";
@@ -107,7 +108,7 @@ export function registerDoctor(program: Command, deps: CliDeps): void {
       const { ctx } = collected;
       const ui = outUi(deps.io);
       const render = (part: readonly DoctorLine[]) =>
-        renderLines(part, { ui, verbose: opts.verbose === true, home: deps.env.HOME });
+        renderLines(part, { ui, verbose: opts.verbose === true, home: homeDir(deps.env) });
       const lines = [...collected.lines];
       let liveRan = false;
       try {

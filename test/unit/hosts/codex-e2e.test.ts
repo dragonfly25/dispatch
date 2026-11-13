@@ -62,71 +62,75 @@ function command(reason: string, launcher: string, sub: string): string {
   return reason.slice(start + 1, reason.indexOf("`", start + 1));
 }
 
-describe("codex deny_redirect → run --detach → wait [UC3]", () => {
-  it("the redirect's commands, run verbatim, deliver the final result", async () => {
-    fakes = createFakes({
-      codex: [{ scenario: "success_edit", file: "math.js", content: "export const x = 1;\n" }],
-    });
-    home = tempHome();
-    repo = tempRepo({ files: { "math.js": "function add(a, b) {\n  return a + b;\n}\n" } });
-    const dh = home.dispatchHome;
-    mkdirSync(join(dh, "profiles"), { recursive: true });
-    mkdirSync(join(dh, "bin"));
-    writeFileSync(join(dh, "config.yaml"), GLOBAL);
-    writeFileSync(join(dh, "profiles", "t.yaml"), PROFILE);
-    const launcher = join(dh, "bin", "dispatch");
-    writeFileSync(
-      launcher,
-      renderLauncherScript({ nodePath: process.execPath, cliPath: bundle.file }),
-      { mode: 0o755 },
-    );
-    writeHookCache(dh, {
-      version: 1,
-      writtenAt: "2026-11-07T00:00:00.000Z",
-      trustedRepos: [{ root: repo.dir, policyHash: null }],
-      policy: { profile: "t", hardMode: true, hardInterception: true, summary: "all → codex" },
-    });
+// Runs the POSIX launcher through /bin/sh; Windows has no Codex rule and no sh launcher.
+describe.skipIf(process.platform === "win32")(
+  "codex deny_redirect → run --detach → wait [UC3]",
+  () => {
+    it("the redirect's commands, run verbatim, deliver the final result", async () => {
+      fakes = createFakes({
+        codex: [{ scenario: "success_edit", file: "math.js", content: "export const x = 1;\n" }],
+      });
+      home = tempHome();
+      repo = tempRepo({ files: { "math.js": "function add(a, b) {\n  return a + b;\n}\n" } });
+      const dh = home.dispatchHome;
+      mkdirSync(join(dh, "profiles"), { recursive: true });
+      mkdirSync(join(dh, "bin"));
+      writeFileSync(join(dh, "config.yaml"), GLOBAL);
+      writeFileSync(join(dh, "profiles", "t.yaml"), PROFILE);
+      const launcher = join(dh, "bin", "dispatch");
+      writeFileSync(
+        launcher,
+        renderLauncherScript({ nodePath: process.execPath, cliPath: bundle.file }),
+        { mode: 0o755 },
+      );
+      writeHookCache(dh, {
+        version: 1,
+        writtenAt: "2026-11-07T00:00:00.000Z",
+        trustedRepos: [{ root: repo.dir, policyHash: null }],
+        policy: { profile: "t", hardMode: true, hardInterception: true, summary: "all → codex" },
+      });
 
-    // 1. Codex asks the hook about the V2 spawn (recorded fixture, cwd re-pointed).
-    const fixture = JSON.parse(
-      readFileSync(
-        resolve(
-          import.meta.dirname,
-          "../../fixtures/codex/0.167.0/hook_pre_tool_use_spawn_agent_v2.json",
+      // 1. Codex asks the hook about the V2 spawn (recorded fixture, cwd re-pointed).
+      const fixture = JSON.parse(
+        readFileSync(
+          resolve(
+            import.meta.dirname,
+            "../../fixtures/codex/0.167.0/hook_pre_tool_use_spawn_agent_v2.json",
+          ),
+          "utf8",
         ),
-        "utf8",
-      ),
-    ) as HookInput;
-    const res = preToolUseResponse({ ...fixture, cwd: repo.dir }, { DISPATCH_HOME: dh });
-    const reason = JSON.parse(res.stdout ?? "{}").hookSpecificOutput
-      .permissionDecisionReason as string;
+      ) as HookInput;
+      const res = preToolUseResponse({ ...fixture, cwd: repo.dir }, { DISPATCH_HOME: dh });
+      const reason = JSON.parse(res.stdout ?? "{}").hookSpecificOutput
+        .permissionDecisionReason as string;
 
-    // 2. The model restates the task and runs the prescribed command shapes.
-    const env = { ...fakes.env, ...home.env };
-    const sh = (script: string) =>
-      spawnSync("/bin/sh", ["-c", script], { cwd: repo?.dir, env, encoding: "utf8" });
-    const before = snapshotTree(repo.dir);
-    const runCmd = command(reason, launcher, "run").replace(
-      "<the sub-agent task, in your own words>",
-      "add a sub function to math.js",
-    );
-    expect(runCmd).toBe(`${launcher} run --detach --json --task 'add a sub function to math.js'`);
-    const started = sh(runCmd);
-    expect(started.status).toBe(ExitCode.OK);
-    const { runId } = JSON.parse(started.stdout) as { runId: string };
-    expect(runId).toMatch(/\S/);
+      // 2. The model restates the task and runs the prescribed command shapes.
+      const env = { ...fakes.env, ...home.env };
+      const sh = (script: string) =>
+        spawnSync("/bin/sh", ["-c", script], { cwd: repo?.dir, env, encoding: "utf8" });
+      const before = snapshotTree(repo.dir);
+      const runCmd = command(reason, launcher, "run").replace(
+        "<the sub-agent task, in your own words>",
+        "add a sub function to math.js",
+      );
+      expect(runCmd).toBe(`${launcher} run --detach --json --task 'add a sub function to math.js'`);
+      const started = sh(runCmd);
+      expect(started.status).toBe(ExitCode.OK);
+      const { runId } = JSON.parse(started.stdout) as { runId: string };
+      expect(runId).toMatch(/\S/);
 
-    const waitCmd = command(reason, launcher, "wait").replace("<runId>", runId);
-    expect(waitCmd).toBe(`${launcher} wait ${runId} --json --timeout 280`);
-    let waited = sh(waitCmd);
-    for (let i = 0; waited.status === ExitCode.STILL_RUNNING && i < 5; i++) {
-      waited = sh(waitCmd);
-    }
-    expect(waited.status).toBe(ExitCode.OK);
-    const result = JSON.parse(waited.stdout) as RunResult;
-    expect(result).toMatchObject({ runId, status: "completed", outcome: "success" });
-    expect(result.externalAgent?.instance).toBe("codex");
-    // Dispatch never applies the patch: the repo is untouched.
-    expect(snapshotTree(repo.dir)).toEqual(before);
-  }, 120_000);
-});
+      const waitCmd = command(reason, launcher, "wait").replace("<runId>", runId);
+      expect(waitCmd).toBe(`${launcher} wait ${runId} --json --timeout 280`);
+      let waited = sh(waitCmd);
+      for (let i = 0; waited.status === ExitCode.STILL_RUNNING && i < 5; i++) {
+        waited = sh(waitCmd);
+      }
+      expect(waited.status).toBe(ExitCode.OK);
+      const result = JSON.parse(waited.stdout) as RunResult;
+      expect(result).toMatchObject({ runId, status: "completed", outcome: "success" });
+      expect(result.externalAgent?.instance).toBe("codex");
+      // Dispatch never applies the patch: the repo is untouched.
+      expect(snapshotTree(repo.dir)).toEqual(before);
+    }, 120_000);
+  },
+);

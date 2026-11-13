@@ -81,12 +81,16 @@ describe("[SEC-trust] policy set and hash", () => {
     expect(readPolicySet(plain).files).toEqual([]);
   });
 
-  it("an unreadable policy file is an error, not an empty policy", () => {
-    const sb = sandbox();
-    const r = sb.repo("r", POLICY);
-    chmodSync(join(r, ".dispatch/config.yaml"), 0);
-    expect(() => readPolicySet(r)).toThrow(/cannot read/);
-  });
+  // Windows: chmod 0 does not deny reading (ACLs decide); root ignores modes.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "an unreadable policy file is an error, not an empty policy",
+    () => {
+      const sb = sandbox();
+      const r = sb.repo("r", POLICY);
+      chmodSync(join(r, ".dispatch/config.yaml"), 0);
+      expect(() => readPolicySet(r)).toThrow(/cannot read/);
+    },
+  );
 
   it("a symlink anywhere in .dispatch/ (or .dispatch itself) is reported", () => {
     const sb = sandbox();

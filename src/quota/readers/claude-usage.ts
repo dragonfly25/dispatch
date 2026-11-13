@@ -13,9 +13,10 @@
  */
 
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
 import { z } from "zod";
+import { expandTilde, pathApi } from "../../config/pathkey.js";
 import type { Clock, ProviderInstance, QuotaWindow, Spawner } from "../../core/contracts.js";
+import { homeDir, type OsPlatform } from "../../platform/os.js";
 import { DEFAULT_READER_TIMEOUT_MS, type QuotaReadContext, type QuotaReader } from "../reader.js";
 import {
   isGrounded,
@@ -90,6 +91,10 @@ export interface ClaudeUsageOptions {
   llmFallback?: boolean;
   /** Zone assumed for reset times without one (default: the local zone). */
   localZone?: string;
+  /** Platform whose path and env rules apply (default `process.platform`). */
+  platform?: OsPlatform;
+  /** Resolves the binary (config `binary:` -> PATH -> well-known dirs); default: `instance.binary ?? "claude"`. */
+  resolveBinary?: (instance: ProviderInstance) => string | Promise<string>;
 }
 
 /** Reads Claude quota from `claude -p /usage`. */
@@ -144,20 +149,21 @@ export class ClaudeUsageReader implements QuotaReader {
   ): Promise<{ out: string[]; err: string[] }> {
     const o = this.#opts;
     const base = o.env ?? process.env;
-    const env = buildReaderEnv(base, instance);
-    const home = env.HOME;
+    const platform = o.platform ?? process.platform;
+    const env = buildReaderEnv(base, instance, undefined, platform);
     if (instance.configDir) {
-      const dir = instance.configDir;
-      env.CLAUDE_CONFIG_DIR =
-        home && (dir === "~" || dir.startsWith("~/")) ? join(home, dir.slice(1)) : dir;
-      if (!isAbsolute(env.CLAUDE_CONFIG_DIR)) delete env.CLAUDE_CONFIG_DIR;
+      const dir = expandTilde(instance.configDir, homeDir(env, platform), platform);
+      if (pathApi(platform).isAbsolute(dir)) env.CLAUDE_CONFIG_DIR = dir;
     }
     // Dispatch's own hooks stay inert in the child.
     env.DISPATCH_DEPTH = String((Number.parseInt(base.DISPATCH_DEPTH ?? "", 10) || 0) + 1);
     const out: string[] = [];
     const err: string[] = [];
+    const binary = o.resolveBinary
+      ? await o.resolveBinary(instance)
+      : (instance.binary ?? "claude");
     const result = await o.spawner.spawn({
-      binary: instance.binary ?? "claude",
+      binary,
       argv,
       env,
       cwd: o.cwd ?? tmpdir(),
