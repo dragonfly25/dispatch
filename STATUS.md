@@ -3,7 +3,7 @@
 Maintained by the lead engineer after every merge. Plan: [docs/PLAN.md](docs/PLAN.md) (including the
 "Amendments after WP1 spike" section).
 
-_Last update: 2026-11-07 — release v0.1.0_
+_Last update: 2026-11-13 — release v0.2.0 (everything under "After v0.1.0" and "Windows support")_
 
 ## Work packages
 
@@ -143,6 +143,8 @@ Taken during execution:
     workflow (publish.yml), never triggered by tags.
 
 ## After v0.1.0
+
+Shipped in v0.2.0 (2026-11-13), together with [Windows support](#windows-support).
 
 - **Claude quota reader `claude-usage`** (`claude -p /usage --safe-mode`, quota-free): real Claude
   windows (`5h`, `7d`, per-model `7d:<model>`), including the user's interactive usage. Only the

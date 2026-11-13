@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-11-13
+
 ### Added
 - Native Windows support (win32; WSL keeps the Linux path). Binaries resolve through `PATHEXT` and
   npm cmd-shims start as `node <script>` (never through `cmd.exe`); process trees stop with
