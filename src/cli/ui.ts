@@ -221,8 +221,11 @@ export function startSpinner(io: CliIo, text: string, intervalMs = 100): Spinner
   timer.unref?.();
   let stopped = false;
   return {
+    // A new phase is drawn at once: a short run may end before the next tick.
     update: (next) => {
+      if (stopped || next === label) return;
       label = next;
+      draw();
     },
     stop: () => {
       if (stopped) return;

@@ -85,6 +85,8 @@ All notable changes to this project are documented here. The format follows
   provider are delegated through Dispatch unless the user says otherwise.
 
 ### Fixed
+- The `run` progress spinner draws a new phase at once instead of on the next tick, so a short
+  run still shows which provider took it.
 - Codex `SKILL.md` named a nonexistent `--prompt-file` flag; it now uses `--task-file`.
 - Antigravity probe: `agy --help` flags are read from stderr as well as stdout. agy 1.5.3 prints its
   whole help on stderr, so `dispatch doctor` warned "`--help` listed no flags" and the required
