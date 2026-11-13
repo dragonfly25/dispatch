@@ -122,7 +122,8 @@ describe("[UC13] timeout and a patch that does not apply", () => {
       .split("\n")
       .filter((l) => l.startsWith("worktree "))
       .map((l) => l.slice("worktree ".length))
-      .find((p) => p.startsWith(keep.home.dispatchHome));
+      // git prints `/`-separated paths on Windows too.
+      .find((p) => p.startsWith(keep.home.dispatchHome.replaceAll("\\", "/")));
     expect(path).toBeDefined();
     expect(keep.dispatch(["gc"]).stdout).toContain("Removed 0 worktree(s)");
     expect(worktreeCount(keep)).toBe(1);

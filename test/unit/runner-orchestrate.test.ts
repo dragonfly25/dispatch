@@ -340,7 +340,8 @@ describe("executeTask", () => {
     expect(r.patch?.applies).toBe(false);
     expect(r.summary).toContain("patch does not apply");
     expect(readFileSync(join(repo.dir, "math.js"), "utf8")).toBe("user edit\n");
-    expect(repo.git("worktree", "list")).toContain(home.dispatchHome);
+    // git prints `/`-separated paths on Windows too.
+    expect(repo.git("worktree", "list")).toContain(home.dispatchHome.replaceAll("\\", "/"));
   });
 
   it("[AC4] delegates with every quota reader disabled", async () => {
@@ -600,6 +601,10 @@ describe("runner leases", () => {
     expect(isSecretLike("sk-abc")).toBe(true);
     expect(isSecretLike("/Users/x/.dispatch")).toBe(false);
     expect(isSecretLike("12345")).toBe(false);
+    expect(isSecretLike("C:\\Users\\runneradmin\\AppData\\Local\\Temp")).toBe(false);
+    expect(isSecretLike("D:/work/.dispatch")).toBe(false);
+    expect(isSecretLike("\\\\server\\share\\home")).toBe(false);
+    expect(isSecretLike("C:secret")).toBe(true);
   });
 });
 
@@ -799,7 +804,7 @@ describe("sandbox network [SEC-network]", () => {
     const [call] = fakes.readLog({ cli: "codex", kind: "run" });
     expect(call?.args).toContain("sandbox_workspace_write.network_access=true");
     const cache = call?.env.npm_config_cache ?? "";
-    expect(cache.startsWith(join(realpathSync(tmp), "dispatch-net", r.runId))).toBe(true);
+    expect(cache.startsWith(join(realpathSync.native(tmp), "dispatch-net", r.runId))).toBe(true);
     expect(call?.env.npm_config_store_dir).toMatch(/pnpm-store$/);
     // The per-attempt cache is removed with the attempt.
     expect(existsSync(dirname(cache))).toBe(false);

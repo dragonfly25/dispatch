@@ -180,7 +180,7 @@ describe("setup with the clack prompter [UC1]", () => {
     expect(calls).toMatch(/warn Antigravity \(agy\) is EXPERIMENTAL/);
     expect(calls).toContain("confirm Do you want to enable Antigravity anyway?");
     expect(calls).toMatch(/note Plan\n.*Dispatch setup will make these changes:/);
-    expect(calls).toMatch(/Global config: create ~\/\.dispatch\/config\.yaml/);
+    expect(calls).toMatch(/Global config: create ~[\\/]\.dispatch[\\/]config\.yaml/);
     expect(calls).toMatch(/note Trust grants\n/);
     expect(calls).toMatch(/spun .*Setup done: \d+ applied/);
     expect(calls).toMatch(/note Next steps\n.*\/hooks/);

@@ -1,7 +1,7 @@
 /** `dispatch run --handoff` and `dispatch apply` (Claude hard mode for custom agents) with fake CLIs. */
 import { chmodSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HANDOFF_RUNS_DIR, handoffPromptText, readHandoffRun } from "../../src/app/handoff.js";
 import { refusal } from "../../src/cli/commands/apply.js";
 import { buildProgram, runCli } from "../../src/cli/program.js";
@@ -30,7 +30,14 @@ let fakes: FakesContext | undefined;
 let home: TempHome | undefined;
 let repo: TempRepo | undefined;
 let other: TempRepo | undefined;
-afterEach(() => {
+// Real CLI processes spawn much slower on Windows runners than the 5 s default allows.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
+/** CLI calls still running (a timed-out test): awaited so the store is closed before cleanup. */
+const inFlight = new Set<Promise<unknown>>();
+afterEach(async () => {
+  await Promise.allSettled([...inFlight]);
+  inFlight.clear();
   fakes?.dispose();
   home?.cleanup();
   repo?.cleanup();
@@ -79,7 +86,9 @@ function setup(scenarios: FakeScenarioMap = EDIT, config = "") {
         detachCli: [process.execPath, "-e", "0"],
       },
     );
-    const code = await runCli(args, io, program, { platform: process.platform, env: base });
+    const pending = runCli(args, io, program, { platform: process.platform, env: base });
+    inFlight.add(pending);
+    const code = await pending.finally(() => inFlight.delete(pending));
     return { code, out, err };
   };
   return { run, fakes, home, repo };
@@ -126,7 +135,9 @@ describe("dispatch run --handoff [UC2][SEC-handoff]", () => {
     const r = JSON.parse(out) as RunResult;
     expect(r.decisions[0]?.targets[0]).toMatchObject({ tier: "max", effort: "high" });
     const call = fakes.readLog({ cli: "codex", kind: "run" })[0];
-    expect(call?.stdin).toContain("## Agent instructions (from .claude/agents/builder.md)");
+    // The path is shown with the platform separator (backslashes on Windows).
+    const shown = join(".claude", "agents", "builder.md");
+    expect(call?.stdin).toContain(`## Agent instructions (from ${shown})`);
     expect(call?.stdin).toContain("Always add a JSDoc comment.");
     expect(call?.stdin).toMatch(/## Task\n\nadd sub to math\.js/);
     expect(call?.args.join(" ")).toContain("-s read-only");

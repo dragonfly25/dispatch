@@ -89,11 +89,15 @@ export interface AttemptReport {
 }
 
 /**
- * Withheld env values worth masking. Absolute paths (`DISPATCH_HOME`, `PWD`, ...) and plain numbers
- * are not secrets, and masking them would corrupt the patch and log paths stored with the run.
+ * Withheld env values worth masking. Absolute paths (`DISPATCH_HOME`, `PWD`, `TEMP`, `APPDATA`, ...)
+ * and plain numbers are not secrets, and masking them would corrupt the patch and log paths stored
+ * with the run. Paths are recognized in POSIX (`/x`), Windows drive (`C:\x`, `C:/x`) and UNC
+ * (`\\\\server\\share`) form whatever the host platform.
  */
 export function isSecretLike(value: string): boolean {
-  return !value.startsWith("/") && !/^\d+$/.test(value);
+  const absolute =
+    value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+  return !absolute && !/^\d+$/.test(value);
 }
 
 const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));

@@ -331,7 +331,7 @@ describe("codex setup + uninstall --global [UC14]", () => {
       }
       expect(during).toContain("codex SessionStart");
       expect(during).toContain('"matcher": "spawn_agent|collaborationspawn_agent|Agent"');
-      expect(readFileSync(p.rules, "utf8")).toContain(`"${launcher()}"`);
+      expect(readFileSync(p.rules, "utf8")).toContain(JSON.stringify(launcher()));
       expect(existsSync(p.skill)).toBe(true);
       // Idempotent: a second setup changes nothing.
       const again = await applySetup(await planSetup(ctx([host()])), {
