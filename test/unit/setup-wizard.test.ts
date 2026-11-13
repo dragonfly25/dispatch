@@ -18,6 +18,7 @@ import { buildProgram, runCli } from "../../src/cli/program.js";
 import type { RepoCommandDeps } from "../../src/cli/repo-commands.js";
 import type { SetupCommandDeps } from "../../src/cli/setup.js";
 import { loadEffectiveConfig, validate } from "../../src/config/index.js";
+import { CODEX_WINDOWS_NO_RULES } from "../../src/hosts/codex/integration.js";
 import { writeGlobalConfig } from "../../src/setup/global-config.js";
 import { fakeCodexHost } from "../support/fake-host.js";
 import {
@@ -40,6 +41,10 @@ afterEach(() => {
   fakes = undefined;
   repo = undefined;
 });
+
+const WIN = process.platform === "win32";
+/** A fixture absolute path in the running platform's form (`/a/b` or `C:\\a\\b`). */
+const abs = (p: string): string => (WIN ? `C:${p.replaceAll("/", "\\")}` : p);
 
 /** The only invocations the wizard may make: version, help and login probes. */
 const QUOTA_FREE = new Set(["--version", "--help", "exec --help", "features list", "login status"]);
@@ -80,7 +85,11 @@ function harness(
   };
   const full: Partial<SetupCommandDeps> = {
     env,
-    install: () => ({ nodePath: "/n/node", cliPath: "/d/cli.mjs", hookPath: "/d/hook.mjs" }),
+    install: () => ({
+      nodePath: abs("/n/node"),
+      cliPath: abs("/d/cli.mjs"),
+      hookPath: abs("/d/hook.mjs"),
+    }),
     hosts: () => [],
     runner: () => ({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }),
     interactive: false,
@@ -601,7 +610,8 @@ describe("install on a fresh HOME runs setup first [UC1]", () => {
         "preserve",
       ],
     );
-    expect(k.io.stderr).toBe("");
+    // Windows: Codex gets no rules file, and setup says so.
+    expect(k.io.stderr).toBe(WIN ? `warning: ${CODEX_WINDOWS_NO_RULES}\n` : "");
     expect(code).toBe(0);
     expect(k.io.stdout).toContain("running `dispatch setup` first");
     const eff = loadEffectiveConfig({ cwd: r.dir, env: k.env });

@@ -10,6 +10,7 @@ import {
   policyText,
   sessionStartResponse,
 } from "../../../src/hosts/claude-code/hook.js";
+import { runningInvocation } from "../../../src/platform/invocation.js";
 import { launcherFileName } from "../../../src/platform/os.js";
 import { type TempHome, tempHome } from "../../support/temp.js";
 
@@ -45,6 +46,14 @@ describe("claude-code SessionStart handler [UC2][UC9]", () => {
     const out = JSON.parse(res.stdout ?? "");
     expect(Object.keys(out)).toEqual(["hookSpecificOutput"]);
     expect(out.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    if (process.platform === "win32") {
+      // Windows: node + cli quoted for Git Bash instead of the launcher; POSIX text pinned below.
+      const l = runningInvocation(h.dispatchHome, "bash");
+      const text = out.hookSpecificOutput.additionalContext as string;
+      expect(text).toContain(`\`${l} run --detach --json --task '<task>' [--task-type T]`);
+      expect(text).toContain(`\`${l} wait <runId> --json --timeout 100\``);
+      return;
+    }
     // Snapshot with the temp path replaced.
     const text = (out.hookSpecificOutput.additionalContext as string).replaceAll(
       h.dispatchHome,
@@ -110,6 +119,7 @@ describe("claude-code SessionStart handler [UC2][UC9]", () => {
     const text = policyText(
       cacheFor("/r", "x".repeat(5000)),
       "/home/it's me/.dispatch/bin/dispatch",
+      "linux",
     );
     expect(text).toContain(`'/home/it'\\''s me/.dispatch/bin/dispatch' wait <runId>`);
     expect(text.length).toBeLessThan(3500);

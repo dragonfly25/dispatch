@@ -14,6 +14,9 @@ import {
 import { DispatchError } from "../../../src/core/errors.js";
 import { task } from "../../fixtures/contracts.js";
 
+/** Builds on POSIX on any host: native Windows refuses claude (adapterPlatformBlocker). */
+const build = (a: Parameters<typeof buildClaudeInvocation>[0]) => buildClaudeInvocation(a, "linux");
+
 const HOME = "/home/u";
 const probe: ProbeResult = {
   binaryPath: "/opt/claude/bin/claude",
@@ -88,7 +91,7 @@ function settingsOf(argv: readonly string[]): unknown {
 
 describe("claude adapter: golden argv [SEC-claude-cred]", () => {
   it("[SEC-claude-cred] worktree: acceptEdits, edit tools, no Agent, credential deny + fail-closed sandbox", () => {
-    const inv = buildClaudeInvocation(args());
+    const inv = build(args());
     expect(InvocationSchema.parse(inv)).toEqual(inv);
     expect(inv.argv.slice(0, -2)).toEqual([
       ...COMMON,
@@ -117,7 +120,7 @@ describe("claude adapter: golden argv [SEC-claude-cred]", () => {
   });
 
   it("[SEC-claude-cred] read-only: dontAsk with Read,Grep,Glob only", () => {
-    const inv = buildClaudeInvocation(args({ autonomy: "read-only" }));
+    const inv = build(args({ autonomy: "read-only" }));
     expect(inv.argv.slice(0, -2)).toEqual([
       ...COMMON,
       "--permission-mode",
@@ -135,7 +138,7 @@ describe("claude adapter: golden argv [SEC-claude-cred]", () => {
   });
 
   it("[SEC-claude-cred] prompt goes on stdin under the task-data header, never in argv", () => {
-    const inv = buildClaudeInvocation(args());
+    const inv = build(args());
     expect(inv.stdin).toMatch(/^You are running as a delegated agent under Dispatch/);
     expect(inv.stdin).toContain("Do not run `dispatch`");
     expect(inv.stdin).toContain("current directory");
@@ -145,7 +148,7 @@ describe("claude adapter: golden argv [SEC-claude-cred]", () => {
   });
 
   it("[UC12] instance configDir becomes CLAUDE_CONFIG_DIR and is denied too", () => {
-    const inv = buildClaudeInvocation(
+    const inv = build(
       args({
         instance: {
           id: "claude-alt",
@@ -161,14 +164,14 @@ describe("claude adapter: golden argv [SEC-claude-cred]", () => {
   });
 
   it("[UC12] an instance without configDir never inherits another instance's CLAUDE_CONFIG_DIR", () => {
-    const inv = buildClaudeInvocation(
+    const inv = build(
       args({ baseEnv: { PATH: "/usr/bin", HOME, CLAUDE_CONFIG_DIR: "/home/u/.claude-alt" } }),
     );
     expect(inv.env).toEqual({ PATH: "/usr/bin", HOME });
   });
 
   it("does not duplicate a configDir that is already a denied HOME dir", () => {
-    const inv = buildClaudeInvocation(
+    const inv = build(
       args({
         instance: {
           id: "c",
@@ -204,7 +207,7 @@ describe("claude adapter: golden argv [SEC-claude-cred]", () => {
   ])("refuses to build: %s", (_name, over, code) => {
     let err: unknown;
     try {
-      buildClaudeInvocation(args(over));
+      build(args(over));
     } catch (e) {
       err = e;
     }

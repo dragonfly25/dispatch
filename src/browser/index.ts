@@ -24,7 +24,7 @@
  * superset), the codex adapter reads `browser`.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, win32 } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import type { BuildInvocationWithNetwork } from "../sandbox/network.js";
@@ -170,8 +170,12 @@ export function chromeCandidates(
   env: Env = process.env,
 ): string[] {
   if (platform === "darwin") {
-    const app = join("Google Chrome.app", "Contents", "MacOS", "Google Chrome");
-    return [join("/Applications", app), ...(home ? [join(home, "Applications", app)] : [])];
+    // macOS paths whatever the host running this (tests inject the platform).
+    const app = posix.join("Google Chrome.app", "Contents", "MacOS", "Google Chrome");
+    return [
+      posix.join("/Applications", app),
+      ...(home ? [posix.join(home, "Applications", app)] : []),
+    ];
   }
   if (platform === "linux") return ["/opt/google/chrome/chrome"];
   if (platform === "win32") {

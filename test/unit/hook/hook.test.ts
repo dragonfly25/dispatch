@@ -131,7 +131,7 @@ describe("hook cache", () => {
     expect(trustedRepoFor(cache, "/w/repo")?.root).toBe("/w/repo");
     expect(trustedRepoFor(cache, "/w/repository")).toBeNull();
     expect(hookDispatchHome({ DISPATCH_HOME: "/d", HOME: "/h" })).toBe("/d");
-    expect(hookDispatchHome({ HOME: "/h" })).toBe("/h/.dispatch");
+    expect(hookDispatchHome({ HOME: "/h" })).toBe(join("/h", ".dispatch"));
     expect(hookDispatchHome({})).toBeNull();
   });
 });

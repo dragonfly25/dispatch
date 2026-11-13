@@ -1,8 +1,12 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { delimiter, dirname, isAbsolute, join, win32 } from "node:path";
+import { posix, win32 } from "node:path";
 import { ExitCode } from "../core/contracts.js";
 import { DispatchError } from "../core/errors.js";
 import { envGet, homeDir, isWindows, type OsPlatform } from "./os.js";
+
+// The POSIX lookup uses POSIX path rules whatever the host (identical to node:path there), so an
+// injected non-Windows platform behaves the same on a Windows host; Windows uses `win32` below.
+const { delimiter, dirname, isAbsolute, join } = posix;
 
 /** Filesystem access used by {@link resolveBinary}; injectable for tests. */
 export interface ResolveFs {

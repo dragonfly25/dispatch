@@ -79,7 +79,13 @@ describe("tempHome / tempRepo [AC1]", () => {
     const h = tempHome();
     expect(h.env.HOME).toBe(h.home);
     expect(h.env.DISPATCH_HOME).toBe(join(h.home, ".dispatch"));
-    expect(h.home.startsWith(homedir())).toBe(false);
+    // Not the real home nor inside the user's own agent config (on Windows the temp dir itself
+    // lives under %USERPROFILE%\AppData\Local\Temp, so "outside the home" cannot be asserted).
+    expect(h.home).not.toBe(homedir());
+    for (const real of [".dispatch", ".claude", ".codex"]) {
+      expect(h.home.startsWith(join(homedir(), real))).toBe(false);
+    }
+    if (process.platform !== "win32") expect(h.home.startsWith(homedir())).toBe(false);
     expect(existsSync(h.home)).toBe(true);
     h.cleanup();
     expect(existsSync(h.home)).toBe(false);

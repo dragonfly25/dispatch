@@ -24,7 +24,10 @@ export function isBareCommand(binary: string): boolean {
 
 /** Lookup inputs for bare names on Windows; injectable for tests. */
 export interface BareLookup {
-  /** Env whose `PATH`/`PATHEXT` are searched (default `process.env`). */
+  /**
+   * The child's env: its `PATH`/`PATHEXT` are searched. Default, and fallback when it has no
+   * `PATH`: `process.env`.
+   */
   env?: Readonly<Record<string, string | undefined>>;
   fs?: ResolveFs;
 }
@@ -44,7 +47,10 @@ export function clearBareCommandCache(): void {
  * Cached per name + `PATH` + `PATHEXT`; a miss is not cached.
  */
 function resolveBareWindows(binary: string, lookup: BareLookup): string {
-  const env = lookup.env ?? process.env;
+  const env =
+    lookup.env !== undefined && envGet(lookup.env, "PATH", "win32") !== undefined
+      ? lookup.env
+      : process.env;
   const fs = lookup.fs ?? nodeResolveFs;
   const key = [
     binary.toLowerCase(),

@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DispatchError } from "../../../src/core/errors.js";
@@ -197,19 +197,22 @@ describe.skipIf(WIN)("renderHookCommand [UC9][AC5]", () => {
 
 describe("currentInstallPaths", () => {
   it("derives cli and hook paths next to the given module and uses execPath for node", () => {
-    const url = pathToFileURL("/opt/dispatch/dist/cli.mjs").href;
-    expect(currentInstallPaths({ moduleUrl: url, execPath: "/n/node" })).toEqual({
+    // Native form: on Windows `/opt/...` resolves against the current drive.
+    const file = resolve("/opt/dispatch/dist/cli.mjs");
+    expect(
+      currentInstallPaths({ moduleUrl: pathToFileURL(file).href, execPath: "/n/node" }),
+    ).toEqual({
       nodePath: "/n/node",
-      cliPath: "/opt/dispatch/dist/cli.mjs",
-      hookPath: "/opt/dispatch/dist/hook.mjs",
+      cliPath: file,
+      hookPath: join(dirname(file), "hook.mjs"),
     });
   });
 
   it("defaults to the running node and this module's directory", () => {
     const p = currentInstallPaths();
     expect(p.nodePath).toBe(process.execPath);
-    expect(p.cliPath.endsWith("/cli.mjs")).toBe(true);
-    expect(p.hookPath.endsWith("/hook.mjs")).toBe(true);
+    expect(p.cliPath.endsWith(`${sep}cli.mjs`)).toBe(true);
+    expect(p.hookPath.endsWith(`${sep}hook.mjs`)).toBe(true);
   });
 });
 

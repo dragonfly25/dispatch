@@ -18,6 +18,7 @@ import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { Clock, HostContext, RunRecord, RunResult, Task } from "../core/contracts.js";
+import { DispatchError } from "../core/errors.js";
 import { newRunId } from "../core/ids.js";
 import type { HostDetection } from "../platform/host.js";
 import { canonicalJson } from "../router/canonical.js";
@@ -200,13 +201,17 @@ export async function startDetached(
   store.setRunDir(runId, runDir); // `cancel` finds the run dir from any cwd
 
   const [cliBinary = process.execPath, ...cliArgs] = deps.cli ?? defaultCli();
-  const { command, args } = spawnCommandFor(cliBinary, cliArgs);
   const env = Object.fromEntries(
     Object.entries(deps.env).filter((e): e is [string, string] => e[1] !== undefined),
   );
   const out = openSync(join(runDir, SUPERVISOR_LOG), "a", 0o600);
   let spawnError: Error | null = null;
   try {
+    // Inside the try: a binary Windows refuses to start (binary.unspawnable / not_found) ends the
+    // run like a spawn error instead of leaving it "running" with no supervisor.
+    const { command, args } = spawnCommandFor(cliBinary, cliArgs, process.platform, undefined, {
+      env,
+    });
     // detached on every OS: the supervisor must outlive this process (Windows: no console of its
     // own is shown thanks to windowsHide).
     const child = spawn(command, [...args, SUPERVISE_COMMAND, runId, "--run-dir", runDir], {
@@ -224,6 +229,9 @@ export async function startDetached(
     if (child.pid !== undefined) {
       await store.updateRun(runId, { pid: child.pid, updatedAt: createdAt });
     }
+  } catch (err) {
+    if (!(err instanceof DispatchError)) throw err;
+    spawnError = err;
   } finally {
     closeSync(out);
   }

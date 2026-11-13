@@ -75,7 +75,7 @@ export async function runRpcSession<T>(
   body: (session: RpcSession) => Promise<T>,
 ): Promise<T> {
   const platform = opts.platform ?? process.platform;
-  const cmd = spawnCommandFor(opts.binary, opts.argv, platform, opts.toSpawn);
+  const cmd = spawnCommandFor(opts.binary, opts.argv, platform, opts.toSpawn, { env: opts.env });
   const child = spawn(cmd.command, cmd.args, {
     cwd: opts.cwd,
     env: { ...opts.env },

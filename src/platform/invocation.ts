@@ -8,7 +8,7 @@
  * class). So on Windows the model calls the absolute `node.exe` with the absolute `cli.mjs`
  * instead, which no shell re-parses; `dispatch.cmd` stays for the user's own terminal.
  */
-import { dirname, join, win32 } from "node:path";
+import { posix, win32 } from "node:path";
 import { isWindows, type OsPlatform } from "./os.js";
 
 /** The shell the model's command goes through. */
@@ -22,14 +22,13 @@ export interface InvocationPaths {
   cliPath: string;
 }
 
-/** `cli.mjs`, which the build emits next to `hook.mjs` (Windows path rules on win32). */
+/** `cli.mjs`, which the build emits next to `hook.mjs` (the path rules of `platform`). */
 export function cliPathBesideHook(
   hookPath: string,
   platform: OsPlatform = process.platform,
 ): string {
-  return isWindows(platform)
-    ? win32.join(win32.dirname(hookPath), "cli.mjs")
-    : join(dirname(hookPath), "cli.mjs");
+  const p = isWindows(platform) ? win32 : posix;
+  return p.join(p.dirname(hookPath), "cli.mjs");
 }
 
 /** Single-quotes `s` for bash/sh (an embedded `'` becomes `'\''`). */
@@ -72,7 +71,7 @@ export function runningInvocation(
   platform: OsPlatform = process.platform,
   entry: string = process.argv[1] ?? "",
 ): string {
-  const launcherPath = join(dispatchHome, "bin", "dispatch");
+  const launcherPath = (isWindows(platform) ? win32 : posix).join(dispatchHome, "bin", "dispatch");
   if (!isWindows(platform)) return launcherPath;
   const cliPath = cliPathBesideHook(entry, platform);
   const paths = { launcherPath, nodePath: process.execPath, cliPath };

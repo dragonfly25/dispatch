@@ -64,7 +64,7 @@ describe("profiles", () => {
     const r = await h.run(["profiles"]);
     expect(r.code).toBe(0);
     expect(r.out).toMatch(
-      /^\* balance +default +2 rule\(s\) +\S*assets\/profiles\/balance\.yaml$/m,
+      /^\* balance +default +2 rule\(s\) +\S*assets[\\/]profiles[\\/]balance\.yaml$/m,
     );
     expect(r.out).toMatch(/^ {2}preserve +default/m);
     expect(r.out).toContain("    Delegate to the instance with the most remaining quota.");

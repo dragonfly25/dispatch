@@ -21,6 +21,25 @@ const POSIX_ONLY = process.platform === "win32";
 /** Absolute path of the fake claude (production always spawns a resolved path; Windows PATH lookup never finds a .cmd). */
 const claudeBin = (ctx: FakesContext): string => join(ctx.binDir, shimFileName("claude"));
 const BASE_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin" };
+/**
+ * Variables libuv itself copies from the parent into a Windows child's environment block when the
+ * given env lacks them (uv_spawn's "required vars"); not Dispatch's doing, and none is a secret.
+ */
+const LIBUV_WINDOWS_REQUIRED =
+  process.platform === "win32"
+    ? [
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LOGONSERVER",
+        "SYSTEMDRIVE",
+        "SYSTEMROOT",
+        "TEMP",
+        "USERDOMAIN",
+        "USERNAME",
+        "USERPROFILE",
+        "WINDIR",
+      ]
+    : [];
 
 /**
  * Asserts that `pid` is gone. kill(pid, 0) still succeeds for a killed process that has not been
@@ -108,8 +127,9 @@ describe("ProcessSpawner: basics", () => {
         { env: { ...BASE_ENV, ONLY_THIS: "1" }, cwd: dir },
       );
       const keys: string[] = JSON.parse(r.stdout[0] ?? "[]");
-      // macOS adds __CF_USER_TEXT_ENCODING to every process on its own.
-      expect(keys.filter((k) => k !== "__CF_USER_TEXT_ENCODING")).toEqual(["ONLY_THIS", "PATH"]);
+      // macOS adds __CF_USER_TEXT_ENCODING to every process on its own, libuv the Windows basics.
+      const own = new Set(["__CF_USER_TEXT_ENCODING", ...LIBUV_WINDOWS_REQUIRED]);
+      expect(keys.filter((k) => !own.has(k.toUpperCase()))).toEqual(["ONLY_THIS", "PATH"]);
       expect(r.stdout[1]).toBe(realpathSync(dir));
       rmSync(dir, { recursive: true, force: true });
     } finally {
@@ -160,7 +180,10 @@ describe("ProcessSpawner: basics", () => {
       cwd: tmpdir(),
     });
     await expect(p).rejects.toBeInstanceOf(DispatchError);
-    await expect(p).rejects.toMatchObject({ code: "spawn.failed" });
+    // Windows refuses an extensionless path before spawning (only .exe/.com and npm shims start).
+    await expect(p).rejects.toMatchObject({
+      code: process.platform === "win32" ? "binary.unspawnable" : "spawn.failed",
+    });
   });
 
   it("an onLine callback that throws does not break the run", async () => {
@@ -603,6 +626,7 @@ describe("[SEC-env] canaries through the real spawner", () => {
     "__CF_USER_TEXT_ENCODING", // macOS adds it to every process
     // Windows: the base list forwards these system variables (none carries a secret).
     ...(process.platform === "win32" ? WINDOWS_BASE_ENV : []),
+    ...LIBUV_WINDOWS_REQUIRED,
   ]);
 
   it("[SEC-env] the fake CLI sees only allow-listed keys plus DISPATCH_* and never a canary value", async () => {

@@ -74,7 +74,7 @@ function setup(globalYaml = ON) {
   const probes = new ProbeCache();
   probes.set("codex", "codex", {
     ...probeResult,
-    binaryPath: join(fakes.binDir, "codex"),
+    binaryPath: fakes.bin("codex"),
     features: ["hooks", "plugins", "apps", "memories"],
   });
   const run = async (args: string[]) => {

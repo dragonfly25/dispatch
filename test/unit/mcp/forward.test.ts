@@ -110,19 +110,22 @@ describe("codex forwards only the needed servers, by variable name [SEC-mcp] [SE
 
 describe("claude and antigravity cannot receive MCP servers", () => {
   it("claude refuses forwarded servers (--safe-mode drops --mcp-config) but builds without", () => {
-    expect(() => buildClaudeInvocation(args("claude", [plain]))).toThrow(/safe-mode/);
-    const inv = buildClaudeInvocation(args("claude", []));
+    // POSIX: claude is never built on native Windows (by design).
+    expect(() => buildClaudeInvocation(args("claude", [plain]), "linux")).toThrow(/safe-mode/);
+    const inv = buildClaudeInvocation(args("claude", []), "linux");
     expect(inv.argv).toContain("--safe-mode");
     expect(inv.argv.join(" ")).not.toContain("mcp");
   });
 
   it("antigravity refuses forwarded servers", () => {
-    expect(() => buildAgyInvocation(args("antigravity", [plain]))).toThrow(/never receives MCP/);
+    expect(() => buildAgyInvocation(args("antigravity", [plain]), "linux")).toThrow(
+      /never receives MCP/,
+    );
     expect(
-      buildAgyInvocation({
-        ...args("antigravity"),
-        probe: { ...probeResult, binaryPath: "/bin/agy", flags: [] },
-      }).argv,
+      buildAgyInvocation(
+        { ...args("antigravity"), probe: { ...probeResult, binaryPath: "/bin/agy", flags: [] } },
+        "linux",
+      ).argv,
     ).toContain("--sandbox");
   });
 

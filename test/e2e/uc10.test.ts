@@ -81,12 +81,21 @@ describe.skipIf(!hasPython)("[UC10] dispatch as a subprocess of a Python framewo
       decision: { targets: { instance: string }[]; chain: { effect: string }[] };
     }>(w.dispatch(["run", "--task", "x", "--dry-run", "--json"]));
     expect(dry.input.host.self).toBeNull();
-    expect(dry.decision.targets.map((t) => t.instance).sort()).toEqual(["claude", "codex"]);
+    // Native Windows leaves claude out (its OS sandbox does not exist there, by design).
+    const win = process.platform === "win32";
+    expect(dry.decision.targets.map((t) => t.instance).sort()).toEqual(
+      win ? ["codex"] : ["claude", "codex"],
+    );
     expect(dry.decision.chain.some((c) => /self/.test(c.effect))).toBe(false);
 
     const viaClaude = w.run(["--provider", "claude"]);
     expect(viaClaude.code, viaClaude.stderr).toBe(0);
-    expect(viaClaude.result?.externalAgent?.instance).toBe("claude");
+    if (win) {
+      expect(viaClaude.result?.status).toBe("returned_to_host");
+      expect(viaClaude.result?.summary).toMatch(/not available on this OS: claude: .*WSL2/);
+    } else {
+      expect(viaClaude.result?.externalAgent?.instance).toBe("claude");
+    }
     expect(w.fakes.readLog({ cli: "codex", kind: "run" })).toEqual([]);
   });
 });

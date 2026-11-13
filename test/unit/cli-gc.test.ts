@@ -1,9 +1,12 @@
 import { existsSync } from "node:fs";
 import { utimes } from "node:fs/promises";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { WorktreeSandbox } from "../../src/sandbox/worktree.js";
 import { DAY, HOUR, iso, MIN, type Ops, opsHarness, runRecord } from "./cli-ops.helpers.js";
 import { cleanup, makeRepo } from "./sandbox-helpers.js";
+
+// Five real git worktrees take longer than the 5 s default on Windows runners.
+if (process.platform === "win32") vi.setConfig({ testTimeout: 60_000 });
 
 const dirs: string[] = [];
 const saved: Record<string, string | undefined> = {};

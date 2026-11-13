@@ -265,7 +265,7 @@ export async function runSetup(
   if (plan.detected.includes("codex") && !codexRulesSupported(platform)) {
     io.err(`warning: ${CODEX_WINDOWS_NO_RULES}\n`);
   }
-  const preview = renderPlanPreview(plan, change, { ui, home });
+  const preview = renderPlanPreview(plan, change, { ui, home, platform });
   if (rich && prompter) {
     prompter.note("Plan", preview.changes.trimEnd());
     if (preview.grants) prompter.note("Trust grants", preview.grants.trimEnd());

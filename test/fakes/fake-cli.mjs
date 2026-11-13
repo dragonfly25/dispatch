@@ -201,10 +201,12 @@ function loadFixture(spec) {
   const stdout = read(`${base}.stdout.jsonl`) ?? read(`${base}.json`);
   if (stdout === null) throw new Error(`fixture not found: ${spec}`);
   const meta = JSON.parse(read(`${base}.meta.json`) ?? "{}");
-  const sub = (s) => s.replaceAll("<WT>", cwd).replaceAll("<TMP>", os.tmpdir());
+  const sub = (s, enc) => s.replaceAll("<WT>", enc(cwd)).replaceAll("<TMP>", enc(os.tmpdir()));
+  // The placeholders sit inside JSON strings in stdout: escape the path (Windows backslashes).
+  const inJson = (p) => JSON.stringify(p).slice(1, -1);
   return {
-    stdout: sub(stdout),
-    stderr: sub(read(`${base}.stderr.txt`) ?? ""),
+    stdout: sub(stdout, inJson),
+    stderr: sub(read(`${base}.stderr.txt`) ?? "", (p) => p),
     exitCode: meta.exitCode ?? 0,
   };
 }

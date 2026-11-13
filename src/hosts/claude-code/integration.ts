@@ -12,7 +12,7 @@
  * (docs/spikes/hosts-prototype.md §1).
  */
 import { existsSync } from "node:fs";
-import { join, posix, win32 } from "node:path";
+import { join, normalize, posix, win32 } from "node:path";
 import type { EditOp, HostIntegration, HostPlanContext } from "../../core/contracts.js";
 import { envGet, isWindows, type OsPlatform } from "../../platform/os.js";
 import { type ResolveFs, resolveBinary } from "../../platform/resolve.js";
@@ -49,10 +49,13 @@ export interface ClaudeInstance {
   isDefault: boolean;
 }
 
-/** The instance selected by the environment (`CLAUDE_CONFIG_DIR`); the default one when unset. */
+/**
+ * The instance selected by the environment (`CLAUDE_CONFIG_DIR`); the default one when unset.
+ * The comparison normalizes separators, so `C:/Users/u/.claude` is the default instance on Windows.
+ */
 export function claudeInstanceOf(env: Env, home: string): ClaudeInstance {
   const configDir = claudeConfigDir(env, home);
-  return { configDir, isDefault: configDir === join(home, ".claude") };
+  return { configDir, isDefault: normalize(configDir) === join(home, ".claude") };
 }
 
 /** Version from `CLAUDE_CODE_VERSION`, else a `x.y.z` path segment of `CLAUDE_CODE_EXECPATH`. */

@@ -31,7 +31,8 @@ const isPort = (v: unknown): v is number =>
 function relativeInside(v: unknown): string | null {
   if (typeof v !== "string" || v === "" || isAbsolute(v)) return null;
   const n = normalize(v);
-  return n === ".." || n.startsWith("../") ? null : n;
+  // Windows normalizes to `..\x`: either separator after `..` leaves the repo.
+  return n === ".." || /^\.\.[\\/]/.test(n) ? null : n;
 }
 
 /**

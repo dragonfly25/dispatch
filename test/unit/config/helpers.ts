@@ -11,7 +11,8 @@ afterEach(() => {
 
 /** A fresh temp directory (realpath'd), removed after the test. */
 export function tempDir(): string {
-  const d = realpathSync(mkdtempSync(join(tmpdir(), "dispatch-config-")));
+  // The native realpath: on Windows it also expands 8.3 short names (RUNNER~1) like findRepo does.
+  const d = realpathSync.native(mkdtempSync(join(tmpdir(), "dispatch-config-")));
   cleanup.push(d);
   return d;
 }

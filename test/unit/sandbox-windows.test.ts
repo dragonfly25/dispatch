@@ -55,10 +55,14 @@ describe("bootstrap helpers on Windows", () => {
   });
 });
 
-/** An in-memory tree: dirs, files and links (a link's target is never listed). */
+/**
+ * An in-memory tree: dirs, files and links (a link's target is never listed). Keys use `/`; the
+ * code under test joins with the host separator, so incoming paths are folded to `/`.
+ */
 function memFs(tree: Record<string, "dir" | "file" | "link">, fail: Set<string> = new Set()) {
   const calls: string[] = [];
-  const kind = (p: string) => tree[p];
+  const n = (p: string): string => p.replaceAll("\\", "/");
+  const kind = (p: string) => tree[n(p)];
   const fs: SandboxFs = {
     lstat: async (p) => {
       const k = kind(p);
@@ -68,7 +72,8 @@ function memFs(tree: Record<string, "dir" | "file" | "link">, fail: Set<string> 
     stat: async () => ({ isDirectory: () => true, mtimeMs: 0 }),
     symlink: async () => {},
     mkdir: async () => undefined,
-    readdir: async (p) => {
+    readdir: async (raw) => {
+      const p = n(raw);
       calls.push(`readdir ${p}`);
       if (kind(p) !== "dir") throw new Error(`readdir of non-directory ${p}`);
       const prefix = `${p}/`;
@@ -76,18 +81,20 @@ function memFs(tree: Record<string, "dir" | "file" | "link">, fail: Set<string> 
         .filter((k) => k.startsWith(prefix) && !k.slice(prefix.length).includes("/"))
         .map((k) => k.slice(prefix.length));
     },
-    unlink: async (p) => {
+    unlink: async (raw) => {
+      const p = n(raw);
       calls.push(`unlink ${p}`);
       if (fail.has(`unlink ${p}`)) throw new Error("EPERM");
       delete tree[p];
     },
-    rmdir: async (p) => {
+    rmdir: async (raw) => {
+      const p = n(raw);
       calls.push(`rmdir ${p}`);
       if (fail.has(`rmdir ${p}`)) throw new Error("EPERM");
       delete tree[p];
     },
     rm: async (p) => {
-      calls.push(`rm ${p}`);
+      calls.push(`rm ${n(p)}`);
     },
   };
   return { fs, calls, tree };

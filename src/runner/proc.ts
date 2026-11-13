@@ -177,7 +177,9 @@ export class ProcessSpawner implements Spawner {
     const graceMs = req.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
     const startedAt = clock.monotonicMs();
 
-    const cmd = spawnCommandFor(req.binary, req.argv, this.platform, this.toSpawn);
+    const cmd = spawnCommandFor(req.binary, req.argv, this.platform, this.toSpawn, {
+      env: req.env,
+    });
     const child: ChildProcess = spawn(cmd.command, cmd.args, {
       cwd: req.cwd,
       env: { ...req.env },

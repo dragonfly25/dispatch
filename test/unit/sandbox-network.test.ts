@@ -1,4 +1,5 @@
 /** Opt-in sandbox network: golden argv per adapter, the scope decision, tighten-only config, doctor. */
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildAgyInvocation } from "../../src/adapters/agy/invocation.js";
 import { buildClaudeInvocation, SANDBOX_NETWORK } from "../../src/adapters/claude/invocation.js";
@@ -74,9 +75,10 @@ describe("codex sandbox network (golden argv) [SEC-network]", () => {
     for (const flag of ["--ignore-user-config", "--ignore-rules", "--strict-config"]) {
       expect(on.argv).toContain(flag);
     }
+    // The caches are joined with the host's separator (they are real paths of this machine).
     expect(on.env).toMatchObject({
-      npm_config_cache: "/tmp/dispatch-net/r1-1/npm",
-      npm_config_store_dir: "/tmp/dispatch-net/r1-1/pnpm-store",
+      npm_config_cache: join(NET.cacheDir, "npm"),
+      npm_config_store_dir: join(NET.cacheDir, "pnpm-store"),
     });
     expect(on.sideEffectGuards).toContain("codex-network-opt-in");
     // Otherwise identical to the run without network.
@@ -97,10 +99,13 @@ describe("codex sandbox network (golden argv) [SEC-network]", () => {
   });
 });
 
+/** POSIX golden argv: claude and agy are never built on native Windows (by design). */
+const POSIX = "linux";
+
 describe("claude sandbox network (golden argv) [SEC-network] [SEC-claude-cred]", () => {
   it("adds sandbox.network and the cache allowWrite; credential denyRead unchanged", () => {
-    const off = buildClaudeInvocation(args("claude", false));
-    const on = buildClaudeInvocation(args("claude", true));
+    const off = buildClaudeInvocation(args("claude", false), POSIX);
+    const on = buildClaudeInvocation(args("claude", true), POSIX);
     const a = settingsOf(off.argv);
     const b = settingsOf(on.argv);
     expect(a.sandbox.network).toBeUndefined();
@@ -114,7 +119,7 @@ describe("claude sandbox network (golden argv) [SEC-network] [SEC-claude-cred]",
     expect(b.sandbox.filesystem.allowWrite).toEqual([NET.cacheDir]);
     expect(b.permissions).toEqual(a.permissions);
     expect(b.sandbox.failIfUnavailable).toBe(true);
-    expect(on.env.npm_config_store_dir).toBe("/tmp/dispatch-net/r1-1/pnpm-store");
+    expect(on.env.npm_config_store_dir).toBe(join(NET.cacheDir, "pnpm-store"));
     expect(on.sideEffectGuards).toContain("claude-network-opt-in");
     expect(off.sideEffectGuards).not.toContain("claude-network-opt-in");
     // Everything but --settings is unchanged.
@@ -123,16 +128,19 @@ describe("claude sandbox network (golden argv) [SEC-network] [SEC-claude-cred]",
   });
 
   it("a read-only child (no Bash) gets no network", () => {
-    const ro = buildClaudeInvocation(args("claude", true, "read-only"));
+    const ro = buildClaudeInvocation(args("claude", true, "read-only"), POSIX);
     expect(settingsOf(ro.argv).sandbox.network).toBeUndefined();
     expect(ro.env.npm_config_cache).toBeUndefined();
   });
 
   it("antigravity (read-only) ignores it", () => {
-    const inv = buildAgyInvocation({
-      ...args("antigravity", true, "read-only"),
-      probe: { ...probeResult, binaryPath: "/bin/agy", flags: [] },
-    });
+    const inv = buildAgyInvocation(
+      {
+        ...args("antigravity", true, "read-only"),
+        probe: { ...probeResult, binaryPath: "/bin/agy", flags: [] },
+      },
+      POSIX,
+    );
     expect(inv.argv.join(" ")).not.toMatch(/network/);
   });
 });
@@ -170,10 +178,10 @@ describe("network scope decision [SEC-network]", () => {
   });
 
   it("caches live in a per-attempt directory outside the worktree", () => {
-    expect(cacheDirFor("/t", "r1", 2)).toBe("/t/dispatch-net/r1-2");
+    expect(cacheDirFor("/t", "r1", 2)).toBe(join("/t", "dispatch-net", "r1-2"));
     expect(packageCacheEnv({ cacheDir: "/c" })).toEqual({
-      npm_config_cache: "/c/npm",
-      npm_config_store_dir: "/c/pnpm-store",
+      npm_config_cache: join("/c", "npm"),
+      npm_config_store_dir: join("/c", "pnpm-store"),
     });
   });
 });

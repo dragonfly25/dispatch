@@ -201,7 +201,11 @@ describe("hook cache writer [UC9][UC2]", () => {
         io,
         buildProgram(io, {
           env,
-          install: () => ({ nodePath: "/n", cliPath: "/c", hookPath: "/h" }),
+          // Absolute in the running platform's form (the launcher validates them).
+          install: () =>
+            process.platform === "win32"
+              ? { nodePath: "C:\\n", cliPath: "C:\\c", hookPath: "C:\\h" }
+              : { nodePath: "/n", cliPath: "/c", hookPath: "/h" },
           hosts: () => [],
           runner: () => ({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }),
         }),

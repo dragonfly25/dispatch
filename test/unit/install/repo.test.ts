@@ -34,7 +34,11 @@ function setupDeps(
 ): Partial<SetupCommandDeps> {
   return {
     env,
-    install: () => ({ nodePath: "/n/node", cliPath: "/d/cli.mjs", hookPath: "/d/hook.mjs" }),
+    // Absolute in the running platform's form (the launcher validates them).
+    install: () =>
+      process.platform === "win32"
+        ? { nodePath: "C:\\n\\node", cliPath: "C:\\d\\cli.mjs", hookPath: "C:\\d\\hook.mjs" }
+        : { nodePath: "/n/node", cliPath: "/d/cli.mjs", hookPath: "/d/hook.mjs" },
     hosts: () => hosts,
     runner: () => ({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }),
     interactive: false,

@@ -71,12 +71,23 @@ function fakeNpm(calls: Call[]): CommandRunner {
 function harness(over: Partial<SetupCommandDeps> = {}) {
   const t = tempHome();
   h = t;
-  const bin = join(t.home, "node", "bin");
-  mkdirSync(join(t.home, "node", "lib"), { recursive: true });
+  const win = process.platform === "win32";
+  // npm where the running platform's node install keeps it (see npmCliFor).
+  const bin = win ? join(t.home, "node") : join(t.home, "node", "bin");
+  const node = join(bin, win ? "node.exe" : "node");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "node"), "");
-  writeFileSync(join(t.home, "node", "lib", "npm-cli.js"), "");
-  symlinkSync(join(t.home, "node", "lib", "npm-cli.js"), join(bin, "npm"));
+  writeFileSync(node, "");
+  let npm: string;
+  if (win) {
+    npm = join(bin, "node_modules", "npm", "bin", "npm-cli.js");
+    mkdirSync(join(bin, "node_modules", "npm", "bin"), { recursive: true });
+    writeFileSync(npm, "");
+  } else {
+    mkdirSync(join(t.home, "node", "lib"), { recursive: true });
+    writeFileSync(join(t.home, "node", "lib", "npm-cli.js"), "");
+    npm = join(bin, "npm");
+    symlinkSync(join(t.home, "node", "lib", "npm-cli.js"), npm);
+  }
   const calls: Call[] = [];
   const io = { stdout: "", stderr: "" };
   const sink = {
@@ -90,9 +101,9 @@ function harness(over: Partial<SetupCommandDeps> = {}) {
   const deps: Partial<SetupCommandDeps> = {
     env: t.env,
     install: () => ({
-      nodePath: join(bin, "node"),
-      cliPath: "/d/cli.mjs",
-      hookPath: "/d/hook.mjs",
+      nodePath: node,
+      cliPath: join(t.home, "d", "cli.mjs"),
+      hookPath: join(t.home, "d", "hook.mjs"),
     }),
     hosts: () => [],
     runner: () => fakeNpm(calls),
@@ -104,7 +115,7 @@ function harness(over: Partial<SetupCommandDeps> = {}) {
     runCli(args, sink, buildProgram(sink, deps, {}), { platform: "darwin", env: {} });
   const dir = browserToolsDir(t.dispatchHome);
   const installs = () => calls.filter((c) => c.argv[1] === "install");
-  return { t, io, run, calls, installs, dir, npmCli: realpathSync(join(bin, "npm")) };
+  return { t, io, run, calls, installs, dir, npmCli: realpathSync(npm) };
 }
 
 describe("setup installs the isolated browser when the config enables it [UC1][UC14][AC2]", () => {
@@ -113,7 +124,9 @@ describe("setup installs the isolated browser when the config enables it [UC1][U
     expect(await k.run("setup", "--non-interactive", "--yes", "--browser")).toBe(0);
     expect(k.io.stderr).toBe("");
     expect(k.io.stdout).toContain("Isolated browser");
-    expect(k.io.stdout).toMatch(/run .*node .*npm-cli\.js install --prefix .*playwright-mcp/);
+    expect(k.io.stdout).toMatch(
+      /run .*node(\.exe)? .*npm-cli\.js install --prefix .*playwright-mcp/,
+    );
     expect(k.io.stdout).toMatch(/Trust grants[\s\S]*@playwright\/mcp@0\.0\.84 \(~19 MB\)/);
     expect(readFileSync(join(k.t.dispatchHome, "config.yaml"), "utf8")).toMatch(
       /^ {4}browser: true$/m,

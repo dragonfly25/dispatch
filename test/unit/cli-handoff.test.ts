@@ -52,7 +52,7 @@ function setup(scenarios: FakeScenarioMap = EDIT, config = "") {
   const probes = new ProbeCache();
   probes.set("codex", "codex", {
     ...probeResult,
-    binaryPath: join(fakes.binDir, "codex"),
+    binaryPath: fakes.bin("codex"),
     features: ["hooks", "plugins", "apps", "memories"],
   });
   const run = async (args: string[], cwd = repo?.dir ?? "") => {
@@ -231,8 +231,16 @@ describe("dispatch run --handoff [UC2][SEC-handoff]", () => {
     });
     const text = handoffPromptText(h, "/repo", "/home/me");
     expect(text).not.toContain("Agent instructions");
-    expect(handoffPromptText({ ...h, instructions: "i" }, "/repo", "/home/me")).toContain(
-      "(from ~/.claude/agents/u.md)",
+    expect(
+      handoffPromptText({ ...h, instructions: "i" }, "/repo", "/home/me", [], "linux"),
+    ).toContain("(from ~/.claude/agents/u.md)");
+    const win = {
+      ...h,
+      instructions: "i",
+      agent: { ...h.agent, path: "C:\\Users\\me\\.claude\\agents\\u.md" },
+    };
+    expect(handoffPromptText(win, "C:\\repo", "C:\\Users\\me", [], "win32")).toContain(
+      "(from ~\\.claude\\agents\\u.md)",
     );
   });
 });

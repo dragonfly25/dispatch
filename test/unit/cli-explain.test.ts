@@ -28,7 +28,15 @@ describe("explain", () => {
     const h = harness();
     h.sb.global(PIN_CONFIG);
     const r = await h.run(["explain", ...PINNED, "--task-type", "refactor"]);
-    expect(maskHash(r.out)).toMatchSnapshot();
+    let out = maskHash(r.out);
+    if (process.platform === "win32") {
+      // Native Windows also lists claude as unavailable on this OS; the snapshot is the POSIX one.
+      const block = /^Unavailable \(disabled for this decision\):\n(?: {2}.*\n)+/m;
+      expect(out).toMatch(block);
+      expect(out).toContain("claude: Claude Code's OS sandbox is not available on native Windows");
+      out = out.replace(block, "");
+    }
+    expect(out).toMatchSnapshot();
   });
 
   it("[UC5] without a pinned path the profiles differ", async () => {

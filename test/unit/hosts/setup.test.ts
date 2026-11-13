@@ -16,6 +16,7 @@ import {
   writeManifest,
 } from "../../../src/hosts/_framework/index.js";
 import { manifestPath } from "../../../src/hosts/_framework/manifest.js";
+import { cliPathBesideHook, hostInvocation } from "../../../src/platform/invocation.js";
 import { launcherFileName } from "../../../src/platform/os.js";
 import {
   CODEX_RULES_GRANT,
@@ -28,15 +29,21 @@ import { type TempHome, tempHome } from "../../support/temp.js";
 let h: TempHome;
 afterEach(() => h?.cleanup());
 
+/** Install paths in the running platform's form (the launcher and hooks validate them). */
+const INSTALL =
+  process.platform === "win32"
+    ? {
+        nodePath: "C:\\opt\\node\\node.exe",
+        cliPath: "C:\\opt\\d\\cli.mjs",
+        hookPath: "C:\\opt\\d\\hook.mjs",
+      }
+    : { nodePath: "/opt/node/bin/node", cliPath: "/opt/d/cli.mjs", hookPath: "/opt/d/hook.mjs" };
+
 function ctx(hosts: HostIntegration[]): SetupContext {
   return {
     home: h.home,
     dispatchHome: h.dispatchHome,
-    install: {
-      nodePath: "/opt/node/bin/node",
-      cliPath: "/opt/d/cli.mjs",
-      hookPath: "/opt/d/hook.mjs",
-    },
+    install: INSTALL,
     hosts,
   };
 }
@@ -59,7 +66,7 @@ describe("planSetup / applySetup / uninstallGlobal", () => {
     if (process.platform !== "win32") {
       expect(statSync(launcher).mode & 0o777).toBe(0o755);
     }
-    expect(readFileSync(launcher, "utf8")).toContain('exec "/opt/node/bin/node"');
+    expect(readFileSync(launcher, "utf8")).toContain(`"${INSTALL.nodePath}"`);
   });
 
   it("the preview lists every file and trust grant before anything is written", async () => {
@@ -129,11 +136,18 @@ describe("planSetup / applySetup / uninstallGlobal", () => {
           "utf8",
         ),
       ).hooks.SessionStart[0].hooks[0].command,
-    ).toContain("'/opt/d/hook.mjs' claude-code SessionStart");
+    ).toContain(`'${INSTALL.hookPath}' claude-code SessionStart`);
     expect(
       readFileSync(join(h.home, ".agents", "skills", "dispatch", "SKILL.md"), "utf8"),
     ).toContain(
-      `${join(h.dispatchHome, "bin", launcherFileName())} wait <runId> --json --timeout 280`,
+      `${hostInvocation(
+        {
+          launcherPath: join(h.dispatchHome, "bin", launcherFileName()),
+          nodePath: INSTALL.nodePath,
+          cliPath: cliPathBesideHook(INSTALL.hookPath),
+        },
+        "bash",
+      )} wait <runId> --json --timeout 280`,
     );
     const manifest = readManifest(h.dispatchHome);
     expect(manifest.entries).toHaveLength(plan.ops.length);

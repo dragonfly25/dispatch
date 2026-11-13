@@ -1,4 +1,5 @@
 import type { Adapter, AdapterCapabilities } from "../../core/contracts.js";
+import type { OsPlatform } from "../../platform/os.js";
 import { finalizeAgy } from "./finalize.js";
 import { buildAgyInvocation } from "./invocation.js";
 import { parseAgyLine } from "./parse.js";
@@ -40,12 +41,17 @@ export const AGY_CAPABILITIES: AdapterCapabilities = {
   childNetwork: "none",
 };
 
-/** Creates the Antigravity adapter (read-only, experimental). */
-export function createAgyAdapter(): Adapter {
+/**
+ * Creates the Antigravity adapter (read-only, experimental). `platform` (default
+ * `process.platform`) pins the OS the invocation is built for (native Windows is refused); tests
+ * use it to check the POSIX argv on any host.
+ */
+export function createAgyAdapter(opts: { platform?: OsPlatform } = {}): Adapter {
+  const { platform } = opts;
   return {
     caps: AGY_CAPABILITIES,
     probe: (instance, deps) => probeAgy(instance, deps, AGY_CAPABILITIES),
-    buildInvocation: buildAgyInvocation,
+    buildInvocation: (args) => buildAgyInvocation(args, platform),
     parseLine: parseAgyLine,
     finalize: finalizeAgy,
   };

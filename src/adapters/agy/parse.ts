@@ -1,4 +1,4 @@
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import type { AdapterRunContext, NormalizedEvent } from "../../core/contracts.js";
 
 /** A denied tool action as reported in `result.denied_actions`. */
@@ -73,11 +73,14 @@ function stamp(ctx: AdapterRunContext): string {
   return new Date().toISOString();
 }
 
-/** Worktree-relative form of `p`, or undefined when it lies outside the worktree. */
+/**
+ * Worktree-relative form of `p` (`/`-separated on every OS, like the codex adapter), or undefined
+ * when it lies outside the worktree.
+ */
 function inWorktree(p: string, worktree: string): string | undefined {
   const rel = isAbsolute(p) ? relative(worktree, p) : p;
   if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return undefined;
-  return rel;
+  return rel.split(sep).join("/");
 }
 
 function toolKind(name: string): NormalizedEvent["kind"] {

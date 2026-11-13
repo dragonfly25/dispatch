@@ -24,6 +24,10 @@ afterEach(() => {
 
 const CANCEL = Symbol("clack:cancel");
 
+/** A fixture absolute path in the running platform's form (`/a/b` or `C:\\a\\b`). */
+const abs = (p: string): string =>
+  process.platform === "win32" ? `C:${p.replaceAll("/", "\\")}` : p;
+
 /**
  * A fake clack. Prompts answer from `answers` in order (a function gets the prompt options;
  * `undefined` takes the prompt's initial value); prompt number `cancelAt` is cancelled.
@@ -73,7 +77,11 @@ function harness(deps: Partial<SetupCommandDeps>) {
   };
   const full: Partial<SetupCommandDeps> = {
     env,
-    install: () => ({ nodePath: "/n/node", cliPath: "/d/cli.mjs", hookPath: "/d/hook.mjs" }),
+    install: () => ({
+      nodePath: abs("/n/node"),
+      cliPath: abs("/d/cli.mjs"),
+      hookPath: abs("/d/hook.mjs"),
+    }),
     hosts: () => [],
     runner: () => ({ run: async () => ({ code: 0, stdout: "", stderr: "" }) }),
     interactive: true,

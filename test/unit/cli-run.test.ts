@@ -51,10 +51,10 @@ function setup(o: Setup = {}) {
   const base = { ...fakes.env, ...home.env };
   // The fake claude does not advertise --safe-mode, so the probes are seeded (as in WP19).
   const probes = new ProbeCache();
-  for (const cli of ["claude", "codex"]) {
+  for (const cli of ["claude", "codex"] as const) {
     probes.set(cli, cli, {
       ...probeResult,
-      binaryPath: join(fakes.binDir, cli),
+      binaryPath: fakes.bin(cli),
       flags: ["--safe-mode"],
       features: ["hooks", "plugins", "apps", "memories"],
     });
@@ -191,9 +191,9 @@ describe("dispatch run", () => {
 
   it("--provider forces a pin that explain shows; the router still applies", async () => {
     const { run, fakes } = setup({ config: "profile: preserve\n" });
-    const dry = await run([...TASK, "--provider", "claude", "--dry-run", "--json"]);
+    const dry = await run([...TASK, "--provider", "codex", "--dry-run", "--json"]);
     const d = JSON.parse(dry.out);
-    expect(d.decision.targets.map((t: { instance: string }) => t.instance)).toEqual(["claude"]);
+    expect(d.decision.targets.map((t: { instance: string }) => t.instance)).toEqual(["codex"]);
     expect(d.explain).toContain("flag:provider");
     // Inside Claude Code the host is never a target: the pinned task stays on the host.
     const self = await run([...TASK, "--provider", "claude", "--json"], { CLAUDECODE: "1" });

@@ -155,8 +155,8 @@ describe("agent lookup [UC2]", () => {
 
   it("CLAUDE_CONFIG_DIR (absolute) replaces ~/.claude for user agents", () => {
     expect(agentDirs("/r", { HOME: "/h", CLAUDE_CONFIG_DIR: "/alt" })).toEqual({
-      project: "/r/.claude/agents",
-      user: "/alt/agents",
+      project: join("/r", ".claude", "agents"),
+      user: join("/alt", "agents"),
     });
     expect(agentDirs(null, { CLAUDE_CONFIG_DIR: "rel" })).toEqual({ project: null, user: null });
   });

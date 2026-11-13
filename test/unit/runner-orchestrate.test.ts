@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { disabledReaders, loadAppContext } from "../../src/app/context.js";
 import { runnerDeps } from "../../src/app/runner.js";
 import { renderRunResult } from "../../src/cli/commands/run.js";
@@ -41,6 +41,7 @@ import { probeResult } from "../fixtures/contracts.js";
 import {
   createFakes,
   FAKE_LEAKS,
+  type FakeCli,
   type FakeScenarioMap,
   type FakesContext,
   snapshotTree,
@@ -50,6 +51,20 @@ import {
   tempRepo,
 } from "../support/index.js";
 import { makeConfig } from "./router/fixtures.js";
+
+/**
+ * Native Windows never routes to claude (its OS sandbox does not exist there, by design). Tests of
+ * generic fallback behaviour use a second codex instance as the first target there instead; tests
+ * of claude's own argv run on POSIX only.
+ */
+const WIN = process.platform === "win32";
+const FIRST = WIN
+  ? ({ id: "codex-b", adapter: "codex", cli: "codex" } as const)
+  : ({ id: "claude", adapter: "claude", cli: "claude" } as const);
+/** For tests that need claude itself as the delegation target. */
+const itClaude = it.skipIf(WIN);
+// Worktree runs with real git and node children take several seconds each on Windows runners.
+if (WIN) vi.setConfig({ testTimeout: 60_000 });
 
 const instance = (id: string, adapter: string) => ({
   id,
@@ -64,7 +79,11 @@ const instance = (id: string, adapter: string) => ({
 function execution(over: Partial<ExecutionConfig> = {}): ExecutionConfig {
   return {
     autonomy: "worktree",
-    instances: [instance("claude", "claude"), instance("codex", "codex")],
+    instances: [
+      instance("claude", "claude"),
+      instance("codex", "codex"),
+      ...(WIN ? [instance(FIRST.id, FIRST.adapter)] : []),
+    ],
     concurrency: { perProvider: 1, total: 4 },
     maxDepth: 1,
     network: "off",
@@ -78,7 +97,10 @@ function execution(over: Partial<ExecutionConfig> = {}): ExecutionConfig {
 function routing(rule: Rule["action"], over: Partial<RoutingConfig> = {}): RoutingConfig {
   const base = makeConfig();
   return makeConfig({
-    instances: base.instances.filter((i) => i.id === "claude" || i.id === "codex"),
+    instances: [
+      ...base.instances.filter((i) => i.id === "claude" || i.id === "codex"),
+      ...base.instances.filter((i) => WIN && i.id === "codex").map((i) => ({ ...i, id: FIRST.id })),
+    ],
     activeProfile: "test",
     profiles: { ...base.profiles, test: { rules: [{ id: "r", match: {}, action: rule }] } },
     ...over,
@@ -95,6 +117,12 @@ const task = (over: Partial<Task> = {}): Task => ({
 });
 
 const FALLBACK: Rule["action"] = {
+  type: "fallback",
+  instances: [FIRST.id, "codex"],
+  strategy: "ordered",
+};
+/** claude then codex, on every OS (on Windows claude is left out as blocked). */
+const CLAUDE_CODEX: Rule["action"] = {
   type: "fallback",
   instances: ["claude", "codex"],
   strategy: "ordered",
@@ -128,14 +156,15 @@ function setup(o: SetupOptions = {}) {
   repo = tempRepo({ files: { "math.js": "function add(a, b) {\n  return a + b;\n}\n" } });
   const env = { ...fakes.env, ...home.env, ...o.env };
   const probes = new ProbeCache();
-  const probe = (cli: string): ProbeResult => ({
+  const probe = (cli: FakeCli): ProbeResult => ({
     ...probeResult,
-    binaryPath: join(fakes?.binDir ?? "", cli),
+    binaryPath: fakes?.bin(cli) ?? "",
     flags: ["--safe-mode"],
     features: ["hooks", "plugins", "apps", "memories"],
   });
   probes.set("claude", "claude", probe("claude"));
   probes.set("codex", "codex", probe("codex"));
+  if (WIN) probes.set("codex", FIRST.id, probe("codex"));
   const ctx = loadAppContext({ cwd: repo.dir, env });
   ctx.config = {
     ...ctx.config,
@@ -200,7 +229,7 @@ describe("executeTask", () => {
     const { run, deps } = setup({
       action: FALLBACK,
       scenarios: {
-        claude: [{ scenario: "quota_exhausted" }],
+        [FIRST.cli]: [{ scenario: "quota_exhausted" }],
         codex: [{ scenario: "quota_exhausted" }],
       },
     });
@@ -209,9 +238,9 @@ describe("executeTask", () => {
     expect(r.status).toBe("returned_to_host");
     expect(r.outcome).toBe("quota_exhausted");
     expect(r.externalAgent).toBeNull();
-    expect(r.summary).toMatch(/claude: quota_exhausted.*codex: quota_exhausted/);
+    expect(r.summary).toMatch(new RegExp(`${FIRST.id}: quota_exhausted.*codex: quota_exhausted`));
     const signals = (deps.store as SqliteStateStore).activeQuotaSignals(new Date());
-    expect(signals.map((s) => s.instanceId)).toEqual(["claude", "codex"]);
+    expect(signals.map((s) => s.instanceId).sort()).toEqual([FIRST.id, "codex"].sort());
     // The next run skips both without spawning: the router filters them out.
     const again = await run();
     expect(again.status).toBe("returned_to_host");
@@ -222,27 +251,34 @@ describe("executeTask", () => {
     // adapter's default instance is called.
     const { run, fakes } = setup({
       action: FALLBACK,
-      overrides: { hostSelf: "claude" },
+      overrides: { hostSelf: FIRST.id },
       scenarios: { codex: [{ scenario: "success_edit", file: "a.txt", content: "a\n" }] },
     });
     const r = await run();
     expect(r.externalAgent?.instance).toBe("codex");
-    expect(r.decisions[0]?.chain.find((c) => c.ruleId === "claude")?.effect).toMatch(/self/);
-    expect(fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
+    expect(r.decisions[0]?.chain.find((c) => c.ruleId === FIRST.id)?.effect).toMatch(/self/);
+    expect(fakes.readLog({ kind: "run" })).toHaveLength(1);
   });
 
   it("[UC4] second target succeeds after the first one is exhausted", async () => {
     const { run, fakes } = setup({
       action: FALLBACK,
-      scenarios: {
-        claude: [{ scenario: "quota_exhausted" }],
-        codex: [{ scenario: "success_edit", file: "math.js", content: "y\n" }],
-      },
+      scenarios: WIN
+        ? {
+            codex: [
+              { scenario: "quota_exhausted" },
+              { scenario: "success_edit", file: "math.js", content: "y\n" },
+            ],
+          }
+        : {
+            claude: [{ scenario: "quota_exhausted" }],
+            codex: [{ scenario: "success_edit", file: "math.js", content: "y\n" }],
+          },
     });
     const r = await run();
     expect(r).toMatchObject({ status: "completed", outcome: "success" });
     expect(r.externalAgent?.instance).toBe("codex");
-    expect(fakes.readLog({ kind: "run" }).map((c) => c.cli)).toEqual(["claude", "codex"]);
+    expect(fakes.readLog({ kind: "run" }).map((c) => c.cli)).toEqual([FIRST.cli, "codex"]);
   });
 
   it("[UC4] skips a target whose quota signal appeared after the decision", async () => {
@@ -254,12 +290,12 @@ describe("executeTask", () => {
     const snapshot = deps.quota.snapshot.bind(deps.quota);
     deps.quota.snapshot = async (i) => {
       const s = await snapshot(i);
-      store.recordQuotaSignal("claude", new Date(Date.now() + 3_600_000), "late");
+      store.recordQuotaSignal(FIRST.id, new Date(Date.now() + 3_600_000), "late");
       return s;
     };
     const r = await run();
     expect(r.externalAgent?.instance).toBe("codex");
-    expect(fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
+    expect(fakes.readLog({ kind: "run" })).toHaveLength(1);
   });
 
   it("[UC13] a slow child hits the timeout; without work it falls back to the host", async () => {
@@ -390,7 +426,7 @@ describe("executeTask", () => {
 
   it("[win32] routes around an adapter that cannot run on the OS, with the reason logged", async () => {
     const { run, fakes } = setup({
-      action: FALLBACK,
+      action: CLAUDE_CODEX,
       overrides: { platform: "win32", hostSelf: null },
       scenarios: { codex: [{ scenario: "success_edit", file: "a.txt", content: "a\n" }] },
     });
@@ -432,8 +468,10 @@ describe("executeTask", () => {
 
   it("skips unknown instances and missing adapters", async () => {
     const { run } = setup({
-      action: FALLBACK,
+      action: CLAUDE_CODEX,
       exec: { instances: [instance("codex", "nope")] },
+      // On Windows claude would be left out as blocked before the instance lookup.
+      overrides: { platform: "linux" },
     });
     const r = await run();
     expect(r.summary).toContain("claude: unknown instance");
@@ -612,7 +650,7 @@ describe("MCP forwarding [SEC-mcp] [SEC-env]", () => {
 
   it("forwards a pure-reference server to codex by name only; the value never reaches argv, logs or state", async () => {
     const { deps, fakes } = setup({
-      action: FALLBACK,
+      action: CLAUDE_CODEX,
       exec: { forwardMcp: true },
       env: { GH_TOKEN: CANARY },
       scenarios: { codex: [{ scenario: "leak_secret", secret: CANARY }] },
@@ -623,7 +661,9 @@ describe("MCP forwarding [SEC-mcp] [SEC-env]", () => {
     expect(r.externalAgent?.instance).toBe("codex");
     // claude cannot host MCP servers: the router never picked it.
     expect(fakes.readLog({ cli: "claude", kind: "run" })).toEqual([]);
-    expect(r.decisions[0]?.chain.find((c) => c.ruleId === "claude")?.effect).toMatch(/disabled/);
+    if (!WIN) {
+      expect(r.decisions[0]?.chain.find((c) => c.ruleId === "claude")?.effect).toMatch(/disabled/);
+    }
     const [call] = fakes.readLog({ cli: "codex", kind: "run" });
     expect(call?.args).toContain('mcp_servers.gh.env_vars=["GH_TOKEN"]');
     expect(call?.args).toContain("--ignore-user-config");
@@ -646,7 +686,8 @@ describe("MCP forwarding [SEC-mcp] [SEC-env]", () => {
   });
 
   it("re-resolves at run time: a server that became a literal secret goes back to the host", async () => {
-    const { deps, fakes } = setup({ exec: { forwardMcp: true } });
+    // platform linux: on Windows the summary would also name claude as left out on this OS.
+    const { deps, fakes } = setup({ exec: { forwardMcp: true }, overrides: { platform: "linux" } });
     // The hook saw a forwardable `gh`; by run time the user pasted a token into the config.
     claudeJson({ gh: { command: "gh-mcp", env: { GH_TOKEN: CANARY } } });
     const r = await forward(deps, ["gh"]);
@@ -687,7 +728,7 @@ describe("web access [UC2]", () => {
     expect(readFileSync(r.log.path, "utf8")).toContain('"type":"web.forward"');
   });
 
-  it("claude gets the web tools, pre-approved", async () => {
+  itClaude("claude gets the web tools, pre-approved", async () => {
     const { deps, fakes } = setup({
       action: { type: "provider", instance: "claude" },
       scenarios: { claude: [{ scenario: "success_edit", file: "math.js", content: "x\n" }] },
@@ -794,20 +835,23 @@ describe("sandbox network [SEC-network]", () => {
     expect(call?.env.npm_config_cache).toBeUndefined();
   });
 
-  it("default off: no field, no flag; claude gets sandbox.network in --settings", async () => {
-    const off = netSetup({ scenarios: edit });
-    const r = await go(off.deps, {}, "builder");
-    expect(r.sandboxNetwork).toBeUndefined();
-    const cl = netSetup({
-      action: { type: "provider", instance: "claude" },
-      scenarios: { claude: [{ scenario: "success_edit", file: "math.js", content: "x\n" }] },
-      exec: { network: "all" },
-    });
-    const r2 = await go(cl.deps);
-    expect(r2.externalAgent?.instance).toBe("claude");
-    const [call] = cl.fakes.readLog({ cli: "claude", kind: "run" });
-    const settings = JSON.parse(call?.args[(call?.args.indexOf("--settings") ?? 0) + 1] ?? "{}");
-    expect(settings.sandbox.network).toMatchObject({ allowLocalBinding: true });
-    expect(renderRunResult(r2)).toContain("Sandbox network: on (network: all)");
-  });
+  itClaude(
+    "default off: no field, no flag; claude gets sandbox.network in --settings",
+    async () => {
+      const off = netSetup({ scenarios: edit });
+      const r = await go(off.deps, {}, "builder");
+      expect(r.sandboxNetwork).toBeUndefined();
+      const cl = netSetup({
+        action: { type: "provider", instance: "claude" },
+        scenarios: { claude: [{ scenario: "success_edit", file: "math.js", content: "x\n" }] },
+        exec: { network: "all" },
+      });
+      const r2 = await go(cl.deps);
+      expect(r2.externalAgent?.instance).toBe("claude");
+      const [call] = cl.fakes.readLog({ cli: "claude", kind: "run" });
+      const settings = JSON.parse(call?.args[(call?.args.indexOf("--settings") ?? 0) + 1] ?? "{}");
+      expect(settings.sandbox.network).toMatchObject({ allowLocalBinding: true });
+      expect(renderRunResult(r2)).toContain("Sandbox network: on (network: all)");
+    },
+  );
 });

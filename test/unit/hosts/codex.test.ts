@@ -29,9 +29,19 @@ let h: TempHome;
 afterEach(() => h?.cleanup());
 
 const NONE = { isExecutableFile: () => false, realpath: (p: string) => p };
+const WIN = process.platform === "win32";
+/**
+ * These tests pin the POSIX integration (sh hooks, the rules file); the Windows plan (PowerShell
+ * hooks, no rules file) is covered in windows.test.ts. Setup still writes to the real temp HOME.
+ */
+const POSIX = "linux";
 
 function host(env: Record<string, string> = {}): HostIntegration {
-  return createCodexIntegration({ env: () => ({ HOME: h.home, PATH: "/none", ...env }), fs: NONE });
+  return createCodexIntegration({
+    env: () => ({ HOME: h.home, PATH: "/none", ...env }),
+    fs: NONE,
+    platform: POSIX,
+  });
 }
 
 function ctx(hosts: HostIntegration[]): SetupContext {
@@ -44,11 +54,12 @@ function ctx(hosts: HostIntegration[]): SetupContext {
       hookPath: "/opt/d/hook.mjs",
     },
     hosts,
+    platform: POSIX,
   };
 }
 
 const launcher = () => join(h.dispatchHome, "bin", "dispatch");
-const paths = () => codexPaths({}, h.home);
+const paths = () => codexPaths({}, h.home, POSIX);
 
 /** A temp HOME with `~/.codex` (and a config.toml Dispatch must never touch). */
 function codexHome(): string {
@@ -79,16 +90,21 @@ describe("codex integration: identity and detection", () => {
   it("detect: ~/.codex, CODEX_HOME or the binary; codexHomeDir ignores a relative CODEX_HOME", async () => {
     h = tempHome();
     const pc = { home: h.home, launcherPath: launcher(), nodePath: "/n", hookPath: "/h" };
-    expect(await host().detect(pc)).toBe(false);
+    // Detection on the running platform: CODEX_HOME and PATH hold native paths.
+    const native = (env: Record<string, string> = {}) =>
+      createCodexIntegration({ env: () => ({ HOME: h.home, PATH: "/none", ...env }), fs: NONE });
+    expect(await native().detect(pc)).toBe(false);
     const alt = join(h.home, "alt-codex");
     mkdirSync(alt);
-    expect(await host({ CODEX_HOME: alt }).detect(pc)).toBe(true);
+    expect(await native({ CODEX_HOME: alt }).detect(pc)).toBe(true);
+    const binDir = join(h.home, "bin");
+    const bin = join(binDir, WIN ? "codex.exe" : "codex");
     const withBin = createCodexIntegration({
-      env: () => ({ PATH: "/bin" }),
-      fs: { isExecutableFile: (p) => p === "/bin/codex", realpath: (p) => p },
+      env: () => ({ PATH: binDir }),
+      fs: { isExecutableFile: (p) => p === bin, realpath: (p) => p },
     });
     expect(await withBin.detect(pc)).toBe(true);
-    expect(codexHomeDir({ CODEX_HOME: "rel" }, "/u")).toBe("/u/.codex");
+    expect(codexHomeDir({ CODEX_HOME: "rel" }, "/u")).toBe(join("/u", ".codex"));
     expect(codexHomeDir({ CODEX_HOME: "/x" }, "/u")).toBe("/x");
   });
 });
@@ -202,44 +218,49 @@ describe("[SEC-rules] the rendered dispatch.rules", () => {
     ]);
   });
 
-  it("compound, redirect, expansion and other-binary forms never bypass the sandbox", async () => {
-    codexHome();
-    const plan = await planSetup(ctx([host()]));
-    const { pattern } = ruleParts(plan.ops.find((o) => o.kind === "rules-file")?.content ?? "");
-    const L = launcher();
-    const table: [string, boolean][] = [
-      [`${L} run --detach --json --task 'fix the bug'`, true],
-      [`${L} run --detach --json --task "it's fine"`, true],
-      [`${L} wait run_1 --timeout 280`, true],
-      [`${L} cancel run_1`, true],
-      [`${L} status`, true],
-      [`${L} status && ${L} wait run_1`, true], // every piece allowed
-      [`${L} run x && rm -rf ~`, false],
-      [`${L} run x && rm -rf /tmp/y`, false],
-      [`${L} run x; sh`, false],
-      [`${L} run x || sh`, false],
-      [`${L} status && /usr/bin/true`, false],
-      [`${L} run "$(cat f)"`, false],
-      [`${L} run \`cat f\``, false],
-      [`${L} run "$HOME"`, false],
-      [`${L} run x > /tmp/out`, false],
-      [`${L} run x <<EOF`, false],
-      [`(${L} run x)`, false],
-      [`cd /tmp && ${L} run x`, false],
-      [`printf x | ${L} run`, false],
-      [`bash -lc "${L} run x"`, false],
-      ["dispatch run x", false],
-      ["~/.dispatch/bin/dispatch run x", false],
-      ["/tmp/evil/dispatch run x", false],
-      [`${L} install`, false],
-      [`${L} setup`, false],
-      [`${L} uninstall --global`, false],
-      [`${L}`, false],
-    ];
-    for (const [script, expected] of table) {
-      expect([script, bypassesSandbox(script, pattern)]).toEqual([script, expected]);
-    }
-  });
+  // The tokenizer models Codex's POSIX shell parsing of a `/`-path launcher; Codex on Windows
+  // gets no rules file at all (codexRulesSupported).
+  it.skipIf(WIN)(
+    "compound, redirect, expansion and other-binary forms never bypass the sandbox",
+    async () => {
+      codexHome();
+      const plan = await planSetup(ctx([host()]));
+      const { pattern } = ruleParts(plan.ops.find((o) => o.kind === "rules-file")?.content ?? "");
+      const L = launcher();
+      const table: [string, boolean][] = [
+        [`${L} run --detach --json --task 'fix the bug'`, true],
+        [`${L} run --detach --json --task "it's fine"`, true],
+        [`${L} wait run_1 --timeout 280`, true],
+        [`${L} cancel run_1`, true],
+        [`${L} status`, true],
+        [`${L} status && ${L} wait run_1`, true], // every piece allowed
+        [`${L} run x && rm -rf ~`, false],
+        [`${L} run x && rm -rf /tmp/y`, false],
+        [`${L} run x; sh`, false],
+        [`${L} run x || sh`, false],
+        [`${L} status && /usr/bin/true`, false],
+        [`${L} run "$(cat f)"`, false],
+        [`${L} run \`cat f\``, false],
+        [`${L} run "$HOME"`, false],
+        [`${L} run x > /tmp/out`, false],
+        [`${L} run x <<EOF`, false],
+        [`(${L} run x)`, false],
+        [`cd /tmp && ${L} run x`, false],
+        [`printf x | ${L} run`, false],
+        [`bash -lc "${L} run x"`, false],
+        ["dispatch run x", false],
+        ["~/.dispatch/bin/dispatch run x", false],
+        ["/tmp/evil/dispatch run x", false],
+        [`${L} install`, false],
+        [`${L} setup`, false],
+        [`${L} uninstall --global`, false],
+        [`${L}`, false],
+      ];
+      for (const [script, expected] of table) {
+        expect([script, bypassesSandbox(script, pattern)]).toEqual([script, expected]);
+      }
+    },
+  );
 
   it("when the rule does not match, the launcher fails fast on CODEX_SANDBOX (exit 3)", async () => {
     let err = "";
@@ -338,7 +359,7 @@ describe("codex doctor checks", () => {
 
   async function run(env: Record<string, string> = {}, now = NOW) {
     const out: Record<string, { status: string; message: string; fix?: string }> = {};
-    for (const c of codexDoctorChecks({ fs: NONE, now: () => now })) {
+    for (const c of codexDoctorChecks({ fs: NONE, now: () => now, platform: POSIX })) {
       out[c.id] = await c.run({
         home: h.home,
         dispatchHome: h.dispatchHome,

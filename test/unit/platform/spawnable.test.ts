@@ -190,8 +190,10 @@ describe("toSpawnCommand", () => {
 
   it("uses process.platform and copies argv by default", () => {
     const argv = ["a"];
-    const r = toSpawnCommand("/bin/echo", argv);
-    if (process.platform !== "win32") expect(r).toEqual({ command: "/bin/echo", args: ["a"] });
+    // A binary every platform passes through as is (Windows accepts only .exe/.com that way).
+    const bin = process.platform === "win32" ? "C:\\x\\tool.exe" : "/bin/echo";
+    const r = toSpawnCommand(bin, argv);
+    expect(r).toEqual({ command: bin, args: ["a"] });
     expect(r.args).not.toBe(argv);
   });
 

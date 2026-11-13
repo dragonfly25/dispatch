@@ -21,7 +21,10 @@ export class NodeSpawner implements Spawner {
   spawn(req: SpawnRequest): Promise<SpawnResult> {
     this.requests.push(req);
     return new Promise((resolve, reject) => {
-      const cmd = spawnCommandFor(req.binary, req.argv);
+      // Bare names resolve against the child's PATH (as POSIX execvp does), not the runner's.
+      const cmd = spawnCommandFor(req.binary, req.argv, process.platform, undefined, {
+        env: req.env,
+      });
       const child = spawn(cmd.command, cmd.args, {
         cwd: req.cwd,
         env: { ...req.env },

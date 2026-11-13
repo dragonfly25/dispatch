@@ -168,7 +168,7 @@ describe("setup provisions it with npm, never running lifecycle scripts [SEC-bro
     });
     expect(op.trustGrant).toMatch(/@playwright\/mcp@0\.0\.84 \(~19 MB\).*never your own profile/);
     const spec = JSON.parse(op.content);
-    const dir = "/h/.dispatch/tools/playwright-mcp";
+    const dir = join("/h/.dispatch", "tools", "playwright-mcp");
     expect(spec.argv).toEqual(installArgv("/n/npm-cli.js", dir));
     expect(spec.argv).toContain("--ignore-scripts");
     expect(spec.argv).toContain("@playwright/mcp@0.0.84");
@@ -431,7 +431,7 @@ function invArgs(
 
 describe("codex gets the Dispatch-owned dispatch_browser server [SEC-browser]", () => {
   it("golden overrides: isolated headless Chrome, origins, output dir and HOME outside the worktree, allowlisted tools", () => {
-    expect(browserOverrides(RUN, "worktree", "/w/run/attempt-1")).toEqual([
+    expect(browserOverrides(RUN, "worktree", "/w/run/attempt-1", "linux")).toEqual([
       "-c",
       'mcp_servers.dispatch_browser.command="/n/node"',
       "-c",

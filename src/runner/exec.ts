@@ -57,13 +57,15 @@ export function execTool(
 ): Promise<ExecToolResult> {
   return new Promise((resolve, reject) => {
     const platform = opts.platform ?? process.platform;
-    const spawnable = spawnCommandFor(cmd, args, platform, opts.toSpawn);
+    const env = layerEnv(process.env, opts.env, platform);
+    // A bare name resolves against the PATH the child gets, not only this process's.
+    const spawnable = spawnCommandFor(cmd, args, platform, opts.toSpawn, { env });
     const child = execFile(
       spawnable.command,
       spawnable.args,
       {
         cwd: opts.cwd,
-        env: layerEnv(process.env, opts.env, platform),
+        env,
         shell: false,
         timeout: opts.timeoutMs,
         killSignal: "SIGKILL",

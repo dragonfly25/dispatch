@@ -206,6 +206,11 @@ export interface FakesContext {
   readonly stateDir: string;
   readonly logPath: string;
   readonly scenarioPath: string;
+  /**
+   * Absolute path of the fake `cli` as a probe would report it: `<binDir>/<cli>` on POSIX,
+   * `<binDir>/<cli>.cmd` (the npm cmd-shim) on Windows.
+   */
+  bin(cli: FakeCli): string;
   /** Merged invocation records in start order; optionally filtered. */
   readLog(filter?: { cli?: FakeCli; kind?: "run" | "subcommand"; key?: string }): FakeInvocation[];
   /** Replaces the scenario file; call counters keep counting. */
@@ -292,6 +297,7 @@ export function createFakes(
     stateDir,
     logPath,
     scenarioPath,
+    bin: (cli) => join(binDir, fakeShimFiles(cli, platform)[0] ?? cli),
     readLog(filter = {}) {
       const byId = new Map<string, FakeInvocation>();
       for (const line of readFileSync(logPath, "utf8").split("\n")) {

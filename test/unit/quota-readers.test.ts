@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { QuotaObservation } from "../../src/core/contracts.js";
+import { resolveBinary } from "../../src/platform/resolve.js";
 import { runReader } from "../../src/quota/reader.js";
 import {
   AgyUsageReader,
@@ -41,6 +42,9 @@ async function withCodex<T>(
       clock,
       version: "9.9.9",
       env: { ...ctx.env, HOME: home, SECRET_TOKEN: "do-not-forward" },
+      // As in production: an absolute path from the reader's own PATH (the fake codex).
+      resolveBinary: (inst) =>
+        resolveBinary("codex", { configured: inst.binary, env: ctx.env })?.path ?? "codex",
       onObservation: (o) => void seen.push(o),
     });
     return fn(reader, ctx, seen);
@@ -228,9 +232,9 @@ describe("codex app-server reader [UC11]", () => {
 
   it("fails clearly when the binary does not exist or exits early", async () => {
     const reader = new CodexAppServerReader({ clock, env: { PATH: "/nonexistent", HOME: home } });
-    await expect(reader.read(instance({ binary: "/nonexistent/codex" }))).rejects.toThrow(
-      /failed to start/,
-    );
+    // Windows only spawns .exe/.com (or npm .cmd shims) directly.
+    const missing = join(home, "missing", process.platform === "win32" ? "codex.exe" : "codex");
+    await expect(reader.read(instance({ binary: missing }))).rejects.toThrow(/failed to start/);
     const early = new CodexAppServerReader({ clock, env: { PATH: "/usr/bin", HOME: home } });
     await expect(
       early.read(instance({ binary: scriptedAppServer({ exitAfterInit: true }) })),

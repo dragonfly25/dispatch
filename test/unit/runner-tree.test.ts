@@ -4,14 +4,14 @@
  * branch runs here on macOS/Linux through an injected `platform: "win32"` and fake helpers.
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { RunRecord, RunResult } from "../../src/core/contracts.js";
 import type { ResolveFs } from "../../src/platform/resolve.js";
 import { CANCEL_FILE, CANCELLED, cancelRequested, requestCancel } from "../../src/runner/detach.js";
-import { layerEnv } from "../../src/runner/exec.js";
+import { execTool, layerEnv } from "../../src/runner/exec.js";
 import { ProcessSpawner } from "../../src/runner/proc.js";
 import { runRpcSession } from "../../src/runner/rpc.js";
 import {
@@ -599,6 +599,66 @@ describe("spawnCommandFor", () => {
     expect(run("C:\\other").command).toBe("C:\\other\\git.exe");
     clearBareCommandCache();
   });
+
+  it("win32: a bare name is searched on the child env's PATH; the parent's PATH only when it has none", () => {
+    clearBareCommandCache();
+    const fs = winFs("C:\\child\\tool.exe", "C:\\parent\\tool.exe");
+    const parent = process.env.PATH;
+    process.env.PATH = "C:\\parent";
+    try {
+      const child = { PATH: "C:\\child" };
+      expect(spawnCommandFor("tool", [], "win32", undefined, { env: child, fs }).command).toBe(
+        "C:\\child\\tool.exe",
+      );
+      expect(
+        spawnCommandFor("tool", [], "win32", undefined, { env: { LANG: "C" }, fs }).command,
+      ).toBe("C:\\parent\\tool.exe");
+      // Only on the child's PATH: found there, never refused for the parent's PATH.
+      const only = winFs("C:\\child\\only.exe");
+      expect(
+        spawnCommandFor("only", [], "win32", undefined, { env: child, fs: only }).command,
+      ).toBe("C:\\child\\only.exe");
+    } finally {
+      process.env.PATH = parent;
+      clearBareCommandCache();
+    }
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "win32 spawn sites (ProcessSpawner, runRpcSession, execTool) look a bare name up on the child's PATH",
+    async () => {
+      clearBareCommandCache();
+      const dir = mkdtempSync(join(tmpdir(), "dispatch-childpath-"));
+      try {
+        writeFileSync(join(dir, "childonly.exe"), "");
+        const seen: string[] = [];
+        const toSpawn: ToSpawn = (b) => {
+          seen.push(b.toLowerCase());
+          return {
+            command: process.execPath,
+            args: ["-e", "process.stdin.resume();setTimeout(()=>process.exit(0),50)"],
+          };
+        };
+        const env = { ...process.env, PATH: dir } as Record<string, string>;
+        const want = join(dir, "childonly.exe").toLowerCase();
+        await new ProcessSpawner({ toSpawn }).spawn({
+          binary: "childonly",
+          argv: [],
+          env,
+          cwd: dir,
+        });
+        await runRpcSession(
+          { binary: "childonly", argv: [], env, cwd: dir, toSpawn, timeoutMs: 5_000 },
+          async () => undefined,
+        ).catch(() => undefined);
+        await execTool("childonly", [], { cwd: dir, env: { PATH: dir }, toSpawn });
+        expect(seen).toEqual([want, want, want]);
+      } finally {
+        clearBareCommandCache();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("win32 with the real converter: a non-shim batch file is refused before anything starts", async () => {
     const spawner = new ProcessSpawner({ platform: "win32" });

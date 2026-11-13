@@ -16,6 +16,7 @@ import type {
   QuotaWindow,
   RunRecord,
 } from "../../src/core/contracts.js";
+import { resolveBinary } from "../../src/platform/resolve.js";
 import { DefaultQuotaProvider } from "../../src/quota/provider.js";
 import {
   CLAUDE_PASSIVE_ID,
@@ -70,6 +71,9 @@ function setup(scenarios: FakeScenarioMap = {}, timeoutMs = 3_000) {
     env,
     version: "1.2.3",
     onObservation: (o) => holder.provider?.recordObservation(o),
+    // As in production (app/context.ts): absolute paths from the readers' own PATH.
+    resolveBinary: (name, instance) =>
+      resolveBinary(name, { configured: instance.binary, env })?.path ?? null,
   });
   const provider = new DefaultQuotaProvider({
     store,

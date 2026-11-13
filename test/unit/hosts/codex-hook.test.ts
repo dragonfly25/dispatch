@@ -17,6 +17,7 @@ import {
   sessionStartResponse,
   writeHeartbeat,
 } from "../../../src/hosts/codex/hook.js";
+import { runningInvocation } from "../../../src/platform/invocation.js";
 import { type TempHome, tempHome } from "../../support/temp.js";
 
 const FIXTURES = resolve(import.meta.dirname, "../../fixtures/codex/0.167.0");
@@ -55,6 +56,9 @@ function trusted(policy: Policy = {}) {
 }
 
 const scrub = (s: string) => s.replaceAll(h.dispatchHome, "<DH>");
+const WIN = process.platform === "win32";
+/** The call prefix the hook names on the running platform (Windows: node + cli for PowerShell). */
+const prefix = () => runningInvocation(h.dispatchHome, "powershell");
 
 describe("codex PreToolUse deny_redirect [UC3]", () => {
   it("V2 spawn fixture in a trusted, delegating repo → deny with the redirect (snapshot)", () => {
@@ -62,6 +66,13 @@ describe("codex PreToolUse deny_redirect [UC3]", () => {
     const res = preToolUseResponse(t.spawn, t.env);
     expect(res.exitCode).toBe(0);
     const out = JSON.parse(res.stdout ?? "");
+    if (WIN) {
+      // Windows: the task goes in a file; the POSIX text is pinned below.
+      expect(out.hookSpecificOutput.permissionDecisionReason).toContain(
+        `${prefix()} run --detach --json --task-file .dispatch/inbox/<name>.md\``,
+      );
+      return;
+    }
     expect(out.hookSpecificOutput.permissionDecisionReason).toContain(
       `${join(h.dispatchHome, "bin", "dispatch")} run --detach --json --task '`,
     );
@@ -108,7 +119,7 @@ describe("codex PreToolUse deny_redirect [UC3]", () => {
   });
 
   it("redirectReason quotes a launcher path with spaces", () => {
-    expect(redirectReason("/home/a b/.dispatch/bin/dispatch")).toContain(
+    expect(redirectReason("/home/a b/.dispatch/bin/dispatch", "linux")).toContain(
       `'/home/a b/.dispatch/bin/dispatch' run --detach`,
     );
   });
@@ -124,8 +135,14 @@ describe("codex SessionStart [UC3][UC9]", () => {
     const text = scrub(out.hookSpecificOutput.additionalContext as string);
     expect(text).toContain("Dispatch is active in this repository (profile: balance).");
     expect(text).toContain("- review tasks: delegated to claude.");
-    expect(text).toContain("`<DH>/bin/dispatch run --detach --json --task '<task>'");
-    expect(text).toContain("`<DH>/bin/dispatch wait <runId> --json --timeout 280`");
+    if (WIN) {
+      const l = prefix();
+      expect(text).toContain(`\`${l} run --detach --json --task-file .dispatch/inbox/<name>.md`);
+      expect(text).toContain(`\`${l} wait <runId> --json --timeout 280\``);
+    } else {
+      expect(text).toContain("`<DH>/bin/dispatch run --detach --json --task '<task>'");
+      expect(text).toContain("`<DH>/bin/dispatch wait <runId> --json --timeout 280`");
+    }
     expect(text).toContain("write_stdin");
     expect(text).toContain("returned_to_host");
     expect(text).toContain("EXTERNAL_AGENT_OUTPUT");

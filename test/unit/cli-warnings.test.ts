@@ -1,11 +1,11 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   installWarningFilter,
   isSqliteExperimentalWarning,
   type WarningTarget,
 } from "../../src/cli/warnings.js";
+import { buildCli } from "../helpers/bundle.js";
 import { sandbox } from "./config/helpers.js";
 
 class Fake {
@@ -80,23 +80,21 @@ describe("installWarningFilter", () => {
 });
 
 describe("the built CLI", () => {
-  beforeAll(() => {
-    // Rebuild so the test never judges a stale bundle (tsup does not clean dist/).
-    execFileSync("pnpm", ["exec", "tsup"], { cwd: process.cwd(), stdio: "ignore" });
+  let cli = "";
+  beforeAll(async () => {
+    // A fresh bundle of the real bin (never a stale dist/), built in-process: no `pnpm` child,
+    // which Windows could only start through cmd.exe.
+    cli = await buildCli();
   }, 60_000);
 
   it("explain prints no ExperimentalWarning on stderr, although it opens the SQLite store", () => {
     const sb = sandbox();
-    const r = spawnSync(
-      process.execPath,
-      [join(process.cwd(), "dist", "cli.mjs"), "explain", "--task", "hello"],
-      {
-        cwd: sb.root,
-        encoding: "utf8",
-        // An empty PATH: the default quota readers must not find any real CLI.
-        env: { PATH: sb.root, HOME: sb.home, DISPATCH_HOME: sb.dispatchHome },
-      },
-    );
+    const r = spawnSync(process.execPath, [cli, "explain", "--task", "hello"], {
+      cwd: sb.root,
+      encoding: "utf8",
+      // An empty PATH: the default quota readers must not find any real CLI.
+      env: { PATH: sb.root, HOME: sb.home, DISPATCH_HOME: sb.dispatchHome },
+    });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Dispatch explain");
     expect(r.stderr).not.toMatch(/ExperimentalWarning/);
