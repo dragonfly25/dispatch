@@ -333,7 +333,7 @@ describe("agy /usage reader [UC11]", () => {
       {
         kind: "weekly:gemini",
         usedPct: 0,
-        resetAt: "2026-11-14T07:18:55.000Z",
+        resetAt: "2099-11-14T07:18:55.000Z",
         source: "agy-usage",
         readAt: clock.now().toISOString(),
         reliability: "real",
@@ -341,7 +341,7 @@ describe("agy /usage reader [UC11]", () => {
       {
         kind: "weekly:claude-gpt",
         usedPct: 0,
-        resetAt: "2026-11-14T07:18:55.000Z",
+        resetAt: "2099-11-14T07:18:55.000Z",
         source: "agy-usage",
         readAt: clock.now().toISOString(),
         reliability: "real",
