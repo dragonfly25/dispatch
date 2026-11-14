@@ -191,10 +191,7 @@ function explain(cli: ReturnType<typeof setup>["cli"]) {
   return { stderr: r.stderr, repoPolicyApplied: pins.includes("repo-pin") };
 }
 
-// Each test spawns the CLI several times (and git worktree): slow on Windows runners.
-describe("[SEC-trust] the repo policy applies only while it is byte-identical to what was trusted", {
-  timeout: 60_000,
-}, () => {
+describe("[SEC-trust] the repo policy applies only while it is byte-identical to what was trusted", () => {
   const SAFE =
     "version: 1\npins:\n  - { id: repo-pin, action: { type: provider, instance: codex } }\n";
 
