@@ -174,4 +174,23 @@ describe("startSpinner", () => {
     vi.advanceTimersByTime(500);
     expect(err.length).toBe(writes);
   });
+
+  it("draws a new text at once, before the next tick; same text or after stop draws nothing", () => {
+    vi.useFakeTimers();
+    const err: string[] = [];
+    const io = {
+      out: () => {},
+      err: (t: string) => err.push(t),
+      decorate: { out: false, err: true },
+    };
+    const s = startSpinner(io, "routing · starting", 1_000);
+    s.update("codex · starting");
+    expect(err).toHaveLength(2);
+    expect(err[1]).toContain("codex · starting");
+    s.update("codex · starting");
+    expect(err).toHaveLength(2);
+    s.stop();
+    s.update("codex · editing src/a.ts");
+    expect(err.at(-1)).toBe("\r\x1b[K");
+  });
 });

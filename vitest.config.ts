@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     environment: "node",
+    // Windows runners spawn processes and run git several times slower: tests that pass in
+    // ~2s elsewhere take 5-7s there, so the 5s default fails a different test each run.
+    ...(process.platform === "win32" ? { testTimeout: 30_000, hookTimeout: 30_000 } : {}),
     // node:sqlite prints an ExperimentalWarning on first load; hide only that warning type.
     execArgv: ["--disable-warning=ExperimentalWarning"],
     // Fails the run early when the fake CLI shims are missing or not executable (WP2).

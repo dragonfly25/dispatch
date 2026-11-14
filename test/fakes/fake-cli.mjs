@@ -527,6 +527,9 @@ const CODEX_MODELS = [
   "gpt-5.6-luna",
 ];
 
+/** Reset time the fake agy `/usage` reports (the recorded one has passed). */
+const AGY_FAKE_RESET = "2099-11-14T07:18:55Z";
+
 function agyUsage(cfg) {
   const variant = cfg.variant ?? "fixture";
   if (variant === "unauthenticated") {
@@ -541,19 +544,20 @@ function agyUsage(cfg) {
     return { stdout: `${JSON.stringify(data)}\n` };
   }
   const fixture = JSON.parse(loadFixture(`agy/${FIXTURE_VERSION.agy}/usage`).stdout);
-  if (cfg.remainingFraction !== undefined || cfg.resetTime !== undefined) {
-    const rows = [];
-    for (const g of fixture.command.data.groups) {
-      for (const b of g.buckets) {
-        if (cfg.remainingFraction !== undefined) b.remaining_fraction = cfg.remainingFraction;
-        if (cfg.resetTime !== undefined) b.reset_time = cfg.resetTime;
-        rows.push(
-          `${g.name}\t${b.name}\t${Math.round(b.remaining_fraction * 100)}%\t${b.reset_time}`,
-        );
-      }
+  // The recording's reset (2026-11-14) is in the past now, and an expired window is dropped:
+  // serve it with a fixed far-future reset so the tests do not depend on today's date.
+  const resetTime = cfg.resetTime ?? AGY_FAKE_RESET;
+  const rows = [];
+  for (const g of fixture.command.data.groups) {
+    for (const b of g.buckets) {
+      if (cfg.remainingFraction !== undefined) b.remaining_fraction = cfg.remainingFraction;
+      b.reset_time = resetTime;
+      rows.push(
+        `${g.name}\t${b.name}\t${Math.round(b.remaining_fraction * 100)}%\t${b.reset_time}`,
+      );
     }
-    fixture.response = `${rows.join("\n")}\n`;
   }
+  fixture.response = `${rows.join("\n")}\n`;
   return { stdout: `${JSON.stringify(fixture)}\n` };
 }
 
